@@ -13,6 +13,8 @@ from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QVBoxLayout
 from histogram_io import ParseError, load_histogram
 from settings import Settings
 
+ZOOM_FACTOR = 1.5
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -39,6 +41,9 @@ class MainWindow(QMainWindow):
         self._update_recent_menu()
 
         self.canvas.mpl_connect("motion_notify_event", self._on_mouse_move)
+        self.canvas.mpl_connect("scroll_event", self._on_scroll)
+
+        self._build_zoom_buttons()
 
     def _build_menu(self):
         file_menu = self.menuBar().addMenu("&File")
@@ -124,3 +129,43 @@ class MainWindow(QMainWindow):
             self._update_recent_menu()
             return
         self._load_file(path)
+
+    def _build_zoom_buttons(self):
+        self.nav_toolbar.addSeparator()
+
+        zoom_in_action = QAction("Zoom In X", self)
+        zoom_in_action.triggered.connect(lambda: self._zoom_x(1 / ZOOM_FACTOR))
+        self.nav_toolbar.addAction(zoom_in_action)
+
+        zoom_out_action = QAction("Zoom Out X", self)
+        zoom_out_action.triggered.connect(lambda: self._zoom_x(ZOOM_FACTOR))
+        self.nav_toolbar.addAction(zoom_out_action)
+
+    def _on_scroll(self, event):
+        if self.data is None or event.inaxes != self.axes or event.xdata is None:
+            return
+        factor = (1 / ZOOM_FACTOR) if event.button == "up" else ZOOM_FACTOR
+        self._zoom_x(factor, center=event.xdata)
+
+    def _zoom_x(self, factor, center=None):
+        if self.data is None:
+            return
+        xlim = self.axes.get_xlim()
+        if center is None:
+            center = (xlim[0] + xlim[1]) / 2
+        half_width = (xlim[1] - xlim[0]) / 2 * factor
+        new_xlim = (center - half_width, center + half_width)
+        self.axes.set_xlim(new_xlim)
+        self._autoscale_y(new_xlim)
+        self.canvas.draw()
+
+    def _autoscale_y(self, xlim):
+        lo = max(0, int(np.floor(xlim[0])))
+        hi = min(len(self.data), int(np.ceil(xlim[1])) + 1)
+        if lo >= hi:
+            return
+        visible = self.data[lo:hi]
+        y_min = float(np.min(visible))
+        y_max = float(np.max(visible))
+        margin = (y_max - y_min) * 0.05 or 1.0
+        self.axes.set_ylim(y_min - margin, y_max + margin)
