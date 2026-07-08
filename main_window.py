@@ -34,6 +34,8 @@ class MainWindow(QMainWindow):
 
         self._build_menu()
 
+        self.canvas.mpl_connect("motion_notify_event", self._on_mouse_move)
+
     def _build_menu(self):
         file_menu = self.menuBar().addMenu("&File")
 
@@ -77,3 +79,13 @@ class MainWindow(QMainWindow):
         self.axes.set_ylabel("Counts")
         self.axes.grid(True)
         self.canvas.draw()
+
+    def _on_mouse_move(self, event):
+        if self.data is None or event.inaxes != self.axes or event.xdata is None:
+            self.statusBar().clearMessage()
+            return
+        channel = int(round(event.xdata))
+        if 0 <= channel < len(self.data):
+            self.statusBar().showMessage(f"Channel: {channel}  Counts: {self.data[channel]}")
+        else:
+            self.statusBar().clearMessage()
