@@ -11,6 +11,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QVBoxLayout, QWidget
 
 from histogram_io import ParseError, load_histogram
+from settings import Settings
 
 
 class MainWindow(QMainWindow):
@@ -32,7 +33,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.canvas)
         self.setCentralWidget(container)
 
+        self.settings = Settings()
+
         self._build_menu()
+        self._update_recent_menu()
 
         self.canvas.mpl_connect("motion_notify_event", self._on_mouse_move)
 
@@ -43,6 +47,8 @@ class MainWindow(QMainWindow):
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self._open_file_dialog)
         file_menu.addAction(open_action)
+
+        self.recent_menu = file_menu.addMenu("Recent Files")
 
         file_menu.addSeparator()
 
@@ -58,7 +64,7 @@ class MainWindow(QMainWindow):
 
     def _open_file_dialog(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open Histogram", "", "Text files (*.txt);;All files (*)"
+            self, "Open Histogram", self.settings.last_folder(), "Text files (*.txt);;All files (*)"
         )
         if path:
             self._load_file(path)
@@ -75,6 +81,9 @@ class MainWindow(QMainWindow):
 
         self.data = data
         self.setWindowTitle(f"Histogram Viewer - {os.path.basename(path)}")
+        self.settings.set_last_folder(os.path.dirname(path))
+        self.settings.add_recent_file(path)
+        self._update_recent_menu()
         self._plot_data()
 
     def _plot_data(self):
@@ -100,3 +109,18 @@ class MainWindow(QMainWindow):
     def _on_log_scale_toggled(self, checked):
         if self.data is not None:
             self._plot_data()
+
+    def _update_recent_menu(self):
+        self.recent_menu.clear()
+        for path in self.settings.recent_files():
+            action = QAction(path, self)
+            action.triggered.connect(lambda checked=False, p=path: self._open_recent(p))
+            self.recent_menu.addAction(action)
+
+    def _open_recent(self, path):
+        if not os.path.exists(path):
+            QMessageBox.warning(self, "File not found", f"{path} no longer exists.")
+            self.settings.remove_recent_file(path)
+            self._update_recent_menu()
+            return
+        self._load_file(path)
