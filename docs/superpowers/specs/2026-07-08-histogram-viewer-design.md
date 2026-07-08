@@ -27,6 +27,24 @@ The binary `eu.spe` (Maestro format) file in the working directory is out of
 scope for this version — this app only reads the ASCII `.txt` format
 described above.
 
+### Channel count bucketing
+
+MCA spectra conventionally have a channel count that's a power of two
+(4096, 8192, 16384, …), and some exports truncate trailing all-zero
+channels, so the number of numeric data lines in a file (`N`) may be less
+than the spectrum's true channel count. The app infers the true channel
+count by rounding `N` up to the smallest power-of-two bucket, floored at
+`2^12 = 4096`:
+
+- `N <= 4096` → 4096 channels
+- `4096 < N <= 8192` → 8192 channels
+- `8192 < N <= 16384` → 16384 channels
+- … and so on.
+
+Any channels beyond `N` (i.e. the truncated trailing channels) are
+zero-padded. An exact fit (e.g. `N == 4096`) stays in its own bucket — it is
+not bumped up to the next one.
+
 ## Tech stack
 
 - Python 3.13, PySide6 (Qt) for the GUI, Matplotlib embedded via
@@ -84,11 +102,14 @@ unaffected by the auto-rescale logic.
    "All files" option) or clicks a Recent Files entry.
 2. `histogram_io.load_histogram(path)` reads the file line by line, attempts
    `int(line.strip())` on each line, skips lines that fail to parse. The
-   remaining values become a numpy integer array, indexed 0..N-1.
+   remaining values give `N` data points.
 3. If zero numeric lines are found, raises `ParseError` with a clear
    message.
-4. `MainWindow` plots the array, sets the window title to the filename.
-5. On success, the last-used folder and recent-files list are updated via
+4. The channel count is rounded up to the appropriate power-of-two bucket
+   (see "Channel count bucketing" above), and the values are placed into a
+   numpy integer array of that length, zero-padded beyond `N`.
+5. `MainWindow` plots the array, sets the window title to the filename.
+6. On success, the last-used folder and recent-files list are updated via
    `QSettings`.
 
 ## Error handling
@@ -108,6 +129,10 @@ unaffected by the auto-rescale logic.
   - Handles a file with no header line.
   - Handles stray blank lines interspersed with data.
   - Raises `ParseError` on a file with no numeric data.
+  - Channel-count bucketing: a file with fewer than 4096 data lines pads out
+    to 4096 channels; a file with 4097–8192 data lines pads out to 8192
+    channels; a file with exactly 4096 data lines (like test.txt) stays at
+    4096 channels (no bump to 8192).
 - **Manual GUI smoke test** (checklist, run once before calling the app
   done): open a file, confirm the plot renders, toggle log-scale, hover for
   the channel/count readout, scroll-zoom and toolbar-zoom X with Y
