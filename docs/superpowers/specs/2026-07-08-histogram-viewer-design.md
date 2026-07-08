@@ -160,10 +160,17 @@ unaffected by the auto-rescale logic.
 
 ## Out of scope for this version
 
-- Reading the binary `.spe` format — planned as a future addition (would
-  need a separate parser in `histogram_io.py` producing the same channel
-  array shape, so the rest of the app — plotting, zoom, status bar — needs
-  no changes to support it).
-- Peak finding / curve fitting (future project phase).
+All of the following are deferred to future project phases, not rejected —
+none of them are needed for this version, but the design (particularly the
+separation between `histogram_io.py` and the rest of the app) leaves room
+for them:
+
+- Reading the binary `.spe` format — would need a separate parser in
+  `histogram_io.py` producing the same channel array shape, so the rest of
+  the app (plotting, zoom, status bar) needs no changes to support it.
+- Peak finding / curve fitting — the core motivation for the
+  "PeakFinderFitting" project; this viewer is the foundation it will build
+  on.
 - Overlaying multiple histograms in one plot.
-- Automated GUI testing.
+- Automated GUI testing (e.g. `pytest-qt`), if the UI grows complex enough
+  to warrant it.
