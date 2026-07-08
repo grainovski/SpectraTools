@@ -25,7 +25,8 @@ starting at 0.
 
 The binary `eu.spe` (Maestro format) file in the working directory is out of
 scope for this version — this app only reads the ASCII `.txt` format
-described above.
+described above. Support for `.spe` may be added later (see "Out of scope"
+section).
 
 ### Channel count bucketing
 
@@ -159,7 +160,10 @@ unaffected by the auto-rescale logic.
 
 ## Out of scope for this version
 
-- Reading the binary `.spe` format.
+- Reading the binary `.spe` format — planned as a future addition (would
+  need a separate parser in `histogram_io.py` producing the same channel
+  array shape, so the rest of the app — plotting, zoom, status bar — needs
+  no changes to support it).
 - Peak finding / curve fitting (future project phase).
 - Overlaying multiple histograms in one plot.
 - Automated GUI testing.
