@@ -1,0 +1,25 @@
+$ErrorActionPreference = "Stop"
+$root = Resolve-Path "$PSScriptRoot/../.."
+Set-Location $root
+
+& "$root/.venv/Scripts/python.exe" -m PyInstaller --noconfirm --onefile --windowed --name HistogramViewer main.py
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller failed with exit code $LASTEXITCODE"
+}
+
+$isccCandidates = @(
+    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
+    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+    "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+)
+$iscc = $isccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $iscc) {
+    throw "ISCC.exe not found. Install Inno Setup (e.g. 'winget install --id JRSoftware.InnoSetup -e') and retry."
+}
+
+& $iscc "packaging/windows/installer.iss"
+if ($LASTEXITCODE -ne 0) {
+    throw "ISCC.exe failed with exit code $LASTEXITCODE"
+}
+
+Write-Host "Installer built in packaging/windows/output/"
