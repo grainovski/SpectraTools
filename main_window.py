@@ -50,6 +50,12 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
+        view_menu = self.menuBar().addMenu("&View")
+        self.log_scale_action = QAction("Log scale Y", self)
+        self.log_scale_action.setCheckable(True)
+        self.log_scale_action.toggled.connect(self._on_log_scale_toggled)
+        view_menu.addAction(self.log_scale_action)
+
     def _open_file_dialog(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Open Histogram", "", "Text files (*.txt);;All files (*)"
@@ -78,6 +84,7 @@ class MainWindow(QMainWindow):
         self.axes.set_xlabel("Channel")
         self.axes.set_ylabel("Counts")
         self.axes.grid(True)
+        self.axes.set_yscale("log" if self.log_scale_action.isChecked() else "linear")
         self.canvas.draw()
 
     def _on_mouse_move(self, event):
@@ -89,3 +96,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Channel: {channel}  Counts: {self.data[channel]}")
         else:
             self.statusBar().clearMessage()
+
+    def _on_log_scale_toggled(self, checked):
+        if self.data is not None:
+            self._plot_data()
