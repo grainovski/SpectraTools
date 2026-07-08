@@ -1,6 +1,7 @@
+import pytest
 from pathlib import Path
 
-from histogram_io import load_histogram
+from histogram_io import ParseError, load_histogram
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -28,3 +29,8 @@ def test_handles_blank_lines_interspersed():
     data = load_histogram(str(FIXTURES / "blank_lines.txt"))
     assert len(data) == 4096
     assert list(data[:3]) == [4, 0, 1]
+
+
+def test_raises_parse_error_on_no_numeric_data():
+    with pytest.raises(ParseError):
+        load_histogram(str(FIXTURES / "no_numeric_data.txt"))
