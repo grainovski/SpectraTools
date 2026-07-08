@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .venv/
+.venv-linux/
 venv/
 build/
 dist/
@@ -8,4 +9,8 @@ dist/
 !packaging/**/*.spec
 *.egg-info/
 .pytest_cache/
+packaging/windows/output/
+packaging/linux/output/
+packaging/linux/tools/
+*.AppDir/
 .worktrees/
