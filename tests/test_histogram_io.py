@@ -34,3 +34,27 @@ def test_handles_blank_lines_interspersed():
 def test_raises_parse_error_on_no_numeric_data():
     with pytest.raises(ParseError):
         load_histogram(str(FIXTURES / "no_numeric_data.txt"))
+
+
+def test_bucket_under_4096_pads_to_4096(tmp_path):
+    file_path = tmp_path / "short.txt"
+    values = list(range(10))
+    file_path.write_text("\n".join(str(v) for v in values) + "\n")
+
+    data = load_histogram(str(file_path))
+
+    assert len(data) == 4096
+    assert list(data[:10]) == values
+    assert list(data[10:]) == [0] * (4096 - 10)
+
+
+def test_bucket_between_4096_and_8192_pads_to_8192(tmp_path):
+    file_path = tmp_path / "medium.txt"
+    values = [i % 10 for i in range(5000)]
+    file_path.write_text("\n".join(str(v) for v in values) + "\n")
+
+    data = load_histogram(str(file_path))
+
+    assert len(data) == 8192
+    assert list(data[:5000]) == values
+    assert list(data[5000:]) == [0] * (8192 - 5000)
