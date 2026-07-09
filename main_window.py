@@ -7,13 +7,51 @@ matplotlib.use("QtAgg")
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
-from PySide6.QtGui import QAction
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QVBoxLayout, QWidget
 
 from histogram_io import ParseError, load_histogram
 from settings import Settings
 
 ZOOM_FACTOR = 1.5
+_ICON_SIZE = 24
+
+
+def _magnifier_icon(sign):
+    pixmap = QPixmap(_ICON_SIZE, _ICON_SIZE)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(Qt.GlobalColor.black)
+    pen.setWidth(2)
+    painter.setPen(pen)
+    painter.drawEllipse(3, 3, 12, 12)
+    painter.drawLine(13, 13, 20, 20)
+    painter.drawLine(6, 9, 12, 9)
+    if sign == "+":
+        painter.drawLine(9, 6, 9, 12)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def _full_spectrum_icon():
+    pixmap = QPixmap(_ICON_SIZE, _ICON_SIZE)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setBrush(Qt.GlobalColor.black)
+    painter.setPen(Qt.PenStyle.NoPen)
+    heights = (6, 14, 9, 18, 11)
+    bar_width = 3
+    gap = 1
+    base_y = 21
+    x = 2
+    for height in heights:
+        painter.drawRect(x, base_y - height, bar_width, height)
+        x += bar_width + gap
+    painter.end()
+    return QIcon(pixmap)
 
 
 class MainWindow(QMainWindow):
@@ -103,6 +141,12 @@ class MainWindow(QMainWindow):
         # 5% autoscale margin, which would otherwise show them as such.
         self.axes.set_xlim(0, len(self.data) - 1)
         self.canvas.draw()
+        # Our custom zoom bypasses the toolbar's usual box-zoom/pan path, so
+        # without this the Home/Back/Forward buttons wouldn't know about
+        # this view. Reset the navigation history and record this full view
+        # as the new "home" baseline.
+        self.nav_toolbar.update()
+        self.nav_toolbar.push_current()
 
     def _on_mouse_move(self, event):
         if self.data is None or event.inaxes != self.axes or event.xdata is None:
@@ -136,13 +180,17 @@ class MainWindow(QMainWindow):
     def _build_zoom_buttons(self):
         self.nav_toolbar.addSeparator()
 
-        zoom_in_action = QAction("Zoom In X", self)
+        zoom_in_action = QAction(_magnifier_icon("+"), "Zoom In X", self)
         zoom_in_action.triggered.connect(lambda: self._zoom_x(1 / ZOOM_FACTOR))
         self.nav_toolbar.addAction(zoom_in_action)
 
-        zoom_out_action = QAction("Zoom Out X", self)
+        zoom_out_action = QAction(_magnifier_icon("-"), "Zoom Out X", self)
         zoom_out_action.triggered.connect(lambda: self._zoom_x(ZOOM_FACTOR))
         self.nav_toolbar.addAction(zoom_out_action)
+
+        full_spectrum_action = QAction(_full_spectrum_icon(), "Show Full Spectrum", self)
+        full_spectrum_action.triggered.connect(self._show_full_spectrum)
+        self.nav_toolbar.addAction(full_spectrum_action)
 
     def _on_scroll(self, event):
         if self.data is None or event.inaxes != self.axes or event.xdata is None:
@@ -168,6 +216,16 @@ class MainWindow(QMainWindow):
         self.axes.set_xlim(new_xlim)
         self._autoscale_y(new_xlim)
         self.canvas.draw()
+        self.nav_toolbar.push_current()
+
+    def _show_full_spectrum(self):
+        if self.data is None:
+            return
+        full_xlim = (0, len(self.data) - 1)
+        self.axes.set_xlim(full_xlim)
+        self._autoscale_y(full_xlim)
+        self.canvas.draw()
+        self.nav_toolbar.push_current()
 
     def _autoscale_y(self, xlim):
         lo = max(0, int(np.floor(xlim[0])))
