@@ -231,7 +231,7 @@ class MainWindow(QMainWindow):
 
     def _build_spectrum_panel(self):
         self.spectrum_list = QListWidget()
-        self.spectrum_list.itemChanged.connect(self._on_spectrum_item_changed)
+        self.spectrum_list.itemClicked.connect(self._on_spectrum_item_clicked)
         self.spectrum_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.spectrum_list.customContextMenuRequested.connect(self._on_spectrum_context_menu)
 
@@ -253,11 +253,17 @@ class MainWindow(QMainWindow):
             self.spectrum_list.addItem(item)
         self.spectrum_list.blockSignals(False)
 
-    def _on_spectrum_item_changed(self, item):
+    def _on_spectrum_item_clicked(self, item):
+        # Toggling on any click within the row (not just Qt's native tiny
+        # checkbox glyph) -- the glyph alone is an easy-to-miss target
+        # sitting right next to the color swatch icon.
         path = item.data(Qt.ItemDataRole.UserRole)
         for spectrum in self.spectra:
             if spectrum.path == path:
-                spectrum.visible = item.checkState() == Qt.CheckState.Checked
+                spectrum.visible = not spectrum.visible
+                item.setCheckState(
+                    Qt.CheckState.Checked if spectrum.visible else Qt.CheckState.Unchecked
+                )
                 break
         self._plot_data()
 
