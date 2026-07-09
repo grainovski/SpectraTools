@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 
 from histogram_io import ParseError, load_histogram
 from settings import Settings
+from spe_io import load_spe
 from spectrum import LoadedSpectrum, next_color
 
 ZOOM_FACTOR = 1.5
@@ -175,14 +176,18 @@ class MainWindow(QMainWindow):
 
     def _open_file_dialog(self):
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Open Histogram", self.settings.last_folder(), "Text files (*.txt);;All files (*)"
+            self,
+            "Open Histogram",
+            self.settings.last_folder(),
+            "Spectrum files (*.txt *.spe);;Text files (*.txt);;SPE files (*.spe);;All files (*)",
         )
         if paths:
             self._load_files(paths)
 
     def _try_load_spectrum(self, path):
+        loader = load_spe if path.lower().endswith(".spe") else load_histogram
         try:
-            data = load_histogram(path)
+            data = loader(path)
         except ParseError as exc:
             return None, f"{os.path.basename(path)}: {exc}"
         except OSError as exc:
