@@ -190,17 +190,21 @@ class MainWindow(QMainWindow):
         self.nav_toolbar.push_current()
 
     def _on_mouse_move(self, event):
-        if self.data is None or event.inaxes != self.axes or event.xdata is None:
+        visible = [s for s in self.spectra if s.visible]
+        if not visible or event.inaxes != self.axes or event.xdata is None:
             self.statusBar().clearMessage()
             return
         channel = int(round(event.xdata))
-        if 0 <= channel < len(self.data):
-            self.statusBar().showMessage(f"Channel: {channel}  Counts: {self.data[channel]}")
-        else:
-            self.statusBar().clearMessage()
+        parts = [f"Channel: {channel}"]
+        for spectrum in visible:
+            if 0 <= channel < len(spectrum.data):
+                parts.append(f"{os.path.basename(spectrum.path)}: {spectrum.data[channel]}")
+            else:
+                parts.append(f"{os.path.basename(spectrum.path)}: -")
+        self.statusBar().showMessage("  |  ".join(parts))
 
     def _on_log_scale_toggled(self, checked):
-        if self.data is not None:
+        if self.spectra:
             self._plot_data()
 
     def _update_recent_menu(self):
