@@ -78,6 +78,12 @@ class MainWindow(QMainWindow):
         self.resize(900, 600)
 
         self.spectra = []
+        # Monotonically increasing, never reused -- unlike len(self.spectra),
+        # this can't collide with a still-loaded spectrum's color after one
+        # is removed (there's no plot legend, so color is the only way to
+        # tell traces apart; a collision would make two spectra
+        # indistinguishable on the plot).
+        self._next_color_index = 0
 
         self.figure = Figure()
         self.axes = self.figure.add_subplot(111)
@@ -137,7 +143,8 @@ class MainWindow(QMainWindow):
             return None, f"{os.path.basename(path)}: {exc}"
         except OSError as exc:
             return None, f"{os.path.basename(path)}: {exc}"
-        color = next_color(len(self.spectra))
+        color = next_color(self._next_color_index)
+        self._next_color_index += 1
         return LoadedSpectrum(path, data, color), None
 
     def _load_files(self, paths):
