@@ -16,7 +16,7 @@ def main():
     histogram_path, output_path = sys.argv[1], sys.argv[2]
     app = QApplication([])
     window = MainWindow()
-    window._load_file(histogram_path)
+    window._load_files([histogram_path])
     window.figure.savefig(output_path)
 
 
