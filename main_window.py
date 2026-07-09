@@ -8,8 +8,18 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QVBoxLayout, QWidget
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import (
+    QDockWidget,
+    QFileDialog,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 from histogram_io import ParseError, load_histogram
 from settings import Settings
@@ -55,6 +65,12 @@ def _full_spectrum_icon():
     return QIcon(pixmap)
 
 
+def _color_swatch_icon(color):
+    pixmap = QPixmap(16, 16)
+    pixmap.fill(QColor(color))
+    return QIcon(pixmap)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -83,6 +99,7 @@ class MainWindow(QMainWindow):
         self.canvas.mpl_connect("scroll_event", self._on_scroll)
 
         self._build_zoom_buttons()
+        self._build_spectrum_panel()
 
     def _build_menu(self):
         file_menu = self.menuBar().addMenu("&File")
@@ -140,6 +157,7 @@ class MainWindow(QMainWindow):
 
         if loaded_any:
             self._update_recent_menu()
+            self._update_spectrum_list()
             self._plot_data()
 
         if failures:
@@ -192,6 +210,51 @@ class MainWindow(QMainWindow):
             self._update_recent_menu()
             return
         self._load_files([path])
+
+    def _build_spectrum_panel(self):
+        self.spectrum_list = QListWidget()
+        self.spectrum_list.itemChanged.connect(self._on_spectrum_item_changed)
+        self.spectrum_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.spectrum_list.customContextMenuRequested.connect(self._on_spectrum_context_menu)
+
+        dock = QDockWidget("Loaded Spectra", self)
+        dock.setWidget(self.spectrum_list)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
+
+    def _update_spectrum_list(self):
+        self.spectrum_list.blockSignals(True)
+        self.spectrum_list.clear()
+        for spectrum in self.spectra:
+            item = QListWidgetItem(os.path.basename(spectrum.path))
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(
+                Qt.CheckState.Checked if spectrum.visible else Qt.CheckState.Unchecked
+            )
+            item.setIcon(_color_swatch_icon(spectrum.color))
+            item.setData(Qt.ItemDataRole.UserRole, spectrum.path)
+            self.spectrum_list.addItem(item)
+        self.spectrum_list.blockSignals(False)
+
+    def _on_spectrum_item_changed(self, item):
+        path = item.data(Qt.ItemDataRole.UserRole)
+        for spectrum in self.spectra:
+            if spectrum.path == path:
+                spectrum.visible = item.checkState() == Qt.CheckState.Checked
+                break
+        self._plot_data()
+
+    def _on_spectrum_context_menu(self, position):
+        item = self.spectrum_list.itemAt(position)
+        if item is None:
+            return
+        menu = QMenu(self)
+        remove_action = menu.addAction("Remove")
+        chosen = menu.exec(self.spectrum_list.viewport().mapToGlobal(position))
+        if chosen == remove_action:
+            path = item.data(Qt.ItemDataRole.UserRole)
+            self.spectra = [s for s in self.spectra if s.path != path]
+            self._update_spectrum_list()
+            self._plot_data()
 
     def _build_zoom_buttons(self):
         self.nav_toolbar.addSeparator()
