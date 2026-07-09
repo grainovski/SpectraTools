@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QVBoxLayout
 
 from histogram_io import ParseError, load_histogram
 from settings import Settings
+from spectrum import LoadedSpectrum, next_color
 
 ZOOM_FACTOR = 1.5
 _ICON_SIZE = 24
@@ -60,7 +61,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Histogram Viewer")
         self.resize(900, 600)
 
-        self.data = None
+        self.spectra = []
 
         self.figure = Figure()
         self.axes = self.figure.add_subplot(111)
@@ -106,28 +107,43 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.log_scale_action)
 
     def _open_file_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(
+        paths, _ = QFileDialog.getOpenFileNames(
             self, "Open Histogram", self.settings.last_folder(), "Text files (*.txt);;All files (*)"
         )
-        if path:
-            self._load_file(path)
+        if paths:
+            self._load_files(paths)
 
-    def _load_file(self, path):
+    def _try_load_spectrum(self, path):
         try:
             data = load_histogram(path)
         except ParseError as exc:
-            QMessageBox.warning(self, "No histogram data found in file", str(exc))
-            return
+            return None, f"{os.path.basename(path)}: {exc}"
         except OSError as exc:
-            QMessageBox.critical(self, "Could not open file", str(exc))
-            return
+            return None, f"{os.path.basename(path)}: {exc}"
+        color = next_color(len(self.spectra))
+        return LoadedSpectrum(path, data, color), None
 
-        self.data = data
-        self.setWindowTitle(f"Histogram Viewer - {os.path.basename(path)}")
-        self.settings.set_last_folder(os.path.dirname(path))
-        self.settings.add_recent_file(path)
-        self._update_recent_menu()
-        self._plot_data()
+    def _load_files(self, paths):
+        failures = []
+        loaded_any = False
+        for path in paths:
+            if any(s.path == path for s in self.spectra):
+                continue
+            spectrum, error = self._try_load_spectrum(path)
+            if error:
+                failures.append(error)
+                continue
+            self.spectra.append(spectrum)
+            self.settings.set_last_folder(os.path.dirname(path))
+            self.settings.add_recent_file(path)
+            loaded_any = True
+
+        if loaded_any:
+            self._update_recent_menu()
+            self._plot_data()
+
+        if failures:
+            QMessageBox.warning(self, "Some files could not be loaded", "\n".join(failures))
 
     def _plot_data(self):
         self.axes.clear()
@@ -175,7 +191,7 @@ class MainWindow(QMainWindow):
             self.settings.remove_recent_file(path)
             self._update_recent_menu()
             return
-        self._load_file(path)
+        self._load_files([path])
 
     def _build_zoom_buttons(self):
         self.nav_toolbar.addSeparator()
