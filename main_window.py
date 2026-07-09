@@ -279,19 +279,20 @@ class MainWindow(QMainWindow):
         self.nav_toolbar.addAction(full_spectrum_action)
 
     def _on_scroll(self, event):
-        if self.data is None or event.inaxes != self.axes or event.xdata is None:
+        if event.inaxes != self.axes or event.xdata is None:
             return
         factor = (1 / ZOOM_FACTOR) if event.button == "up" else ZOOM_FACTOR
         self._zoom_x(factor, center=event.xdata)
 
     def _zoom_x(self, factor, center=None):
-        if self.data is None:
+        visible = [s for s in self.spectra if s.visible]
+        if not visible:
             return
         xlim = self.axes.get_xlim()
         if center is None:
             center = (xlim[0] + xlim[1]) / 2
         half_width = (xlim[1] - xlim[0]) / 2 * factor
-        max_channel = len(self.data) - 1
+        max_channel = max(len(s.data) for s in visible) - 1
         # Clamp to valid channel numbers -- zooming/scrolling must never
         # show negative channels or channels past the end of the data.
         new_lo = max(0.0, center - half_width)
@@ -305,9 +306,10 @@ class MainWindow(QMainWindow):
         self.nav_toolbar.push_current()
 
     def _show_full_spectrum(self):
-        if self.data is None:
+        visible = [s for s in self.spectra if s.visible]
+        if not visible:
             return
-        full_xlim = (0, len(self.data) - 1)
+        full_xlim = (0, max(len(s.data) for s in visible) - 1)
         self.axes.set_xlim(full_xlim)
         self._autoscale_y(full_xlim)
         self.canvas.draw()
