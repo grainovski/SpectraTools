@@ -165,15 +165,22 @@ class MainWindow(QMainWindow):
 
     def _plot_data(self):
         self.axes.clear()
-        channels = np.arange(len(self.data))
-        self.axes.plot(channels, self.data, drawstyle="steps-mid")
+        visible = [s for s in self.spectra if s.visible]
+        for spectrum in visible:
+            channels = np.arange(len(spectrum.data))
+            self.axes.plot(channels, spectrum.data, drawstyle="steps-mid", color=spectrum.color)
         self.axes.set_xlabel("Channel")
         self.axes.set_ylabel("Counts")
         self.axes.grid(True)
         self.axes.set_yscale("log" if self.log_scale_action.isChecked() else "linear")
-        # Channel numbers can't be negative; override Matplotlib's default
-        # 5% autoscale margin, which would otherwise show them as such.
-        self.axes.set_xlim(0, len(self.data) - 1)
+        if visible:
+            # Channel numbers can't be negative; override Matplotlib's
+            # default 5% autoscale margin, which would otherwise show them
+            # as such. Span the widest currently-visible spectrum, since
+            # loaded files can have different channel counts.
+            max_channel = max(len(s.data) for s in visible) - 1
+            self.axes.set_xlim(0, max_channel)
+            self._autoscale_y((0, max_channel))
         self.canvas.draw()
         # Our custom zoom bypasses the toolbar's usual box-zoom/pan path, so
         # without this the Home/Back/Forward buttons wouldn't know about
@@ -307,13 +314,22 @@ class MainWindow(QMainWindow):
         self.nav_toolbar.push_current()
 
     def _autoscale_y(self, xlim):
-        lo = max(0, int(np.floor(xlim[0])))
-        hi = min(len(self.data), int(np.ceil(xlim[1])) + 1)
-        if lo >= hi:
+        visible = [s for s in self.spectra if s.visible]
+        if not visible:
             return
-        visible = self.data[lo:hi]
-        y_min = float(np.min(visible))
-        y_max = float(np.max(visible))
+        lo_bound = max(0, int(np.floor(xlim[0])))
+        hi_bound = int(np.ceil(xlim[1])) + 1
+        slices = []
+        for spectrum in visible:
+            lo = min(lo_bound, len(spectrum.data))
+            hi = min(hi_bound, len(spectrum.data))
+            if lo < hi:
+                slices.append(spectrum.data[lo:hi])
+        if not slices:
+            return
+        combined = np.concatenate(slices)
+        y_min = float(np.min(combined))
+        y_max = float(np.max(combined))
         if self.log_scale_action.isChecked():
             # A log-scaled axis silently ignores set_ylim() with a
             # non-positive bound, so a plain "y_min - margin" (common
