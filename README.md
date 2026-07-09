@@ -1,7 +1,7 @@
-# Histogram Viewer
+# SpectraTools
 
-A cross-platform desktop app (Windows + Linux) for opening an ASCII
-histogram `.txt` file and plotting it — the foundation of the
+A cross-platform desktop app (Windows + Linux) for opening ASCII
+histogram `.txt` files and plotting them — the foundation of the
 "PeakFinderFitting" project.
 
 ## Setup
@@ -24,12 +24,16 @@ histogram `.txt` file and plotting it — the foundation of the
 
 - Windows: `powershell -File packaging\windows\build.ps1` (requires Inno
   Setup — see `packaging/windows/build.ps1` for the check/install step).
-  Produces `packaging/windows/output/HistogramViewerSetup.exe`.
+  Produces `packaging/windows/output/SpectraToolsSetup.exe`.
 - Linux: `bash packaging/linux/build.sh`, built and tested via WSL Ubuntu
   in this repo's history. Produces
-  `packaging/linux/output/HistogramViewer-x86_64.AppImage`. Downloads
+  `packaging/linux/output/SpectraTools-x86_64.AppImage`. Downloads
   `appimagetool` on first run if it isn't already present under
   `packaging/linux/tools/` (requires internet access).
+
+Both build scripts generate `assets/icon.png`/`assets/icon.ico` on first
+run if not already present (via `packaging/make_icon.py`), using the same
+drawing code as the app's own window icon.
 
 ## File format
 

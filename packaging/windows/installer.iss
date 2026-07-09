@@ -1,19 +1,19 @@
 [Setup]
-AppName=Histogram Viewer
+AppName=SpectraTools
 AppVersion=0.1.0
-DefaultDirName={autopf}\HistogramViewer
-DefaultGroupName=Histogram Viewer
+DefaultDirName={autopf}\SpectraTools
+DefaultGroupName=SpectraTools
 OutputDir=output
-OutputBaseFilename=HistogramViewerSetup
+OutputBaseFilename=SpectraToolsSetup
 Compression=none
 PrivilegesRequiredOverridesAllowed=commandline
 
 [Files]
-Source: "..\..\dist\HistogramViewer.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\dist\SpectraTools.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Histogram Viewer"; Filename: "{app}\HistogramViewer.exe"
-Name: "{autodesktop}\Histogram Viewer"; Filename: "{app}\HistogramViewer.exe"; Tasks: desktopicon
+Name: "{group}\SpectraTools"; Filename: "{app}\SpectraTools.exe"
+Name: "{autodesktop}\SpectraTools"; Filename: "{app}\SpectraTools.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop icon"; GroupDescription: "Additional icons:"; Flags: unchecked

@@ -77,10 +77,46 @@ def _color_swatch_pixmap(color):
     return pixmap
 
 
+_APP_ICON_SIZES = (16, 32, 48, 128, 256)
+_APP_ICON_BAR_HEIGHTS = (0.35, 0.7, 0.5, 0.9, 0.6, 0.8, 0.45)
+
+
+def _app_icon_pixmap(size):
+    # Bars colored from the app's own spectrum color cycle -- the icon
+    # doubles as a visual reminder of how loaded spectra are distinguished
+    # from one another in the app itself.
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    margin = size * 0.1
+    gap = size * 0.03
+    n = len(_APP_ICON_BAR_HEIGHTS)
+    bar_width = (size - 2 * margin - (n - 1) * gap) / n
+    base_y = size - margin
+    radius = bar_width * 0.15
+    for i, fraction in enumerate(_APP_ICON_BAR_HEIGHTS):
+        painter.setBrush(QColor(next_color(i)))
+        height = fraction * (size - 2 * margin)
+        x = margin + i * (bar_width + gap)
+        painter.drawRoundedRect(x, base_y - height, bar_width, height, radius, radius)
+    painter.end()
+    return pixmap
+
+
+def _app_icon():
+    icon = QIcon()
+    for size in _APP_ICON_SIZES:
+        icon.addPixmap(_app_icon_pixmap(size))
+    return icon
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Histogram Viewer")
+        self.setWindowTitle("SpectraTools")
+        self.setWindowIcon(_app_icon())
         self.resize(900, 600)
 
         self.spectra = []

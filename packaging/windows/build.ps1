@@ -2,7 +2,11 @@ $ErrorActionPreference = "Stop"
 $root = Resolve-Path "$PSScriptRoot/../.."
 Set-Location $root
 
-& "$root/.venv/Scripts/python.exe" -m PyInstaller --noconfirm --onefile --windowed --name HistogramViewer main.py
+if (-not (Test-Path "$root/assets/icon.ico")) {
+    & "$root/.venv/Scripts/python.exe" "$root/packaging/make_icon.py"
+}
+
+& "$root/.venv/Scripts/python.exe" -m PyInstaller --noconfirm --onefile --windowed --name SpectraTools --icon "$root/assets/icon.ico" main.py
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed with exit code $LASTEXITCODE"
 }

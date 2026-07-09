@@ -6,12 +6,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # Build inside $HOME, not directly on the repo path: under WSL the repo lives on
 # the /mnt/c 9p-mounted Windows filesystem, which is far too slow for PyInstaller's
 # heavy file scanning of PySide6/Qt. Only the small final artifacts are copied back.
-BUILD_DIR="$HOME/.histogram-viewer-build"
+BUILD_DIR="$HOME/.spectratools-build"
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 cp "$ROOT_DIR"/main.py "$ROOT_DIR"/main_window.py "$ROOT_DIR"/histogram_io.py \
-   "$ROOT_DIR"/settings.py "$ROOT_DIR"/requirements.txt "$ROOT_DIR"/requirements-dev.txt \
-   "$BUILD_DIR/"
+   "$ROOT_DIR"/settings.py "$ROOT_DIR"/spectrum.py "$ROOT_DIR"/requirements.txt \
+   "$ROOT_DIR"/requirements-dev.txt "$BUILD_DIR/"
 cd "$BUILD_DIR"
 
 # --without-pip --system-site-packages works around this WSL image's python3-pip
@@ -21,22 +21,26 @@ cd "$BUILD_DIR"
 python3 -m venv --without-pip --system-site-packages .venv
 .venv/bin/python3 -m pip install --quiet -r requirements-dev.txt
 
-.venv/bin/python3 -m PyInstaller --noconfirm --onedir --windowed --name HistogramViewer main.py
+if [ ! -f "$ROOT_DIR/assets/icon.png" ]; then
+    .venv/bin/python3 "$ROOT_DIR/packaging/make_icon.py"
+fi
 
-APPDIR="$BUILD_DIR/HistogramViewer.AppDir"
+.venv/bin/python3 -m PyInstaller --noconfirm --onedir --windowed --name SpectraTools main.py
+
+APPDIR="$BUILD_DIR/SpectraTools.AppDir"
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin"
-cp -r dist/HistogramViewer/* "$APPDIR/usr/bin/"
+cp -r dist/SpectraTools/* "$APPDIR/usr/bin/"
 
 cat > "$APPDIR/AppRun" <<'EOF'
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
-exec "$HERE/usr/bin/HistogramViewer" "$@"
+exec "$HERE/usr/bin/SpectraTools" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
 
-cp "$ROOT_DIR/packaging/linux/histogramviewer.desktop" "$APPDIR/histogramviewer.desktop"
-cp "$ROOT_DIR/packaging/linux/icon.png" "$APPDIR/histogramviewer.png"
+cp "$ROOT_DIR/packaging/linux/spectratools.desktop" "$APPDIR/spectratools.desktop"
+cp "$ROOT_DIR/assets/icon.png" "$APPDIR/spectratools.png"
 
 APPIMAGETOOL="$ROOT_DIR/packaging/linux/tools/appimagetool"
 if [ ! -x "$APPIMAGETOOL" ]; then
@@ -47,6 +51,6 @@ if [ ! -x "$APPIMAGETOOL" ]; then
 fi
 
 mkdir -p "$ROOT_DIR/packaging/linux/output"
-"$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" "$ROOT_DIR/packaging/linux/output/HistogramViewer-x86_64.AppImage"
+"$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" "$ROOT_DIR/packaging/linux/output/SpectraTools-x86_64.AppImage"
 
-echo "AppImage built at packaging/linux/output/HistogramViewer-x86_64.AppImage"
+echo "AppImage built at packaging/linux/output/SpectraTools-x86_64.AppImage"

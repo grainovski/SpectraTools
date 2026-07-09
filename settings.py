@@ -1,7 +1,7 @@
 from PySide6.QtCore import QSettings
 
 ORG_NAME = "PeakFinderFitting"
-APP_NAME = "HistogramViewer"
+APP_NAME = "SpectraTools"
 MAX_RECENT_FILES = 8
 
 
