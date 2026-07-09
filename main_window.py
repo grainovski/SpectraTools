@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QRadioButton,
+    QToolBar,
     QVBoxLayout,
     QWidget,
 )
@@ -134,11 +135,6 @@ class MainWindow(QMainWindow):
         self.log_scale_action.toggled.connect(self._on_log_scale_toggled)
         view_menu.addAction(self.log_scale_action)
 
-        self.toggle_spectrum_panel_action = QAction("Loaded Spectra", self)
-        self.toggle_spectrum_panel_action.setCheckable(True)
-        self.toggle_spectrum_panel_action.setChecked(True)
-        self.toggle_spectrum_panel_action.toggled.connect(self.spectrum_dock.setVisible)
-        self.spectrum_dock.visibilityChanged.connect(self.toggle_spectrum_panel_action.setChecked)
         view_menu.addAction(self.toggle_spectrum_panel_action)
 
     def _open_file_dialog(self):
@@ -252,6 +248,22 @@ class MainWindow(QMainWindow):
         self.spectrum_dock = QDockWidget("Loaded Spectra", self)
         self.spectrum_dock.setWidget(self.spectrum_list)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.spectrum_dock)
+
+        self.toggle_spectrum_panel_action = QAction("Spectra", self)
+        self.toggle_spectrum_panel_action.setCheckable(True)
+        self.toggle_spectrum_panel_action.setToolTip("Show/hide the loaded spectra list")
+        self.toggle_spectrum_panel_action.toggled.connect(self.spectrum_dock.setVisible)
+        self.spectrum_dock.visibilityChanged.connect(self.toggle_spectrum_panel_action.setChecked)
+        # Starts closed -- the dock is only ever a click away via the
+        # always-visible tab below, never left open by default.
+        self.spectrum_dock.setVisible(False)
+
+        spectrum_tab_bar = QToolBar("Spectra Tab", self)
+        spectrum_tab_bar.setMovable(False)
+        spectrum_tab_bar.setFloatable(False)
+        spectrum_tab_bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        spectrum_tab_bar.addAction(self.toggle_spectrum_panel_action)
+        self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, spectrum_tab_bar)
 
     def _update_spectrum_list(self):
         self.spectrum_list.clear()
