@@ -16,7 +16,7 @@ Name: "{group}\Histogram Viewer"; Filename: "{app}\HistogramViewer.exe"
 Name: "{autodesktop}\Histogram Viewer"; Filename: "{app}\HistogramViewer.exe"; Tasks: desktopicon
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a &desktop icon"; GroupDescription: "Additional icons:"
+Name: "desktopicon"; Description: "Create a &desktop icon"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
