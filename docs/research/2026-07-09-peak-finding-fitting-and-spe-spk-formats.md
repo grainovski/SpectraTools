@@ -272,6 +272,17 @@ is conceptually close to `libmfile`'s own `MAT_TXT` handler
 
 ## `.spk` format
 
+> **Correction (later same day):** the conclusion below — that `.spk` is
+> gf3-only — is wrong. It came from grepping source for the literal
+> substring "spk", which tv/libmfile's own code never contains (format
+> identification there is by magic number/trailer content, never by
+> name or extension). tv's actual native `.spk` format is Stefan Esser's
+> Mfile library (`libmfile-1.0.7`); see
+> `docs/superpowers/specs/2026-07-09-spk-reader-design.md` for the
+> empirically-verified format details. The gf3 `HHIRFSPK` format
+> described below is real but unrelated, and out of scope for the
+> `.spk` reader sub-project.
+
 **Only found in gf3/srcRW — not present in tv/libmfile at all.**
 
 Implementation: `srcRW/libs/util/readsp.c` — `spkio()` (139–372),
