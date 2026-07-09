@@ -99,6 +99,9 @@ class MainWindow(QMainWindow):
         self.axes.set_ylabel("Counts")
         self.axes.grid(True)
         self.axes.set_yscale("log" if self.log_scale_action.isChecked() else "linear")
+        # Channel numbers can't be negative; override Matplotlib's default
+        # 5% autoscale margin, which would otherwise show them as such.
+        self.axes.set_xlim(0, len(self.data) - 1)
         self.canvas.draw()
 
     def _on_mouse_move(self, event):
@@ -154,7 +157,14 @@ class MainWindow(QMainWindow):
         if center is None:
             center = (xlim[0] + xlim[1]) / 2
         half_width = (xlim[1] - xlim[0]) / 2 * factor
-        new_xlim = (center - half_width, center + half_width)
+        max_channel = len(self.data) - 1
+        # Clamp to valid channel numbers -- zooming/scrolling must never
+        # show negative channels or channels past the end of the data.
+        new_lo = max(0.0, center - half_width)
+        new_hi = min(float(max_channel), center + half_width)
+        if new_hi <= new_lo:
+            new_hi = min(float(max_channel), new_lo + 1)
+        new_xlim = (new_lo, new_hi)
         self.axes.set_xlim(new_xlim)
         self._autoscale_y(new_xlim)
         self.canvas.draw()
@@ -167,5 +177,15 @@ class MainWindow(QMainWindow):
         visible = self.data[lo:hi]
         y_min = float(np.min(visible))
         y_max = float(np.max(visible))
-        margin = (y_max - y_min) * 0.05 or 1.0
-        self.axes.set_ylim(y_min - margin, y_max + margin)
+        if self.log_scale_action.isChecked():
+            # A log-scaled axis silently ignores set_ylim() with a
+            # non-positive bound, so a plain "y_min - margin" (common
+            # here since spectra often have zero-count channels) would
+            # leave the Y-axis un-rescaled. Floor to a small positive
+            # value and use a multiplicative margin instead.
+            y_min = max(y_min, 1.0)
+            y_max = max(y_max, y_min * 1.1)
+            self.axes.set_ylim(y_min / 1.1, y_max * 1.1)
+        else:
+            margin = (y_max - y_min) * 0.05 or 1.0
+            self.axes.set_ylim(y_min - margin, y_max + margin)

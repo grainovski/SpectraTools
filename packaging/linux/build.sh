@@ -38,7 +38,15 @@ chmod +x "$APPDIR/AppRun"
 cp "$ROOT_DIR/packaging/linux/histogramviewer.desktop" "$APPDIR/histogramviewer.desktop"
 cp "$ROOT_DIR/packaging/linux/icon.png" "$APPDIR/histogramviewer.png"
 
+APPIMAGETOOL="$ROOT_DIR/packaging/linux/tools/appimagetool"
+if [ ! -x "$APPIMAGETOOL" ]; then
+    mkdir -p "$ROOT_DIR/packaging/linux/tools"
+    curl -L -o "$APPIMAGETOOL" \
+        https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+    chmod +x "$APPIMAGETOOL"
+fi
+
 mkdir -p "$ROOT_DIR/packaging/linux/output"
-"$ROOT_DIR/packaging/linux/tools/appimagetool" --appimage-extract-and-run "$APPDIR" "$ROOT_DIR/packaging/linux/output/HistogramViewer-x86_64.AppImage"
+"$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" "$ROOT_DIR/packaging/linux/output/HistogramViewer-x86_64.AppImage"
 
 echo "AppImage built at packaging/linux/output/HistogramViewer-x86_64.AppImage"

@@ -27,7 +27,9 @@ histogram `.txt` file and plotting it — the foundation of the
   Produces `packaging/windows/output/HistogramViewerSetup.exe`.
 - Linux: `bash packaging/linux/build.sh`, built and tested via WSL Ubuntu
   in this repo's history. Produces
-  `packaging/linux/output/HistogramViewer-x86_64.AppImage`.
+  `packaging/linux/output/HistogramViewer-x86_64.AppImage`. Downloads
+  `appimagetool` on first run if it isn't already present under
+  `packaging/linux/tools/` (requires internet access).
 
 ## File format
 
