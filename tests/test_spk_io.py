@@ -212,6 +212,26 @@ def test_lc_rejects_stream_that_runs_out_of_bytes(tmp_path):
         load_spk(str(file_path))
 
 
+def test_lc_rejects_value_overflowing_int64(tmp_path):
+    # LC1's extended-tag continuation loop has no cap on the number of
+    # continuation bytes, so a handful of crafted bytes can build a
+    # decoded value whose magnitude vastly exceeds int64 range. This must
+    # raise ParseError (via the try/except OverflowError in _load_lc),
+    # not crash with an unhandled OverflowError.
+    header = _lc_header(version=1, levels=1, lines=1, columns=1, poslentablepos=44)
+    poslen = struct.pack("<2I", 44 + 8, 11)
+    # tag byte 0xFF (extended, initial 6 bits = 0x3F = 63), followed by
+    # 9 continuation bytes of 0xFF (each contributes 127 << s, s growing
+    # by 7 each time -- by the 9th byte alone the running total is far
+    # past 2**63) and a final stop byte (0x00, bit7 clear).
+    compressed = bytes([0xFF] + [0xFF] * 9 + [0x00])
+    file_path = tmp_path / "lc_overflow.spk"
+    file_path.write_bytes(header + poslen + compressed)
+
+    with pytest.raises(ParseError):
+        load_spk(str(file_path))
+
+
 def test_raises_parse_error_on_unrecognized_file(tmp_path):
     file_path = tmp_path / "not_a_spk_file.spk"
     file_path.write_bytes(b"this is not a valid tv/Mfile spk file at all" + b"\x00" * 40)
@@ -290,6 +310,28 @@ def test_oldmat_rejects_2d_matrix(tmp_path):
     payload = struct.pack("<6i", 1, 2, 3, 4, 5, 6)
     file_path = tmp_path / "oldmat_2d.spk"
     file_path.write_bytes(_oldmat_bytes("2.3.le4", payload))
+
+    with pytest.raises(ParseError):
+        load_spk(str(file_path))
+
+
+def test_oldmat_rejects_2d_matrix_via_levels(tmp_path):
+    # "2.1.3.le4" (three numbers) parses as levels=2, lines=1, columns=3 --
+    # levels != 1 must be rejected too, not just lines != 1.
+    payload = struct.pack("<6i", 1, 2, 3, 4, 5, 6)
+    file_path = tmp_path / "oldmat_2d_levels.spk"
+    file_path.write_bytes(_oldmat_bytes("2.1.3.le4", payload))
+
+    with pytest.raises(ParseError):
+        load_spk(str(file_path))
+
+
+def test_oldmat_rejects_too_many_dimensions(tmp_path):
+    # A 4th dot-separated leading number is not a valid MatFmt grammar --
+    # the format only allows up to levels.lines.columns (3 numbers).
+    payload = struct.pack("<3i", 1, 2, 3)
+    file_path = tmp_path / "oldmat_too_many_dims.spk"
+    file_path.write_bytes(_oldmat_bytes("1.1.1.3.le4", payload))
 
     with pytest.raises(ParseError):
         load_spk(str(file_path))
