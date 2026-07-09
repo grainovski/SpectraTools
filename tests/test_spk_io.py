@@ -218,3 +218,99 @@ def test_raises_parse_error_on_unrecognized_file(tmp_path):
 
     with pytest.raises(ParseError):
         load_spk(str(file_path))
+
+
+def test_parses_real_pg_25um_f_spk():
+    # pg_25um_f.spk is a real tv/Mfile oldmat/MAT_LF4 file: 16384 raw
+    # little-endian float32 channel values, no header, identified by a
+    # 64-byte "\nMatFmt: 16k.lf4:2\n" trailer at EOF -- verified during
+    # design against the libmfile-1.0.7 source and the file's own bytes.
+    data = load_spk(str(FIXTURES / "pg_25um_f.spk"))
+    assert len(data) == 16384
+
+    with open(FIXTURES / "pg_25um_f.spk", "rb") as f:
+        raw = f.read()
+    expected_first5 = struct.unpack_from("<5f", raw, 0)
+    assert list(data[:5]) == [round(v) for v in expected_first5]
+    expected_last = struct.unpack_from("<f", raw, 4 * 16383)[0]
+    assert int(data[16383]) == round(expected_last)
+
+
+def _oldmat_bytes(fmt_string, payload):
+    trailer = b"\nMatFmt: " + fmt_string.encode("ascii") + b"\n"
+    trailer = trailer.ljust(64, b"\x00")
+    return payload + trailer
+
+
+def test_oldmat_le4(tmp_path):
+    values = [10, -5, 2000]
+    payload = struct.pack("<3i", *values)
+    file_path = tmp_path / "oldmat_le4.spk"
+    file_path.write_bytes(_oldmat_bytes("3.le4", payload))
+
+    data = load_spk(str(file_path))
+
+    assert list(data) == values
+
+
+def test_oldmat_lf4(tmp_path):
+    values = [1.4, 2.6, -3.2]
+    payload = struct.pack("<3f", *values)
+    file_path = tmp_path / "oldmat_lf4.spk"
+    file_path.write_bytes(_oldmat_bytes("3.lf4:2", payload))
+
+    data = load_spk(str(file_path))
+
+    assert list(data) == [round(v) for v in values]
+
+
+def test_oldmat_he2(tmp_path):
+    values = [1, 60000, 3]
+    payload = struct.pack(">3H", *values)
+    file_path = tmp_path / "oldmat_he2.spk"
+    file_path.write_bytes(_oldmat_bytes("3.he2", payload))
+
+    data = load_spk(str(file_path))
+
+    assert list(data) == values
+
+
+def test_oldmat_rejects_unsupported_fmtname(tmp_path):
+    payload = struct.pack("<3i", 1, 2, 3)
+    file_path = tmp_path / "oldmat_bad_fmt.spk"
+    file_path.write_bytes(_oldmat_bytes("3.xyz", payload))
+
+    with pytest.raises(ParseError):
+        load_spk(str(file_path))
+
+
+def test_oldmat_rejects_2d_matrix(tmp_path):
+    # "2.3.le4" parses as lines=2, columns=3 (levels defaults to 1) --
+    # lines != 1 must still be rejected as a 2-D matrix.
+    payload = struct.pack("<6i", 1, 2, 3, 4, 5, 6)
+    file_path = tmp_path / "oldmat_2d.spk"
+    file_path.write_bytes(_oldmat_bytes("2.3.le4", payload))
+
+    with pytest.raises(ParseError):
+        load_spk(str(file_path))
+
+
+def test_oldmat_rejects_size_mismatch(tmp_path):
+    payload = struct.pack("<3i", 1, 2, 3)
+    file_path = tmp_path / "oldmat_mismatch.spk"
+    # declares 5 channels but the payload only has 3
+    file_path.write_bytes(_oldmat_bytes("5.le4", payload))
+
+    with pytest.raises(ParseError):
+        load_spk(str(file_path))
+
+
+def test_oldmat_rejects_malformed_trailer(tmp_path):
+    payload = struct.pack("<3i", 1, 2, 3)
+    # magic prefix present but no terminating newline after the fmt string
+    trailer = (b"\nMatFmt: 3.le4" + b"\x00" * 50)[:64]
+    file_path = tmp_path / "oldmat_malformed.spk"
+    file_path.write_bytes(payload + trailer)
+
+    with pytest.raises(ParseError):
+        load_spk(str(file_path))

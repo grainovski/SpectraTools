@@ -9,6 +9,20 @@ LC_HEADER_SIZE = 44
 LC_POSLEN_SIZE = 8
 MAT_COLMAX = 1 << 16  # matches libmfile-1.0.7's own MAT_COLMAX buffer-size limit
 
+OLDMAT_TRAILER_SIZE = 64
+OLDMAT_MAGIC = b"\nMatFmt: "
+
+OLDMAT_DTYPES = {
+    "le4": "<i4",
+    "he4": ">i4",
+    "le2": "<u2",
+    "he2": ">u2",
+    "le2s": "<i2",
+    "he2s": ">i2",
+    "lf4": "<f4",
+    "hf4": ">f4",
+}
+
 
 def load_spk(path: str) -> np.ndarray:
     with open(path, "rb") as f:
@@ -17,8 +31,13 @@ def load_spk(path: str) -> np.ndarray:
     if len(data) >= 4 and struct.unpack_from("<I", data, 0)[0] == LC_MAGIC:
         return _load_lc(data, path)
 
+    if len(data) >= OLDMAT_TRAILER_SIZE:
+        trailer = data[-OLDMAT_TRAILER_SIZE:]
+        if trailer.startswith(OLDMAT_MAGIC):
+            return _load_oldmat(data, trailer, path)
+
     raise ParseError(
-        f"Not a recognized tv/Mfile .spk file (no LC magic found): {path}"
+        f"Not a recognized tv/Mfile .spk file (no LC magic, no MatFmt trailer): {path}"
     )
 
 
@@ -181,3 +200,87 @@ def _load_lc(data: bytes, path: str) -> np.ndarray:
         return np.array(values, dtype=np.int64)
     except OverflowError as exc:
         raise ParseError(f"Decoded channel value out of range in .spk file: {path}") from exc
+
+
+def _parse_oldmat_format(fmt: str, path: str):
+    text = fmt.strip()
+    i = 0
+    n = len(text)
+    nums = []
+
+    while i < n and text[i].isdigit():
+        start = i
+        while i < n and text[i].isdigit():
+            i += 1
+        value = int(text[start:i])
+        if i < n and text[i] == "k":
+            i += 1
+            value *= 1024
+        if value == 0:
+            raise ParseError(f"Invalid .spk MatFmt dimension in '{fmt}': {path}")
+        nums.append(value)
+        if len(nums) > 3:
+            raise ParseError(f"Too many dimensions in .spk MatFmt string '{fmt}': {path}")
+        if i < n and text[i] == ".":
+            i += 1
+        else:
+            break
+
+    name_start = i
+    while i < n and text[i] != ":":
+        i += 1
+    fmtname = text[name_start:i]
+
+    if fmtname not in OLDMAT_DTYPES:
+        raise ParseError(f"Unsupported .spk Mfile format '{fmtname}': {path}")
+
+    if i < n and text[i] == ":":
+        i += 1
+        while i < n and text[i].isdigit():
+            i += 1
+
+    if i != n:
+        raise ParseError(f"Unexpected trailing text in .spk MatFmt string '{fmt}': {path}")
+
+    if not nums:
+        raise ParseError(f"Missing channel count in .spk MatFmt string '{fmt}': {path}")
+    if len(nums) == 1:
+        levels, lines, columns = 1, 1, nums[0]
+    elif len(nums) == 2:
+        levels, lines, columns = 1, nums[0], nums[1]
+    else:
+        levels, lines, columns = nums[0], nums[1], nums[2]
+
+    return levels, lines, columns, OLDMAT_DTYPES[fmtname]
+
+
+def _load_oldmat(data: bytes, trailer: bytes, path: str) -> np.ndarray:
+    text = trailer[len(OLDMAT_MAGIC):]
+    newline = text.find(b"\n")
+    if newline == -1:
+        raise ParseError(f"Malformed .spk MatFmt trailer (no terminator): {path}")
+
+    try:
+        fmt = text[:newline].decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise ParseError(f"Malformed .spk MatFmt trailer: {path}") from exc
+
+    levels, lines, columns, dtype_str = _parse_oldmat_format(fmt, path)
+
+    if levels != 1 or lines != 1:
+        raise ParseError(
+            f"2-D .spk matrices (levels={levels}, lines={lines}) are not supported: {path}"
+        )
+
+    dtype = np.dtype(dtype_str)
+    expected_size = columns * dtype.itemsize + OLDMAT_TRAILER_SIZE
+    if len(data) != expected_size:
+        raise ParseError(
+            f"File size {len(data)} does not match declared .spk dimensions "
+            f"({columns} channels of {dtype_str}, expected {expected_size}): {path}"
+        )
+
+    channels = np.frombuffer(data, dtype=dtype, count=columns, offset=0)
+    if np.issubdtype(dtype, np.floating):
+        return np.round(channels).astype(np.int64)
+    return channels.astype(np.int64)
