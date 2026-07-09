@@ -7,6 +7,7 @@ from histogram_io import ParseError
 LC_MAGIC = 0x80FFFF10
 LC_HEADER_SIZE = 44
 LC_POSLEN_SIZE = 8
+MAT_COLMAX = 1 << 16  # matches libmfile-1.0.7's own MAT_COLMAX buffer-size limit
 
 
 def load_spk(path: str) -> np.ndarray:
@@ -157,8 +158,10 @@ def _load_lc(data: bytes, path: str) -> np.ndarray:
         raise ParseError(
             f"2-D .spk matrices (levels={levels}, lines={lines}) are not supported: {path}"
         )
-    if columns <= 0:
-        raise ParseError(f"Invalid channel count in .spk file: {path}")
+    if columns <= 0 or columns > MAT_COLMAX:
+        raise ParseError(
+            f"Invalid channel count {columns} in .spk file (must be 1-{MAT_COLMAX}): {path}"
+        )
 
     if len(data) < poslentablepos + LC_POSLEN_SIZE:
         raise ParseError(f"File too short for .spk position table: {path}")
@@ -174,4 +177,7 @@ def _load_lc(data: bytes, path: str) -> np.ndarray:
     compressed = data[pos:pos + length]
     uncompress = _lc1_uncompress if version == 1 else _lc2_uncompress
     values = uncompress(compressed, columns, path)
-    return np.array(values, dtype=np.int64)
+    try:
+        return np.array(values, dtype=np.int64)
+    except OverflowError as exc:
+        raise ParseError(f"Decoded channel value out of range in .spk file: {path}") from exc

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from histogram_io import ParseError
-from spk_io import load_spk
+from spk_io import MAT_COLMAX, load_spk
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -185,6 +185,15 @@ def test_lc_rejects_truncated_compressed_data(tmp_path):
     poslen = struct.pack("<2I", 44 + 8, 5)  # claims 5 bytes but none follow
     file_path = tmp_path / "lc_truncated.spk"
     file_path.write_bytes(header + poslen)
+
+    with pytest.raises(ParseError):
+        load_spk(str(file_path))
+
+
+def test_lc_rejects_excessive_channel_count(tmp_path):
+    header = _lc_header(version=2, levels=1, lines=1, columns=MAT_COLMAX + 1, poslentablepos=44)
+    file_path = tmp_path / "lc_too_many_channels.spk"
+    file_path.write_bytes(header)
 
     with pytest.raises(ParseError):
         load_spk(str(file_path))
