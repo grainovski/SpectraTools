@@ -30,8 +30,8 @@ from PySide6.QtWidgets import (
 from histogram_io import ParseError, load_histogram
 from settings import Settings
 from spe_io import load_spe
-from spk_io import load_spk
 from spectrum import LoadedSpectrum, next_color
+from spk_io import load_spk
 
 ZOOM_FACTOR = 1.5
 _ICON_SIZE = 24
