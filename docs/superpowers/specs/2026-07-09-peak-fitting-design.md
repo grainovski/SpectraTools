@@ -113,11 +113,18 @@ needs a reasonable starting point, not a precise one, for peaks that
 aren't extremely tightly overlapping; degenerate cases are handled as
 fit failures (see below), not silently produced as bad fits.
 
-**Weighting:** each fit-region data point is weighted by
-`1 / sqrt(max(y, 1))` (`sigma=` argument to `curve_fit`,
-`absolute_sigma=True`) — a lightweight acknowledgment that gamma-spectrum
-channels are Poisson counts, without adopting tv/gf3's full
-maximum-likelihood machinery (explicitly out of scope, see below).
+**Weighting:** each fit-region data point's standard deviation is taken
+as `sqrt(max(y, 1))` (the `sigma=` argument to `curve_fit`, with
+`absolute_sigma=True`) — the standard Poisson-counting-error convention,
+floored at 1 to avoid a zero/undefined deviation at zero-count channels.
+`curve_fit` internally weights the least-squares cost by the inverse
+*square* of this (i.e. `1/y`), which is the statistically correct
+inverse-variance weighting for Poisson data (de-emphasizing high-count,
+high-absolute-variance channels relative to low-count ones) — not simply
+`1/sqrt(y)` used directly as a weight, which would weight the wrong way.
+This is a lightweight acknowledgment that gamma-spectrum channels are
+Poisson counts, without adopting tv/gf3's full maximum-likelihood
+machinery (explicitly out of scope, see below).
 
 **Reported per peak**, computed from the fitted `(amplitude, position, sigma)`
 and the covariance matrix `curve_fit` returns:
@@ -260,7 +267,7 @@ start over.
   `irelw`/`irelpos`) — each peak's position/width is independently free
   in the fit; no shared-ratio constraint mechanism.
 - **Poisson maximum-likelihood fitting** (tv's `CurPoissonLikelihood`) —
-  weighted least-squares (via the `1/sqrt(y)` weighting described above)
+  weighted least-squares (via the Poisson-error weighting described above)
   instead of a true likelihood-based fit.
 - **Energy calibration** — peak positions/results are in channel units;
   no channel-to-energy mapping exists anywhere in this app yet.
