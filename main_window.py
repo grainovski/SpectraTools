@@ -10,13 +10,18 @@ from matplotlib.figure import Figure
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QButtonGroup,
+    QCheckBox,
     QDockWidget,
     QFileDialog,
+    QHBoxLayout,
+    QLabel,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
     QMenu,
     QMessageBox,
+    QRadioButton,
     QVBoxLayout,
     QWidget,
 )
@@ -65,10 +70,10 @@ def _full_spectrum_icon():
     return QIcon(pixmap)
 
 
-def _color_swatch_icon(color):
+def _color_swatch_pixmap(color):
     pixmap = QPixmap(16, 16)
     pixmap.fill(QColor(color))
-    return QIcon(pixmap)
+    return pixmap
 
 
 class MainWindow(QMainWindow):
@@ -98,6 +103,7 @@ class MainWindow(QMainWindow):
 
         self.settings = Settings()
 
+        self._build_spectrum_panel()
         self._build_menu()
         self._update_recent_menu()
 
@@ -105,7 +111,6 @@ class MainWindow(QMainWindow):
         self.canvas.mpl_connect("scroll_event", self._on_scroll)
 
         self._build_zoom_buttons()
-        self._build_spectrum_panel()
 
     def _build_menu(self):
         file_menu = self.menuBar().addMenu("&File")
@@ -128,6 +133,13 @@ class MainWindow(QMainWindow):
         self.log_scale_action.setCheckable(True)
         self.log_scale_action.toggled.connect(self._on_log_scale_toggled)
         view_menu.addAction(self.log_scale_action)
+
+        self.toggle_spectrum_panel_action = QAction("Loaded Spectra", self)
+        self.toggle_spectrum_panel_action.setCheckable(True)
+        self.toggle_spectrum_panel_action.setChecked(True)
+        self.toggle_spectrum_panel_action.toggled.connect(self.spectrum_dock.setVisible)
+        self.spectrum_dock.visibilityChanged.connect(self.toggle_spectrum_panel_action.setChecked)
+        view_menu.addAction(self.toggle_spectrum_panel_action)
 
     def _open_file_dialog(self):
         paths, _ = QFileDialog.getOpenFileNames(
@@ -157,6 +169,8 @@ class MainWindow(QMainWindow):
             if error:
                 failures.append(error)
                 continue
+            if not self.spectra:
+                spectrum.active = True
             self.spectra.append(spectrum)
             self.settings.set_last_folder(os.path.dirname(path))
             self.settings.add_recent_file(path)
@@ -231,41 +245,68 @@ class MainWindow(QMainWindow):
 
     def _build_spectrum_panel(self):
         self.spectrum_list = QListWidget()
-        self.spectrum_list.itemClicked.connect(self._on_spectrum_item_clicked)
         self.spectrum_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.spectrum_list.customContextMenuRequested.connect(self._on_spectrum_context_menu)
+        self.active_button_group = QButtonGroup(self)
 
-        dock = QDockWidget("Loaded Spectra", self)
-        dock.setWidget(self.spectrum_list)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
+        self.spectrum_dock = QDockWidget("Loaded Spectra", self)
+        self.spectrum_dock.setWidget(self.spectrum_list)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.spectrum_dock)
 
     def _update_spectrum_list(self):
-        self.spectrum_list.blockSignals(True)
         self.spectrum_list.clear()
-        for spectrum in self.spectra:
-            item = QListWidgetItem(os.path.basename(spectrum.path))
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(
-                Qt.CheckState.Checked if spectrum.visible else Qt.CheckState.Unchecked
-            )
-            item.setIcon(_color_swatch_icon(spectrum.color))
-            item.setData(Qt.ItemDataRole.UserRole, spectrum.path)
-            self.spectrum_list.addItem(item)
-        self.spectrum_list.blockSignals(False)
+        # Recreated each rebuild -- the old group (and its buttons) are
+        # discarded along with the list items they belonged to.
+        self.active_button_group = QButtonGroup(self)
 
-    def _on_spectrum_item_clicked(self, item):
-        # Toggling on any click within the row (not just Qt's native tiny
-        # checkbox glyph) -- the glyph alone is an easy-to-miss target
-        # sitting right next to the color swatch icon.
-        path = item.data(Qt.ItemDataRole.UserRole)
+        for spectrum in self.spectra:
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, spectrum.path)
+
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(4, 2, 4, 2)
+
+            show_checkbox = QCheckBox()
+            show_checkbox.setToolTip("Show")
+            show_checkbox.setChecked(spectrum.visible)
+            show_checkbox.toggled.connect(
+                lambda checked, p=spectrum.path: self._on_show_toggled(p, checked)
+            )
+            row_layout.addWidget(show_checkbox)
+
+            active_radio = QRadioButton()
+            active_radio.setToolTip("Active (for future fitting/peak-finding operations)")
+            active_radio.setChecked(spectrum.active)
+            active_radio.toggled.connect(
+                lambda checked, p=spectrum.path: self._on_active_toggled(p, checked)
+            )
+            self.active_button_group.addButton(active_radio)
+            row_layout.addWidget(active_radio)
+
+            swatch = QLabel()
+            swatch.setPixmap(_color_swatch_pixmap(spectrum.color))
+            row_layout.addWidget(swatch)
+
+            row_layout.addWidget(QLabel(os.path.basename(spectrum.path)))
+            row_layout.addStretch()
+
+            item.setSizeHint(row.sizeHint())
+            self.spectrum_list.addItem(item)
+            self.spectrum_list.setItemWidget(item, row)
+
+    def _on_show_toggled(self, path, checked):
         for spectrum in self.spectra:
             if spectrum.path == path:
-                spectrum.visible = not spectrum.visible
-                item.setCheckState(
-                    Qt.CheckState.Checked if spectrum.visible else Qt.CheckState.Unchecked
-                )
+                spectrum.visible = checked
                 break
         self._plot_data()
+
+    def _on_active_toggled(self, path, checked):
+        if not checked:
+            return
+        for spectrum in self.spectra:
+            spectrum.active = spectrum.path == path
 
     def _on_spectrum_context_menu(self, position):
         item = self.spectrum_list.itemAt(position)
@@ -276,7 +317,10 @@ class MainWindow(QMainWindow):
         chosen = menu.exec(self.spectrum_list.viewport().mapToGlobal(position))
         if chosen == remove_action:
             path = item.data(Qt.ItemDataRole.UserRole)
+            removed_was_active = any(s.path == path and s.active for s in self.spectra)
             self.spectra = [s for s in self.spectra if s.path != path]
+            if removed_was_active and self.spectra:
+                self.spectra[0].active = True
             self._update_spectrum_list()
             self._plot_data()
 

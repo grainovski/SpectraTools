@@ -10,6 +10,7 @@ class LoadedSpectrum:
         self.data = data
         self.color = color
         self.visible = True
+        self.active = False
 
 
 def next_color(index):
