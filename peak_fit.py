@@ -2,8 +2,50 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy.optimize import curve_fit
+from scipy.special import erfc
 
 FWHM_FACTOR = 2.3548200450309493  # 2*sqrt(2*ln(2))
+
+TAIL_FRACTION_MAX = 0.3
+TAIL_BETA_MIN = 0.1
+
+
+def hypermet_left_tail(x, position, sigma, r, beta):
+    """gf3's Hypermet tail term (left-side only; the step-background
+    term is out of scope, per the design spec):
+        (1-r)*exp(-w^2) + r*exp(dx/beta)*erfc(w+y)/erfc(y)
+    where dx = x - position, w = dx/(sigma*sqrt(2)),
+    y = sigma/(beta*sqrt(2)). Ported from srcRW/gf3_subs.c's eval();
+    verified numerically during design that beta > 0 biases the tail
+    toward lower x (left), matching real low-energy detector tailing.
+    Public (no leading underscore) because fit_mode.py's committed-fit
+    overlay drawing reuses this exact formula to redraw tailed fits.
+    """
+    dx = x - position
+    w = dx / (sigma * np.sqrt(2))
+    gaussian_core = np.exp(-w ** 2)
+
+    y = sigma / (beta * np.sqrt(2))
+    erfc_y = erfc(y)
+    if erfc_y < 1e-300:
+        # y is so large that erfc(y) has underflowed to zero -- an
+        # extreme, unphysical width/decay ratio that only an
+        # unconverged optimizer iterate would ever produce. Treat the
+        # tail as vanishing rather than divide by (effectively) zero.
+        return (1 - r) * gaussian_core
+
+    # Matches gf3's own overflow guard: exp(dx/beta) grows unbounded
+    # for dx/beta > 0, but the true (mathematically bounded) tail
+    # contribution there is negligible once |dx/beta| is large -- gf3
+    # itself zeroes the tail term entirely past this same threshold
+    # rather than risk exp() overflowing before erfc() can suppress it.
+    ratio = dx / beta
+    tail = np.zeros_like(x, dtype=float)
+    safe = np.abs(ratio) <= 12.0
+    z = w[safe] + y
+    tail[safe] = np.exp(ratio[safe]) * erfc(z) / erfc_y
+
+    return (1 - r) * gaussian_core + r * tail
 
 
 class FitError(Exception):

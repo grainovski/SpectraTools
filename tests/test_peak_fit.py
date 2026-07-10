@@ -1,7 +1,40 @@
 import numpy as np
 import pytest
 
-from peak_fit import FitError, FitResult, PeakResult, _compute_background
+from peak_fit import FitError, FitResult, PeakResult, _compute_background, hypermet_left_tail
+
+
+def test_hypermet_left_tail_biases_left_not_right():
+    x = np.array([-10.0, 10.0])  # dx values either side of position=0
+    values = hypermet_left_tail(x, position=0.0, sigma=3.0, r=0.1, beta=5.0)
+    left_value, right_value = values
+    assert left_value > right_value
+    # hand-derived: ~14.7x; generous margin so this isn't brittle to
+    # floating-point/erfc implementation differences
+    assert left_value / right_value > 5.0
+
+
+def test_hypermet_left_tail_reduces_to_gaussian_when_r_is_zero():
+    x = np.array([-6.0, -2.0, 0.0, 3.0])
+    values = hypermet_left_tail(x, position=1.0, sigma=2.0, r=0.0, beta=5.0)
+    expected = np.exp(-((x - 1.0) ** 2) / (2 * 2.0 ** 2))
+    np.testing.assert_allclose(values, expected, rtol=1e-10)
+
+
+def test_hypermet_left_tail_handles_large_offsets_without_overflow():
+    x = np.array([1000.0])  # dx/beta = 200, far past the safety threshold
+    values = hypermet_left_tail(x, position=0.0, sigma=3.0, r=0.1, beta=5.0)
+    assert np.all(np.isfinite(values))
+    assert values[0] < 1e-6
+
+
+def test_hypermet_left_tail_handles_degenerate_erfc_underflow():
+    # sigma vastly larger than beta drives y = sigma/(beta*sqrt(2)) so
+    # high that erfc(y) underflows to exactly 0.0 -- must fall back to
+    # the plain Gaussian core instead of dividing by (effectively) zero.
+    x = np.array([0.0, -5.0, 5.0])
+    values = hypermet_left_tail(x, position=0.0, sigma=1000.0, r=0.1, beta=0.1)
+    assert np.all(np.isfinite(values))
 
 
 def test_peak_result_holds_expected_fields():
