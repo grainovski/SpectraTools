@@ -158,11 +158,21 @@ def _initial_guess(x_fit, y_sub, fit_region, peak_positions, link_widths, enable
         # reasonably well-separated; linked-width and single-peak fits
         # aren't prone to this failure mode, so they keep the original
         # region-based guess unchanged.
+        #
+        # Skip the cap entirely when min_spacing is 0 (peaks requested
+        # at literally the same position, e.g. an intentionally
+        # degenerate multi-peak request) -- there's no "closest spacing"
+        # to base a tighter guess on, and collapsing to the 1e-6 floor
+        # would just swap one failure mode (bad local minimum) for
+        # another (a differently-degenerate fit) rather than fixing
+        # anything. The unmodified region-based guess is the sensible
+        # fallback here.
         sorted_positions = sorted(peak_positions)
         min_spacing = min(
             b - a for a, b in zip(sorted_positions, sorted_positions[1:])
         )
-        sigma0 = max(min(sigma0, min_spacing / 4), 1e-6)
+        if min_spacing > 0:
+            sigma0 = max(min(sigma0, min_spacing / 4), 1e-6)
 
     guess = []
     for pos in peak_positions:
