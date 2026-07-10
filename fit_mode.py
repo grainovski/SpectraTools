@@ -244,11 +244,9 @@ class FitModeController:
             index = self.results_list.row(item)
             del active.fits[index]
             mw._plot_data()
-            self.update_results_list()
         elif chosen == clear_action:
             active.fits.clear()
             mw._plot_data()
-            self.update_results_list()
 
     def run_fit(self):
         if not self.state.ready_to_fit():
@@ -270,4 +268,3 @@ class FitModeController:
         self._clear_progress()
         self.main_window.fit_button.setEnabled(False)
         self.main_window._plot_data()
-        self.update_results_list()
