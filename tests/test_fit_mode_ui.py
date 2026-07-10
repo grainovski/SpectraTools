@@ -239,3 +239,27 @@ def test_clear_all_fits_empties_panel_and_spectrum(qapp):
     main_window.fit_controller.update_results_list()
 
     assert main_window.fit_controller.results_list.count() == 0
+
+
+def test_clear_progress_survives_an_intervening_full_replot(qapp):
+    # Reproduces a real crash: mark one region (creating an in-progress
+    # artist), then something else triggers a full axes.clear() (here,
+    # simulated directly -- in the real app this happens via the results
+    # panel's "Remove Fit"/"Clear All Fits" context menu calling
+    # _plot_data() while a fit is still mid-marking) before the
+    # in-progress fit is finished. Finishing it afterward (Clear, in
+    # this test) must not raise NotImplementedError.
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    main_window.fit_mode_action.setChecked(True)
+    _drag(main_window, 70, 85)  # marks the left background region
+
+    # Something unrelated triggers a full replot, invalidating the
+    # in-progress artist's _remove_method.
+    main_window._plot_data()
+
+    # Must not raise.
+    main_window.fit_controller.clear()
+
+    assert main_window.fit_controller.state.step == "left_bg"

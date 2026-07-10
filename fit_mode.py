@@ -107,7 +107,19 @@ class FitModeController:
 
     def _clear_progress(self):
         for artist in self._progress_artists:
-            artist.remove()
+            try:
+                artist.remove()
+            except NotImplementedError:
+                # The artist may already have been invalidated by an
+                # unrelated full-axes clear (main_window._plot_data(),
+                # e.g. triggered by the results panel's context menu
+                # while a fit was still being marked) -- matplotlib's
+                # Axes.clear() sets an artist's _remove_method to None
+                # for every child it had, making a later .remove() call
+                # on that same (now-stale) reference raise this. Since
+                # the artist is already gone from the axes either way,
+                # there's nothing left to do for it here.
+                pass
         self._progress_artists = []
         self.state.reset()
 
