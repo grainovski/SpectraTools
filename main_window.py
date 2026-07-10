@@ -238,7 +238,12 @@ class MainWindow(QMainWindow):
         if failures:
             QMessageBox.warning(self, "Some files could not be loaded", "\n".join(failures))
 
-    def _plot_data(self):
+    def _plot_data(self, preserve_view=False):
+        # Captured before axes.clear() (which resets limits) -- used to
+        # keep the user's current zoom when a replot is triggered by
+        # something unrelated to loading/showing a spectrum, e.g.
+        # committing or removing a peak fit.
+        saved_xlim = self.axes.get_xlim() if preserve_view else None
         self.axes.clear()
         visible = [s for s in self.spectra if s.visible]
         for spectrum in visible:
@@ -255,8 +260,9 @@ class MainWindow(QMainWindow):
             # as such. Span the widest currently-visible spectrum, since
             # loaded files can have different channel counts.
             max_channel = max(len(s.data) for s in visible) - 1
-            self.axes.set_xlim(0, max_channel)
-            self._autoscale_y((0, max_channel))
+            xlim = saved_xlim if saved_xlim is not None else (0, max_channel)
+            self.axes.set_xlim(xlim)
+            self._autoscale_y(xlim)
         self.canvas.draw()
         # Our custom zoom bypasses the toolbar's usual box-zoom/pan path, so
         # without this the Home/Back/Forward buttons wouldn't know about

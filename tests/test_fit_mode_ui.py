@@ -67,6 +67,36 @@ def test_full_fit_flow_commits_a_fit_result(qapp):
     assert abs(result.peaks[0].position - 100.0) < 1.0
 
 
+def test_plot_data_preserve_view_keeps_current_zoom(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    main_window.axes.set_xlim(80, 120)
+    main_window._plot_data(preserve_view=True)
+
+    assert main_window.axes.get_xlim() == (80.0, 120.0)
+
+
+def test_run_fit_preserves_the_current_zoom(qapp):
+    # A committed fit must not reset the view back to the full spectrum
+    # -- the user is typically zoomed in on the peak they just fit.
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    main_window.axes.set_xlim(80, 120)
+
+    main_window.fit_mode_action.setChecked(True)
+    _drag(main_window, 81, 86)    # left background region
+    _drag(main_window, 114, 119)  # right background region
+    _drag(main_window, 90, 110)   # fit region
+    _click(main_window, 100)      # peak position
+
+    main_window.fit_controller.run_fit()
+
+    assert len(spectrum.fits) == 1
+    assert main_window.axes.get_xlim() == (80.0, 120.0)
+
+
 def test_clear_discards_in_progress_marks_without_committing(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)

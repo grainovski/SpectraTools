@@ -167,6 +167,10 @@ class FitModeController:
 
     def draw_committed_fits(self, spectrum):
         axes = self.main_window.axes
+        # x in data coordinates, y in axes-fraction -- keeps peak labels
+        # pinned near the top of the visible plot regardless of the
+        # current y-axis scale (linear or log) or zoom level.
+        label_transform = axes.get_xaxis_transform()
         for result in spectrum.fits:
             axes.axvspan(*result.left_bg_region, color="gray", alpha=0.15)
             axes.axvspan(*result.right_bg_region, color="gray", alpha=0.15)
@@ -188,6 +192,13 @@ class FitModeController:
 
             for peak in result.peaks:
                 axes.axvline(peak.position, color="red", linestyle=":", linewidth=1)
+                axes.annotate(
+                    f"pos={peak.position:.1f}\nFWHM={peak.fwhm:.1f}\nvol={peak.area:.0f}",
+                    xy=(peak.position, 0.95),
+                    xycoords=label_transform,
+                    ha="center", va="top",
+                    fontsize=7, color="red",
+                )
 
     def build_results_panel(self):
         mw = self.main_window
@@ -226,7 +237,7 @@ class FitModeController:
                 lines.append(
                     f"  Peak {i}: pos={peak.position:.2f}±{peak.position_err:.2f}  "
                     f"FWHM={peak.fwhm:.2f}±{peak.fwhm_err:.2f}  "
-                    f"area={peak.area:.1f}±{peak.area_err:.1f}"
+                    f"volume={peak.area:.1f}±{peak.area_err:.1f}"
                 )
             self.results_list.addItem(QListWidgetItem("\n".join(lines)))
 
@@ -243,10 +254,10 @@ class FitModeController:
         if item is not None and chosen == remove_action:
             index = self.results_list.row(item)
             del active.fits[index]
-            mw._plot_data()
+            mw._plot_data(preserve_view=True)
         elif chosen == clear_action:
             active.fits.clear()
-            mw._plot_data()
+            mw._plot_data(preserve_view=True)
 
     def run_fit(self):
         if not self.state.ready_to_fit():
@@ -267,4 +278,4 @@ class FitModeController:
         active.fits.append(result)
         self._clear_progress()
         self.main_window.fit_button.setEnabled(False)
-        self.main_window._plot_data()
+        self.main_window._plot_data(preserve_view=True)
