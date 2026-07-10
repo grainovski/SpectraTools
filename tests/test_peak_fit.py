@@ -219,6 +219,119 @@ def test_fit_single_peak_with_poisson_noise():
     assert peak.fwhm == pytest.approx(4.0 * 2.3548, rel=0.15)
 
 
+def test_fit_independent_widths_recovers_different_sigmas():
+    x, y = _make_spectrum(
+        channels=200,
+        peaks=[(400.0, 95.0, 2.0), (300.0, 108.0, 5.0)],
+        slope=0.0, intercept=20.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(60.0, 75.0),
+        right_bg_region=(130.0, 145.0),
+        fit_region=(75.0, 130.0),
+        peak_positions=[95.0, 108.0],
+        link_widths=False,
+    )
+    assert result.link_widths is False
+    sigmas = {round(p.position): p.sigma for p in result.peaks}
+    assert sigmas[95] == pytest.approx(2.0, rel=0.2)
+    assert sigmas[108] == pytest.approx(5.0, rel=0.2)
+
+
+def test_fit_linked_widths_forces_equal_sigma_even_with_different_true_widths():
+    x, y = _make_spectrum(
+        channels=200,
+        peaks=[(400.0, 95.0, 2.0), (300.0, 108.0, 5.0)],
+        slope=0.0, intercept=20.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(60.0, 75.0),
+        right_bg_region=(130.0, 145.0),
+        fit_region=(75.0, 130.0),
+        peak_positions=[95.0, 108.0],
+        link_widths=True,
+    )
+    assert result.link_widths is True
+    assert result.peaks[0].sigma == result.peaks[1].sigma
+    assert result.peaks[0].fwhm == result.peaks[1].fwhm
+
+
+def test_fit_default_link_widths_is_true():
+    x, y = _make_spectrum(
+        channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0),
+        right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0),
+        peak_positions=[100.0],
+    )
+    assert result.link_widths is True
+
+
+def test_fit_without_left_tail_leaves_tail_fields_none():
+    x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0)
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0),
+        right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0),
+        peak_positions=[100.0],
+    )
+    assert result.tail_fraction is None
+    assert result.tail_beta is None
+
+
+def test_fit_with_left_tail_enabled_recovers_known_tail_parameters():
+    # Synthetic data WITH a real left tail baked in via the same
+    # hypermet_left_tail() the fitter itself uses, so this verifies
+    # fit_peaks() can recover known tail parameters, not just that the
+    # option runs without crashing.
+    x = np.arange(200, dtype=float)
+    true_r, true_beta = 0.1, 4.0
+    y = 20.0 + 500.0 * hypermet_left_tail(x, position=100.0, sigma=3.0, r=true_r, beta=true_beta)
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0),
+        right_bg_region=(115.0, 130.0),
+        fit_region=(80.0, 120.0),
+        peak_positions=[100.0],
+        enable_left_tail=True,
+    )
+    assert result.tail_fraction == pytest.approx(true_r, abs=0.05)
+    assert result.tail_beta == pytest.approx(true_beta, rel=0.3)
+    assert result.tail_fraction_err is not None
+    assert result.tail_beta_err is not None
+
+
+def test_fit_independent_widths_with_left_tail_both_enabled():
+    # Exercises the 4th (3n+2) parameter-count combination.
+    x = np.arange(200, dtype=float)
+    y = (
+        20.0
+        + 400.0 * hypermet_left_tail(x, position=95.0, sigma=2.0, r=0.1, beta=4.0)
+        + 300.0 * hypermet_left_tail(x, position=115.0, sigma=4.0, r=0.1, beta=4.0)
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(60.0, 75.0),
+        right_bg_region=(140.0, 155.0),
+        fit_region=(80.0, 130.0),
+        peak_positions=[95.0, 115.0],
+        link_widths=False,
+        enable_left_tail=True,
+    )
+    assert len(result.peaks) == 2
+    assert result.link_widths is False
+    assert result.tail_fraction is not None
+    sigmas = {round(p.position): p.sigma for p in result.peaks}
+    assert sigmas[95] == pytest.approx(2.0, rel=0.3)
+    assert sigmas[115] == pytest.approx(4.0, rel=0.3)
+
+
 def test_fit_rejects_no_peaks():
     x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0)
     with pytest.raises(FitError):
@@ -238,12 +351,17 @@ def test_fit_rejects_too_few_points_for_peak_count():
 
 
 def test_fit_raises_on_non_convergence():
-    # Three peaks requested at the exact same position start curve_fit with
-    # three identical parameter triplets, so their Jacobian columns are
-    # identical at every iteration (a perfectly singular Jacobian). MINPACK's
+    # Three peaks requested at the exact same position, each with its own
+    # independent sigma (link_widths=False), start curve_fit with three
+    # identical parameter triplets, so their Jacobian columns are identical
+    # at every iteration (a perfectly singular Jacobian). MINPACK's
     # Levenberg-Marquardt exhausts its default maxfev before ever breaking
     # that symmetry, so curve_fit raises RuntimeError, which fit_peaks must
-    # convert to FitError.
+    # convert to FitError. (With the default link_widths=True, the shared
+    # single sigma removes enough degrees of freedom from this degenerate
+    # setup that curve_fit actually settles onto a stationary point along
+    # the still-undetermined amplitude/position split, so this test needs
+    # link_widths=False to keep exercising the non-convergence path.)
     x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0)
     with pytest.raises(FitError):
         fit_peaks(
@@ -252,4 +370,5 @@ def test_fit_raises_on_non_convergence():
             right_bg_region=(160.0, 175.0),
             fit_region=(93.0, 107.0),
             peak_positions=[100.0, 100.0, 100.0],
+            link_widths=False,
         )

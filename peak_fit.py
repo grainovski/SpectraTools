@@ -97,28 +97,114 @@ def _compute_background(x, y, left_bg_region, right_bg_region):
     return slope, intercept
 
 
-def _gaussian_sum(x, *params):
-    result = np.zeros_like(x, dtype=float)
-    for i in range(0, len(params), 3):
-        amplitude, position, sigma = params[i], params[i + 1], params[i + 2]
-        result = result + amplitude * np.exp(-((x - position) ** 2) / (2 * sigma ** 2))
-    return result
+def _unpack_params(params, n_peaks, link_widths, enable_left_tail):
+    """Splits a flat curve_fit parameter array into
+    (amplitudes, positions, sigmas, tail_fraction, tail_beta). `sigmas`
+    is always length n_peaks (the shared value repeated if linked);
+    tail_fraction/tail_beta are None if enable_left_tail is False. This
+    is the single canonical parameter ordering shared by the model
+    function, the initial guess, the bounds, and result extraction --
+    changing the layout means changing it only here."""
+    idx = 0
+    amplitudes = []
+    positions = []
+    sigmas = []
+    for _ in range(n_peaks):
+        amplitudes.append(params[idx]); idx += 1
+        positions.append(params[idx]); idx += 1
+        if not link_widths:
+            sigmas.append(params[idx]); idx += 1
+    if link_widths:
+        shared_sigma = params[idx]; idx += 1
+        sigmas = [shared_sigma] * n_peaks
+    tail_fraction = None
+    tail_beta = None
+    if enable_left_tail:
+        tail_fraction = params[idx]; idx += 1
+        tail_beta = params[idx]; idx += 1
+    return amplitudes, positions, sigmas, tail_fraction, tail_beta
 
 
-def _initial_guess(x_fit, y_sub, fit_region, peak_positions):
+def _make_model(n_peaks, link_widths, enable_left_tail):
+    def model(x, *params):
+        amplitudes, positions, sigmas, tail_fraction, tail_beta = _unpack_params(
+            params, n_peaks, link_widths, enable_left_tail
+        )
+        result = np.zeros_like(x, dtype=float)
+        for amplitude, position, sigma in zip(amplitudes, positions, sigmas):
+            if enable_left_tail:
+                result = result + amplitude * hypermet_left_tail(
+                    x, position, sigma, tail_fraction, tail_beta
+                )
+            else:
+                result = result + amplitude * np.exp(-((x - position) ** 2) / (2 * sigma ** 2))
+        return result
+    return model
+
+
+def _initial_guess(x_fit, y_sub, fit_region, peak_positions, link_widths, enable_left_tail):
     lo, hi = fit_region
     region_width = hi - lo
     n_peaks = len(peak_positions)
     sigma0 = max(region_width / (4 * n_peaks), 1e-6)
+    if not link_widths and n_peaks > 1:
+        # With independent per-peak sigmas, a starting width this wide
+        # (derived from the whole fit region) makes neighboring peaks
+        # overlap heavily and lets curve_fit's unconstrained
+        # Levenberg-Marquardt solver settle into a spurious local
+        # minimum (e.g. a negative-amplitude "correction" peak) instead
+        # of recovering each peak's own width. Cap the guess at a
+        # quarter of the closest peak spacing so peaks start out
+        # reasonably well-separated; linked-width and single-peak fits
+        # aren't prone to this failure mode, so they keep the original
+        # region-based guess unchanged.
+        sorted_positions = sorted(peak_positions)
+        min_spacing = min(
+            b - a for a, b in zip(sorted_positions, sorted_positions[1:])
+        )
+        sigma0 = max(min(sigma0, min_spacing / 4), 1e-6)
+
     guess = []
     for pos in peak_positions:
         idx = int(np.argmin(np.abs(x_fit - pos)))
         amplitude0 = float(y_sub[idx])
-        guess.extend([amplitude0, float(pos), sigma0])
+        guess.append(amplitude0)
+        guess.append(float(pos))
+        if not link_widths:
+            guess.append(sigma0)
+    if link_widths:
+        guess.append(sigma0)
+    if enable_left_tail:
+        guess.append(0.05)
+        guess.append(max(sigma0, TAIL_BETA_MIN))
     return guess
 
 
-def fit_peaks(x, y, left_bg_region, right_bg_region, fit_region, peak_positions):
+def _bounds(n_peaks, link_widths, enable_left_tail):
+    """Only needed when enable_left_tail is True (to keep the tail
+    fraction genuinely small and the decay constant away from zero);
+    returns None otherwise so the no-tail fits keep using curve_fit's
+    default unconstrained method, unchanged from v1's behavior."""
+    if not enable_left_tail:
+        return None
+    lower = []
+    upper = []
+    for _ in range(n_peaks):
+        lower.append(-np.inf); upper.append(np.inf)  # amplitude
+        lower.append(-np.inf); upper.append(np.inf)  # position
+        if not link_widths:
+            lower.append(1e-6); upper.append(np.inf)  # sigma
+    if link_widths:
+        lower.append(1e-6); upper.append(np.inf)  # shared sigma
+    lower.append(0.0); upper.append(TAIL_FRACTION_MAX)  # tail_fraction
+    lower.append(TAIL_BETA_MIN); upper.append(np.inf)   # tail_beta
+    return (lower, upper)
+
+
+def fit_peaks(
+    x, y, left_bg_region, right_bg_region, fit_region, peak_positions,
+    link_widths=True, enable_left_tail=False,
+):
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
 
@@ -134,21 +220,33 @@ def fit_peaks(x, y, left_bg_region, right_bg_region, fit_region, peak_positions)
     if x_fit.size == 0:
         raise FitError(f"Fit region {fit_region} contains no data")
 
-    n_params = 3 * len(peak_positions)
+    n_peaks = len(peak_positions)
+    n_params = (
+        2 * n_peaks
+        + (1 if link_widths else n_peaks)
+        + (2 if enable_left_tail else 0)
+    )
     if x_fit.size < n_params:
         raise FitError(
             f"Fit region has {x_fit.size} data points, need at least "
-            f"{n_params} for {len(peak_positions)} peak(s)"
+            f"{n_params} for {n_peaks} peak(s)"
         )
 
     y_sub = y_fit - (slope * x_fit + intercept)
-    p0 = _initial_guess(x_fit, y_sub, fit_region, peak_positions)
+    p0 = _initial_guess(x_fit, y_sub, fit_region, peak_positions, link_widths, enable_left_tail)
     y_err = np.sqrt(np.maximum(y_fit, 1.0))
+    model = _make_model(n_peaks, link_widths, enable_left_tail)
+    bounds = _bounds(n_peaks, link_widths, enable_left_tail)
 
     try:
-        popt, pcov = curve_fit(
-            _gaussian_sum, x_fit, y_sub, p0=p0, sigma=y_err, absolute_sigma=True
-        )
+        if bounds is not None:
+            popt, pcov = curve_fit(
+                model, x_fit, y_sub, p0=p0, sigma=y_err, absolute_sigma=True, bounds=bounds
+            )
+        else:
+            popt, pcov = curve_fit(
+                model, x_fit, y_sub, p0=p0, sigma=y_err, absolute_sigma=True
+            )
     except (RuntimeError, ValueError) as exc:
         raise FitError(f"Fit did not converge: {exc}") from exc
 
@@ -156,12 +254,21 @@ def fit_peaks(x, y, left_bg_region, right_bg_region, fit_region, peak_positions)
         raise FitError("Fit produced a non-finite covariance matrix")
 
     perr = np.sqrt(np.diag(pcov))
+    amplitudes, positions, sigmas, tail_fraction, tail_beta = _unpack_params(
+        popt, n_peaks, link_widths, enable_left_tail
+    )
+    amplitude_errs, position_errs, sigma_errs, tail_fraction_err, tail_beta_err = _unpack_params(
+        perr, n_peaks, link_widths, enable_left_tail
+    )
 
     peaks = []
-    for i in range(len(peak_positions)):
-        amplitude, position, sigma = popt[3 * i], popt[3 * i + 1], popt[3 * i + 2]
-        amplitude_err, position_err, sigma_err = perr[3 * i], perr[3 * i + 1], perr[3 * i + 2]
-        sigma = abs(sigma)
+    for i in range(n_peaks):
+        amplitude = amplitudes[i]
+        position = positions[i]
+        sigma = abs(sigmas[i])
+        amplitude_err = amplitude_errs[i]
+        position_err = position_errs[i]
+        sigma_err = sigma_errs[i]
         fwhm = FWHM_FACTOR * sigma
         fwhm_err = FWHM_FACTOR * sigma_err
         area = amplitude * sigma * np.sqrt(2 * np.pi)
@@ -173,22 +280,20 @@ def fit_peaks(x, y, left_bg_region, right_bg_region, fit_region, peak_positions)
         area_err = abs(area) * np.sqrt(rel_err_sq)
         peaks.append(
             PeakResult(
-                position=float(position),
-                position_err=float(position_err),
-                fwhm=float(fwhm),
-                fwhm_err=float(fwhm_err),
-                area=float(area),
-                area_err=float(area_err),
-                amplitude=float(amplitude),
-                sigma=float(sigma),
+                position=float(position), position_err=float(position_err),
+                fwhm=float(fwhm), fwhm_err=float(fwhm_err),
+                area=float(area), area_err=float(area_err),
+                amplitude=float(amplitude), sigma=float(sigma),
             )
         )
 
     return FitResult(
-        left_bg_region=tuple(left_bg_region),
-        right_bg_region=tuple(right_bg_region),
-        fit_region=tuple(fit_region),
-        background_slope=float(slope),
-        background_intercept=float(intercept),
-        peaks=peaks,
+        left_bg_region=tuple(left_bg_region), right_bg_region=tuple(right_bg_region),
+        fit_region=tuple(fit_region), background_slope=float(slope),
+        background_intercept=float(intercept), peaks=peaks,
+        link_widths=link_widths,
+        tail_fraction=float(tail_fraction) if tail_fraction is not None else None,
+        tail_fraction_err=float(tail_fraction_err) if tail_fraction_err is not None else None,
+        tail_beta=float(tail_beta) if tail_beta is not None else None,
+        tail_beta_err=float(tail_beta_err) if tail_beta_err is not None else None,
     )
