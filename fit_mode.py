@@ -2,7 +2,9 @@ import time
 
 import numpy as np
 from matplotlib.backend_bases import _Mode
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QDockWidget, QListWidget, QListWidgetItem, QMenu, QToolBar
 
 from peak_fit import FitError, fit_peaks
 
@@ -175,6 +177,67 @@ class FitModeController:
             for peak in result.peaks:
                 axes.axvline(peak.position, color="red", linestyle=":", linewidth=1)
 
+    def build_results_panel(self):
+        mw = self.main_window
+        self.results_list = QListWidget()
+        self.results_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.results_list.customContextMenuRequested.connect(self._on_results_context_menu)
+
+        self.results_dock = QDockWidget("Fit Results", mw)
+        self.results_dock.setWidget(self.results_list)
+        mw.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.results_dock)
+
+        self.toggle_results_panel_action = QAction("Fit Results", mw)
+        self.toggle_results_panel_action.setCheckable(True)
+        self.toggle_results_panel_action.setToolTip("Show/hide fit results")
+        self.toggle_results_panel_action.toggled.connect(self.results_dock.setVisible)
+        self.results_dock.visibilityChanged.connect(
+            self.toggle_results_panel_action.setChecked
+        )
+        self.results_dock.setVisible(False)
+
+        results_tab_bar = QToolBar("Fit Results Tab", mw)
+        results_tab_bar.setMovable(False)
+        results_tab_bar.setFloatable(False)
+        results_tab_bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        results_tab_bar.addAction(self.toggle_results_panel_action)
+        mw.addToolBar(Qt.ToolBarArea.RightToolBarArea, results_tab_bar)
+
+    def update_results_list(self):
+        self.results_list.clear()
+        active = next((s for s in self.main_window.spectra if s.active), None)
+        if active is None:
+            return
+        for result in active.fits:
+            lines = [f"Fit region [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]"]
+            for i, peak in enumerate(result.peaks, start=1):
+                lines.append(
+                    f"  Peak {i}: pos={peak.position:.2f}±{peak.position_err:.2f}  "
+                    f"FWHM={peak.fwhm:.2f}±{peak.fwhm_err:.2f}  "
+                    f"area={peak.area:.1f}±{peak.area_err:.1f}"
+                )
+            self.results_list.addItem(QListWidgetItem("\n".join(lines)))
+
+    def _on_results_context_menu(self, position):
+        mw = self.main_window
+        item = self.results_list.itemAt(position)
+        menu = QMenu(mw)
+        remove_action = menu.addAction("Remove Fit") if item is not None else None
+        clear_action = menu.addAction("Clear All Fits")
+        chosen = menu.exec(self.results_list.viewport().mapToGlobal(position))
+        active = next((s for s in mw.spectra if s.active), None)
+        if active is None:
+            return
+        if item is not None and chosen == remove_action:
+            index = self.results_list.row(item)
+            del active.fits[index]
+            mw._plot_data()
+            self.update_results_list()
+        elif chosen == clear_action:
+            active.fits.clear()
+            mw._plot_data()
+            self.update_results_list()
+
     def run_fit(self):
         if not self.state.ready_to_fit():
             return
@@ -195,3 +258,4 @@ class FitModeController:
         self._clear_progress()
         self.main_window.fit_button.setEnabled(False)
         self.main_window._plot_data()
+        self.update_results_list()

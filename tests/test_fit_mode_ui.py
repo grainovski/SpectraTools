@@ -173,3 +173,69 @@ def test_plot_data_draws_committed_fit_overlay(qapp):
     # 1 peak marker = 4 lines.
     assert len(main_window.axes.patches) == 3
     assert len(main_window.axes.lines) == 4
+
+
+def _fit_result_with_one_peak():
+    return FitResult(
+        left_bg_region=(10.0, 20.0),
+        right_bg_region=(180.0, 190.0),
+        fit_region=(90.0, 110.0),
+        background_slope=0.0,
+        background_intercept=20.0,
+        peaks=[
+            PeakResult(
+                position=100.0, position_err=0.1,
+                fwhm=5.0, fwhm_err=0.2,
+                area=1000.0, area_err=50.0,
+                amplitude=200.0, sigma=2.0,
+            )
+        ],
+    )
+
+
+def test_results_panel_lists_committed_fit(qapp):
+    main_window = MainWindow()
+    y = np.full(200, 20, dtype=np.int64)
+    spectrum = LoadedSpectrum("synthetic.txt", y, "#1f77b4")
+    spectrum.active = True
+    spectrum.fits.append(_fit_result_with_one_peak())
+    main_window.spectra.append(spectrum)
+
+    main_window.fit_controller.update_results_list()
+
+    assert main_window.fit_controller.results_list.count() == 1
+    text = main_window.fit_controller.results_list.item(0).text()
+    assert "100.00" in text
+    assert "5.00" in text
+
+
+def test_results_panel_updates_when_active_spectrum_changes(qapp):
+    main_window = MainWindow()
+    y = np.full(200, 20, dtype=np.int64)
+    spectrum_a = LoadedSpectrum("a.txt", y, "#1f77b4")
+    spectrum_a.active = True
+    spectrum_a.fits.append(_fit_result_with_one_peak())
+    spectrum_b = LoadedSpectrum("b.txt", y, "#ff7f0e")
+    main_window.spectra.extend([spectrum_a, spectrum_b])
+    main_window.fit_controller.update_results_list()
+    assert main_window.fit_controller.results_list.count() == 1
+
+    main_window._on_active_toggled("b.txt", True)
+
+    assert main_window.fit_controller.results_list.count() == 0
+
+
+def test_clear_all_fits_empties_panel_and_spectrum(qapp):
+    main_window = MainWindow()
+    y = np.full(200, 20, dtype=np.int64)
+    spectrum = LoadedSpectrum("synthetic.txt", y, "#1f77b4")
+    spectrum.active = True
+    spectrum.fits.append(_fit_result_with_one_peak())
+    main_window.spectra.append(spectrum)
+    main_window.fit_controller.update_results_list()
+
+    spectrum.fits.clear()
+    main_window._plot_data()
+    main_window.fit_controller.update_results_list()
+
+    assert main_window.fit_controller.results_list.count() == 0

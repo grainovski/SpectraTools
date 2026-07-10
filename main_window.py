@@ -155,6 +155,7 @@ class MainWindow(QMainWindow):
 
         self.fit_controller = FitModeController(self)
         self._build_fit_mode_buttons()
+        self.fit_controller.build_results_panel()
         self.canvas.mpl_connect("button_press_event", self._on_canvas_press)
         self.canvas.mpl_connect("button_release_event", self._on_canvas_release)
         self._update_fit_mode_availability()
@@ -264,6 +265,7 @@ class MainWindow(QMainWindow):
         self.nav_toolbar.update()
         self.nav_toolbar.push_current()
         self._update_fit_mode_availability()
+        self.fit_controller.update_results_list()
 
     def _on_mouse_move(self, event):
         if time.monotonic() < self.fit_controller._status_message_until:
@@ -381,6 +383,7 @@ class MainWindow(QMainWindow):
         for spectrum in self.spectra:
             spectrum.active = spectrum.path == path
         self._update_fit_mode_availability()
+        self.fit_controller.update_results_list()
 
     def _on_spectrum_context_menu(self, position):
         item = self.spectrum_list.itemAt(position)
