@@ -11,6 +11,7 @@ class LoadedSpectrum:
         self.color = color
         self.visible = True
         self.active = False
+        self.fits = []
 
 
 def next_color(index):
