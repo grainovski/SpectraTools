@@ -156,8 +156,7 @@ class MainWindow(QMainWindow):
         self.fit_controller = FitModeController(self)
         self._build_fit_mode_buttons()
         self.fit_controller.build_results_panel()
-        self.canvas.mpl_connect("button_press_event", self._on_canvas_press)
-        self.canvas.mpl_connect("button_release_event", self._on_canvas_release)
+        self.canvas.mpl_connect("button_press_event", self._on_canvas_click)
         self._update_fit_mode_availability()
 
     def _build_menu(self):
@@ -426,10 +425,19 @@ class MainWindow(QMainWindow):
         self.fit_toolbar = QToolBar("Fit Peaks", self)
         self.fit_toolbar.setMovable(False)
 
-        self.fit_mode_action = QAction("Fit Peaks", self)
-        self.fit_mode_action.setCheckable(True)
-        self.fit_mode_action.toggled.connect(self.fit_controller.toggle)
-        self.fit_toolbar.addAction(self.fit_mode_action)
+        self.independent_widths_action = QAction("Independent widths", self)
+        self.independent_widths_action.setCheckable(True)
+        self.independent_widths_action.setToolTip(
+            "Fit each peak's width independently instead of sharing one FWHM"
+        )
+        self.fit_toolbar.addAction(self.independent_widths_action)
+
+        self.left_tail_action = QAction("Left tail", self)
+        self.left_tail_action.setCheckable(True)
+        self.left_tail_action.setToolTip(
+            "Allow a small low-channel tail contribution to each peak's shape"
+        )
+        self.fit_toolbar.addAction(self.left_tail_action)
 
         self.fit_button = QAction("Fit", self)
         self.fit_button.setEnabled(False)
@@ -437,28 +445,20 @@ class MainWindow(QMainWindow):
         self.fit_toolbar.addAction(self.fit_button)
 
         self.clear_fit_button = QAction("Clear", self)
-        self.clear_fit_button.setEnabled(False)
         self.clear_fit_button.triggered.connect(self.fit_controller.clear)
         self.fit_toolbar.addAction(self.clear_fit_button)
 
         self.addToolBar(self.fit_toolbar)
 
-    def _on_canvas_press(self, event):
-        self.fit_controller.on_press(event)
-
-    def _on_canvas_release(self, event):
-        self.fit_controller.on_release(event)
+    def _on_canvas_click(self, event):
+        self.fit_controller.on_click(event)
 
     def _update_fit_mode_availability(self):
         active = next((s for s in self.spectra if s.active), None)
         available = active is not None and active.visible
-        self.fit_mode_action.setEnabled(available)
-        if not available and self.fit_mode_action.isChecked():
-            self.fit_mode_action.setChecked(False)
+        self.fit_button.setEnabled(available and self.fit_controller.state.ready_to_fit())
 
     def _on_scroll(self, event):
-        if self.fit_controller.enabled:
-            return
         if event.inaxes != self.axes or event.xdata is None:
             return
         factor = (1 / ZOOM_FACTOR) if event.button == "up" else ZOOM_FACTOR

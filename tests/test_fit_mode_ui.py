@@ -1,8 +1,22 @@
 import numpy as np
+import pytest
 from matplotlib.backend_bases import MouseEvent
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QKeyEvent
+from PySide6.QtWidgets import QApplication
 
 from main_window import MainWindow
+from peak_fit import FitResult, PeakResult
 from spectrum import LoadedSpectrum
+
+_QT_KEY = {"b": Qt.Key.Key_B, "r": Qt.Key.Key_R, "p": Qt.Key.Key_P}
+
+
+def _click(main_window, xdata, ydata=10.0):
+    ax = main_window.axes
+    px, py = ax.transData.transform((xdata, ydata))
+    event = MouseEvent("button_press_event", main_window.canvas, px, py, button=1)
+    main_window.canvas.callbacks.process("button_press_event", event)
 
 
 def _dispatch(main_window, name, xdata, ydata=10.0):
@@ -12,13 +26,15 @@ def _dispatch(main_window, name, xdata, ydata=10.0):
     main_window.canvas.callbacks.process(name, event)
 
 
-def _drag(main_window, x_start, x_end, y=10.0):
-    _dispatch(main_window, "button_press_event", x_start, y)
-    _dispatch(main_window, "button_release_event", x_end, y)
-
-
-def _click(main_window, x, y=10.0):
-    _drag(main_window, x, x, y)
+def _held_key_click(main_window, key_char, xdata, ydata=10.0):
+    """Directly sets the controller's held-key state (bypassing real Qt
+    key events) then simulates a mouse click -- the fast, simple way
+    most tests exercise "given this key is held, what does a click do."
+    test_key_event_filter_tracks_held_key below separately verifies the
+    actual Qt event-filter wiring that sets this state in real usage."""
+    main_window.fit_controller._held_key = key_char
+    _click(main_window, xdata, ydata)
+    main_window.fit_controller._held_key = None
 
 
 def _make_active_spectrum(main_window):
@@ -33,30 +49,31 @@ def _make_active_spectrum(main_window):
     return spectrum
 
 
-def test_toggling_fit_mode_disables_nav_toolbar(qapp):
+def test_key_event_filter_tracks_held_key(qapp):
     main_window = MainWindow()
-    _make_active_spectrum(main_window)
+    canvas = main_window.canvas
 
-    assert main_window.nav_toolbar.isEnabled() is True
-    main_window.fit_mode_action.setChecked(True)
-    assert main_window.fit_controller.enabled is True
-    assert main_window.nav_toolbar.isEnabled() is False
+    press = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_B, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(canvas, press)
+    assert main_window.fit_controller._held_key == "b"
 
-    main_window.fit_mode_action.setChecked(False)
-    assert main_window.nav_toolbar.isEnabled() is True
+    release = QKeyEvent(QEvent.Type.KeyRelease, Qt.Key.Key_B, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(canvas, release)
+    assert main_window.fit_controller._held_key is None
 
 
 def test_full_fit_flow_commits_a_fit_result(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
 
-    main_window.fit_mode_action.setChecked(True)
-
-    _drag(main_window, 70, 85)    # left background region
-    _drag(main_window, 115, 130)  # right background region
-    _drag(main_window, 85, 115)   # fit region
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
     assert main_window.fit_button.isEnabled() is False
-    _click(main_window, 100)      # peak position
+    _held_key_click(main_window, "p", 100)
     assert main_window.fit_button.isEnabled() is True
 
     main_window.fit_controller.run_fit()
@@ -65,6 +82,74 @@ def test_full_fit_flow_commits_a_fit_result(qapp):
     result = spectrum.fits[0]
     assert len(result.peaks) == 1
     assert abs(result.peaks[0].position - 100.0) < 1.0
+
+
+def test_marking_order_is_free(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    # fit region and a peak marked before either background region
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    assert main_window.fit_button.isEnabled() is True
+
+    main_window.fit_controller.run_fit()
+    assert len(spectrum.fits) == 1
+
+
+def test_bg_region_ring_buffer_eviction_via_clicks(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    # pytest.approx does not recurse into a list of tuples (only flat
+    # sequences of numbers or a single tuple) -- compare each region
+    # individually to absorb the floating-point noise from the
+    # pixel-coordinate round-trip in _click/_held_key_click.
+    regions = main_window.fit_controller.state.bg_regions
+    assert len(regions) == 2
+    assert regions[0] == pytest.approx((70.0, 85.0))
+    assert regions[1] == pytest.approx((115.0, 130.0))
+
+    _held_key_click(main_window, "b", 150)
+    _held_key_click(main_window, "b", 160)
+    regions = main_window.fit_controller.state.bg_regions
+    assert len(regions) == 2
+    assert regions[0] == pytest.approx((115.0, 130.0))
+    assert regions[1] == pytest.approx((150.0, 160.0))
+
+
+def test_peak_click_toggle_adds_and_removes(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    assert main_window.fit_controller.state.peak_positions == [100.0]
+
+    _held_key_click(main_window, "p", 100)  # same spot -- removes it
+    assert main_window.fit_controller.state.peak_positions == []
+
+
+def test_peak_click_outside_fit_region_is_rejected_with_a_hint(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 150)
+
+    assert main_window.fit_controller.state.peak_positions == []
+    assert main_window.statusBar().currentMessage() != ""
 
 
 def test_plot_data_preserve_view_keeps_current_zoom(qapp):
@@ -78,18 +163,18 @@ def test_plot_data_preserve_view_keeps_current_zoom(qapp):
 
 
 def test_run_fit_preserves_the_current_zoom(qapp):
-    # A committed fit must not reset the view back to the full spectrum
-    # -- the user is typically zoomed in on the peak they just fit.
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
 
     main_window.axes.set_xlim(80, 120)
 
-    main_window.fit_mode_action.setChecked(True)
-    _drag(main_window, 81, 86)    # left background region
-    _drag(main_window, 114, 119)  # right background region
-    _drag(main_window, 90, 110)   # fit region
-    _click(main_window, 100)      # peak position
+    _held_key_click(main_window, "b", 81)
+    _held_key_click(main_window, "b", 86)
+    _held_key_click(main_window, "b", 114)
+    _held_key_click(main_window, "b", 119)
+    _held_key_click(main_window, "r", 90)
+    _held_key_click(main_window, "r", 110)
+    _held_key_click(main_window, "p", 100)
 
     main_window.fit_controller.run_fit()
 
@@ -101,27 +186,38 @@ def test_clear_discards_in_progress_marks_without_committing(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
 
-    main_window.fit_mode_action.setChecked(True)
-    _drag(main_window, 70, 85)
-    _drag(main_window, 115, 130)
-    _drag(main_window, 85, 115)
-    _click(main_window, 100)
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
 
     main_window.fit_controller.clear()
 
-    assert main_window.fit_controller.state.step == "left_bg"
+    assert main_window.fit_controller.state.bg_regions == []
     assert main_window.fit_button.isEnabled() is False
     assert len(spectrum.fits) == 0
 
 
-def test_fit_mode_disabled_when_active_spectrum_hidden(qapp):
+def test_fit_button_disabled_when_active_spectrum_hidden(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    assert main_window.fit_button.isEnabled() is True
 
     spectrum.visible = False
     main_window._update_fit_mode_availability()
 
-    assert main_window.fit_mode_action.isEnabled() is False
+    assert main_window.fit_button.isEnabled() is False
 
 
 def test_fit_failure_leaves_marks_intact_and_shows_message(qapp):
@@ -132,18 +228,28 @@ def test_fit_failure_leaves_marks_intact_and_shows_message(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
 
-    main_window.fit_mode_action.setChecked(True)
-    _drag(main_window, 70, 85)
-    _drag(main_window, 115, 130)
-    _drag(main_window, 99.5, 100.5)
-    _click(main_window, 100)
-    _click(main_window, 100)
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    # Zoom in before the r/p clicks so the two peak positions (0.8 data
+    # units apart) are comfortably more than PEAK_CLICK_PIXEL_PROXIMITY
+    # (8px) apart on screen -- otherwise, at the default full-spectrum
+    # zoom, the second p-click would land within proximity of the first
+    # and be treated as removing it instead of adding a second peak.
+    # Done after the b-clicks (at 70/85/115/130, outside this narrower
+    # view) so those clicks still land inside the axes' pixel bounding
+    # box under the wider default view.
+    main_window.axes.set_xlim(90, 110)
+    _held_key_click(main_window, "r", 99.5)
+    _held_key_click(main_window, "r", 100.5)
+    _held_key_click(main_window, "p", 99.6)
+    _held_key_click(main_window, "p", 100.4)
 
     main_window.fit_controller.run_fit()
 
     assert len(spectrum.fits) == 0
-    assert main_window.fit_controller.state.step == "marking_peaks"
-    assert main_window.fit_controller.state.peak_positions == [100.0, 100.0]
+    assert main_window.fit_controller.state.peak_positions == pytest.approx([99.6, 100.4])
     assert main_window.statusBar().currentMessage() != ""
 
 
@@ -151,25 +257,14 @@ def test_status_message_not_immediately_clobbered_by_mouse_move(qapp):
     main_window = MainWindow()
     _make_active_spectrum(main_window)
 
-    main_window.fit_mode_action.setChecked(True)
-    # Zero-width click while awaiting the first region drag (state is
-    # still STEP_LEFT_BG right after enabling fit mode) -- triggers the
-    # "Drag to select a region" hint via the zero-width-drag check in
-    # on_release.
-    _click(main_window, 100)
+    _held_key_click(main_window, "p", 100)  # no fit region yet -- rejected with a hint
 
     message_after_hint = main_window.statusBar().currentMessage()
     assert message_after_hint != ""
 
-    # Simulate a mouse-move immediately afterward, as would happen in real
-    # use -- the hint must survive this, not get instantly overwritten by
-    # the hover readout that _on_mouse_move normally shows.
     _dispatch(main_window, "motion_notify_event", 50)
 
     assert main_window.statusBar().currentMessage() == message_after_hint
-
-
-from peak_fit import FitResult, PeakResult
 
 
 def test_plot_data_draws_committed_fit_overlay(qapp):
@@ -198,9 +293,6 @@ def test_plot_data_draws_committed_fit_overlay(qapp):
 
     main_window._plot_data()
 
-    # 3 shaded spans (left bg, right bg, fit region) = 3 patches;
-    # spectrum data line + background dashed line + fitted curve +
-    # 1 peak marker = 4 lines.
     assert len(main_window.axes.patches) == 3
     assert len(main_window.axes.lines) == 4
 
@@ -272,24 +364,20 @@ def test_clear_all_fits_empties_panel_and_spectrum(qapp):
 
 
 def test_clear_progress_survives_an_intervening_full_replot(qapp):
-    # Reproduces a real crash: mark one region (creating an in-progress
-    # artist), then something else triggers a full axes.clear() (here,
-    # simulated directly -- in the real app this happens via the results
-    # panel's "Remove Fit"/"Clear All Fits" context menu calling
-    # _plot_data() while a fit is still mid-marking) before the
-    # in-progress fit is finished. Finishing it afterward (Clear, in
-    # this test) must not raise NotImplementedError.
+    # Reproduces a real crash: mark one background region (creating an
+    # in-progress artist), then something else triggers a full
+    # axes.clear() (in the real app: the results panel's "Remove
+    # Fit"/"Clear All Fits" context menu calling _plot_data() while a
+    # fit is still mid-marking) before the in-progress fit is finished.
+    # Finishing it afterward (Clear, here) must not raise.
     main_window = MainWindow()
     _make_active_spectrum(main_window)
 
-    main_window.fit_mode_action.setChecked(True)
-    _drag(main_window, 70, 85)  # marks the left background region
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
 
-    # Something unrelated triggers a full replot, invalidating the
-    # in-progress artist's _remove_method.
     main_window._plot_data()
 
-    # Must not raise.
     main_window.fit_controller.clear()
 
-    assert main_window.fit_controller.state.step == "left_bg"
+    assert main_window.fit_controller.state.bg_regions == []

@@ -1,12 +1,11 @@
 import time
 
 import numpy as np
-from matplotlib.backend_bases import _Mode
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QDockWidget, QListWidget, QListWidgetItem, QMenu, QToolBar
 
-from peak_fit import FitError, fit_peaks
+from peak_fit import FitError, fit_peaks, hypermet_left_tail
 
 BG_REGION_CAP = 2
 
@@ -87,41 +86,66 @@ class FitModeState:
         return (a, b) if a_mid <= b_mid else (b, a)
 
 
-class FitModeController:
-    """Qt/matplotlib-facing wrapper around FitModeState: owns the plot
-    artists for in-progress marking (committed-fit drawing and the
-    results panel are added on top of this in later tasks), and drives
-    fit_peaks() when the user clicks "Fit"."""
+PEAK_CLICK_PIXEL_PROXIMITY = 8
+
+_KEY_TO_MARK_TYPE = {
+    Qt.Key.Key_B: "b",
+    Qt.Key.Key_R: "r",
+    Qt.Key.Key_P: "p",
+}
+
+_MARK_TYPE_LABEL = {
+    "b": "background region",
+    "r": "fit region",
+    "p": "peak",
+}
+
+
+class FitModeController(QObject):
+    """Qt/matplotlib-facing wrapper around FitModeState: tracks which of
+    b/r/p is currently held via a Qt event filter on the canvas (not
+    matplotlib's own MouseEvent.key, which is documented as unreliable
+    if the canvas lacked focus when the key was pressed), owns the
+    in-progress marking artists, draws committed fits, and drives
+    fit_peaks() when the user clicks "Fit". There is no exclusive
+    "fit mode" -- marking is always available alongside normal
+    pan/zoom, since b/r/p+click never collides with a plain click-drag."""
 
     def __init__(self, main_window):
+        super().__init__()
         self.main_window = main_window
-        self.enabled = False
         self.state = FitModeState()
-        self._drag_start = None
+        self._held_key = None
         self._progress_artists = []
         self._status_message_until = 0.0
+
+        canvas = main_window.canvas
+        canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        canvas.installEventFilter(self)
+        canvas.mpl_connect("figure_enter_event", lambda event: canvas.setFocus())
+
+    def eventFilter(self, obj, event):
+        if obj is self.main_window.canvas:
+            if event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat():
+                mark_type = _KEY_TO_MARK_TYPE.get(event.key())
+                if mark_type is not None:
+                    self._held_key = mark_type
+                    self._show_status_message(
+                        f"Marking {_MARK_TYPE_LABEL[mark_type]}: click to place", 60000
+                    )
+            elif event.type() == QEvent.Type.KeyRelease and not event.isAutoRepeat():
+                mark_type = _KEY_TO_MARK_TYPE.get(event.key())
+                if mark_type is not None and self._held_key == mark_type:
+                    self._held_key = None
+        return False
 
     def _show_status_message(self, message, duration_ms):
         self.main_window.statusBar().showMessage(message, duration_ms)
         self._status_message_until = time.monotonic() + duration_ms / 1000.0
 
-    def toggle(self, enabled):
-        self.enabled = enabled
-        self._clear_progress()
-        mw = self.main_window
-        mw.nav_toolbar.setEnabled(not enabled)
-        if enabled:
-            if mw.nav_toolbar.mode == _Mode.PAN:
-                mw.nav_toolbar.pan()
-            elif mw.nav_toolbar.mode == _Mode.ZOOM:
-                mw.nav_toolbar.zoom()
-        mw.fit_button.setEnabled(False)
-        mw.clear_fit_button.setEnabled(enabled)
-        mw.canvas.draw_idle()
-
     def clear(self):
         self._clear_progress()
-        self.main_window.fit_button.setEnabled(False)
+        self.main_window._update_fit_mode_availability()
         self.main_window.canvas.draw_idle()
 
     def _clear_progress(self):
@@ -142,47 +166,81 @@ class FitModeController:
         self._progress_artists = []
         self.state.reset()
 
-    def on_press(self, event):
-        if not self.enabled or event.inaxes != self.main_window.axes or event.xdata is None:
+    def _redraw_progress(self):
+        """Clears and fully rebuilds every in-progress marking artist
+        from the current FitModeState fields. Trades a little redundant
+        redraw work (never more than a handful of artists) for avoiding
+        any incremental per-artist bookkeeping -- no risk of a stale
+        artist left behind by an evicted background region or a
+        removed peak."""
+        for artist in self._progress_artists:
+            try:
+                artist.remove()
+            except NotImplementedError:
+                pass
+        self._progress_artists = []
+
+        axes = self.main_window.axes
+        state = self.state
+
+        if state.pending_bg_click is not None:
+            self._progress_artists.append(
+                axes.axvline(state.pending_bg_click, color="gray", linestyle="--", linewidth=1)
+            )
+        for region in state.bg_regions:
+            self._progress_artists.append(axes.axvspan(*region, color="gray", alpha=0.15))
+
+        if state.pending_fit_click is not None:
+            self._progress_artists.append(
+                axes.axvline(state.pending_fit_click, color="tab:blue", linestyle="--", linewidth=1)
+            )
+        if state.fit_region is not None:
+            self._progress_artists.append(
+                axes.axvspan(*state.fit_region, color="tab:blue", alpha=0.1)
+            )
+
+        for x in state.peak_positions:
+            self._progress_artists.append(
+                axes.axvline(x, color="red", linestyle=":", linewidth=1)
+            )
+
+        self.main_window.canvas.draw_idle()
+
+    def _pixel_proximity_to_data(self, event):
+        """Converts the fixed PEAK_CLICK_PIXEL_PROXIMITY pixel threshold
+        into a data-coordinate distance at the current zoom level, so
+        the "close enough to hit an existing peak" tolerance stays
+        visually consistent regardless of zoom."""
+        axes = self.main_window.axes
+        inverse = axes.transData.inverted()
+        x0 = inverse.transform((event.x, event.y))[0]
+        x1 = inverse.transform((event.x + PEAK_CLICK_PIXEL_PROXIMITY, event.y))[0]
+        return abs(x1 - x0)
+
+    def on_click(self, event):
+        if event.inaxes != self.main_window.axes or event.xdata is None:
             return
         if event.button != 1:
             return
-        self._drag_start = event.xdata
-
-    def on_release(self, event):
-        if not self.enabled or self._drag_start is None:
-            return
-        if event.inaxes != self.main_window.axes or event.xdata is None:
-            self._drag_start = None
-            return
-        start = self._drag_start
-        end = event.xdata
-        self._drag_start = None
-
-        if self.state.step == STEP_MARKING_PEAKS:
-            added = self.state.add_peak(end)
-            if added:
-                artist = self.main_window.axes.axvline(
-                    end, color="red", linestyle=":", linewidth=1
-                )
-                self._progress_artists.append(artist)
-                self.main_window.canvas.draw_idle()
-            else:
-                self._show_status_message("Peak position must be inside the fit region", 3000)
-        else:
-            lo, hi = min(start, end), max(start, end)
-            if hi <= lo:
+        key = self._held_key
+        if key == "b":
+            self.state.add_bg_click(event.xdata)
+            self._redraw_progress()
+        elif key == "r":
+            self.state.add_fit_click(event.xdata)
+            self._redraw_progress()
+        elif key == "p":
+            proximity = self._pixel_proximity_to_data(event)
+            result = self.state.toggle_peak(event.xdata, proximity)
+            if result is None:
                 self._show_status_message(
-                    "Drag to select a region (a click alone is not enough)", 3000
+                    "Mark the fit region (hold R and click twice) before marking peaks", 3000
                 )
                 return
-            color = "tab:blue" if self.state.step == STEP_FIT_REGION else "gray"
-            artist = self.main_window.axes.axvspan(lo, hi, color=color, alpha=0.15)
-            self._progress_artists.append(artist)
-            self.state.add_region(lo, hi)
-            self.main_window.canvas.draw_idle()
-
-        self.main_window.fit_button.setEnabled(self.state.ready_to_fit())
+            self._redraw_progress()
+        else:
+            return
+        self.main_window._update_fit_mode_availability()
 
     def draw_committed_fits(self, spectrum):
         axes = self.main_window.axes
@@ -204,9 +262,15 @@ class FitModeController:
             x_dense = np.linspace(lo, hi, 200)
             total = result.background_slope * x_dense + result.background_intercept
             for peak in result.peaks:
-                total = total + peak.amplitude * np.exp(
-                    -((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2)
-                )
+                if result.tail_fraction is not None:
+                    total = total + peak.amplitude * hypermet_left_tail(
+                        x_dense, peak.position, peak.sigma,
+                        result.tail_fraction, result.tail_beta,
+                    )
+                else:
+                    total = total + peak.amplitude * np.exp(
+                        -((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2)
+                    )
             axes.plot(x_dense, total, color="red", linewidth=1.5)
 
             for peak in result.peaks:
@@ -251,7 +315,16 @@ class FitModeController:
         if active is None:
             return
         for result in active.fits:
-            lines = [f"Fit region [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]"]
+            header = f"Fit region [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]"
+            if not result.link_widths:
+                header += "  (independent widths)"
+            if result.tail_fraction is not None:
+                header += (
+                    f"  (left tail: r={result.tail_fraction:.2f}"
+                    f"±{result.tail_fraction_err:.2f}, "
+                    f"β={result.tail_beta:.1f}±{result.tail_beta_err:.1f})"
+                )
+            lines = [header]
             for i, peak in enumerate(result.peaks, start=1):
                 lines.append(
                     f"  Peak {i}: pos={peak.position:.2f}±{peak.position_err:.2f}  "
@@ -287,14 +360,16 @@ class FitModeController:
         left, right = self.state.ordered_bg_regions()
         x = np.arange(len(active.data), dtype=float)
         y = active.data
+        link_widths = not self.main_window.independent_widths_action.isChecked()
+        enable_left_tail = self.main_window.left_tail_action.isChecked()
         try:
             result = fit_peaks(
-                x, y, left, right, self.state.fit_region, list(self.state.peak_positions)
+                x, y, left, right, self.state.fit_region, list(self.state.peak_positions),
+                link_widths=link_widths, enable_left_tail=enable_left_tail,
             )
         except FitError as exc:
             self._show_status_message(f"Fit failed: {exc}", 5000)
             return
         active.fits.append(result)
         self._clear_progress()
-        self.main_window.fit_button.setEnabled(False)
         self.main_window._plot_data(preserve_view=True)
