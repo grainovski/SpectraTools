@@ -6,7 +6,7 @@ from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication
 
 from main_window import MainWindow
-from peak_fit import FitResult, PeakResult
+from peak_fit import FitResult, PeakResult, hypermet_left_tail
 from spectrum import LoadedSpectrum
 
 _QT_KEY = {"b": Qt.Key.Key_B, "r": Qt.Key.Key_R, "p": Qt.Key.Key_P}
@@ -426,32 +426,49 @@ def test_plot_data_draws_committed_fit_overlay_with_left_tail(qapp):
     y = np.full(200, 20, dtype=np.int64)
     spectrum = LoadedSpectrum("synthetic.txt", y, "#1f77b4")
     spectrum.active = True
-    spectrum.fits.append(
-        FitResult(
-            left_bg_region=(10.0, 20.0),
-            right_bg_region=(180.0, 190.0),
-            fit_region=(90.0, 110.0),
-            background_slope=0.0,
-            background_intercept=20.0,
-            peaks=[
-                PeakResult(
-                    position=100.0, position_err=0.1,
-                    fwhm=5.0, fwhm_err=0.2,
-                    area=1000.0, area_err=50.0,
-                    amplitude=200.0, sigma=2.0,
-                )
-            ],
-            link_widths=True,
-            tail_fraction=0.1, tail_fraction_err=0.02,
-            tail_beta=3.0, tail_beta_err=0.5,
-        )
+    fit_result = FitResult(
+        left_bg_region=(10.0, 20.0),
+        right_bg_region=(180.0, 190.0),
+        fit_region=(90.0, 110.0),
+        background_slope=0.0,
+        background_intercept=20.0,
+        peaks=[
+            PeakResult(
+                position=100.0, position_err=0.1,
+                fwhm=5.0, fwhm_err=0.2,
+                area=1000.0, area_err=50.0,
+                amplitude=200.0, sigma=2.0,
+            )
+        ],
+        link_widths=True,
+        tail_fraction=0.1, tail_fraction_err=0.02,
+        tail_beta=3.0, tail_beta_err=0.5,
     )
+    spectrum.fits.append(fit_result)
     main_window.spectra.append(spectrum)
 
     main_window._plot_data()  # must not raise
 
     assert len(main_window.axes.patches) == 3
     assert len(main_window.axes.lines) == 4
+
+    # The drawn curve must reflect the tail-aware formula, not a plain
+    # Gaussian -- otherwise this test would pass even if the
+    # tail_fraction branch in draw_committed_fits were broken/skipped.
+    # Line order from draw_committed_fits: [0] spectrum step line,
+    # [1] background dashed line, [2] total fit curve, [3] peak-position
+    # axvline (one per peak) -- the curve is second-to-last, not last.
+    drawn_curve = main_window.axes.lines[-2].get_ydata()
+    x_dense = np.linspace(90.0, 110.0, 200)
+    expected_curve = 20.0 + fit_result.peaks[0].amplitude * hypermet_left_tail(
+        x_dense, fit_result.peaks[0].position, fit_result.peaks[0].sigma,
+        fit_result.tail_fraction, fit_result.tail_beta,
+    )
+    plain_gaussian_curve = 20.0 + fit_result.peaks[0].amplitude * np.exp(
+        -((x_dense - fit_result.peaks[0].position) ** 2) / (2 * fit_result.peaks[0].sigma ** 2)
+    )
+    np.testing.assert_allclose(drawn_curve, expected_curve, rtol=1e-9)
+    assert not np.allclose(drawn_curve, plain_gaussian_curve, rtol=1e-3)
 
 
 def test_results_panel_shows_tail_and_width_link_info(qapp):
