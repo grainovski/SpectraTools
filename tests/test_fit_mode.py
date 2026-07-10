@@ -1,5 +1,3 @@
-import pytest
-
 from fit_mode import BG_REGION_CAP, FitModeState
 
 
@@ -141,3 +139,16 @@ def test_ordered_bg_regions_regardless_of_marking_order():
 
 def test_bg_region_cap_is_two():
     assert BG_REGION_CAP == 2
+
+
+def test_pending_clicks_are_independent_across_bg_fit_and_peak():
+    state = FitModeState()
+    state.add_bg_click(70)          # pending bg click, not yet a region
+    state.add_fit_click(85)
+    state.add_fit_click(115)        # completes fit region
+    state.toggle_peak(100.0, proximity=1.0)  # adds a peak
+    state.add_bg_click(85)          # completes the bg pair from earlier
+
+    assert state.bg_regions == [(70, 85)]
+    assert state.fit_region == (85, 115)
+    assert state.peak_positions == [100.0]
