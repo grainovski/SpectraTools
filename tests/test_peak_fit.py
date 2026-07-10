@@ -68,6 +68,51 @@ def test_fit_result_holds_expected_fields():
     assert result.peaks == [peak]
 
 
+def test_fit_result_new_fields_have_sensible_defaults():
+    peak = PeakResult(
+        position=100.0, position_err=0.1,
+        fwhm=5.0, fwhm_err=0.2,
+        area=1000.0, area_err=50.0,
+        amplitude=200.0, sigma=2.0,
+    )
+    result = FitResult(
+        left_bg_region=(10.0, 20.0),
+        right_bg_region=(180.0, 190.0),
+        fit_region=(90.0, 110.0),
+        background_slope=0.0,
+        background_intercept=20.0,
+        peaks=[peak],
+    )
+    assert result.link_widths is True
+    assert result.tail_fraction is None
+    assert result.tail_fraction_err is None
+    assert result.tail_beta is None
+    assert result.tail_beta_err is None
+
+
+def test_fit_result_accepts_explicit_tail_fields():
+    peak = PeakResult(
+        position=100.0, position_err=0.1,
+        fwhm=5.0, fwhm_err=0.2,
+        area=1000.0, area_err=50.0,
+        amplitude=200.0, sigma=2.0,
+    )
+    result = FitResult(
+        left_bg_region=(10.0, 20.0),
+        right_bg_region=(180.0, 190.0),
+        fit_region=(90.0, 110.0),
+        background_slope=0.0,
+        background_intercept=20.0,
+        peaks=[peak],
+        link_widths=False,
+        tail_fraction=0.1, tail_fraction_err=0.02,
+        tail_beta=3.0, tail_beta_err=0.5,
+    )
+    assert result.link_widths is False
+    assert result.tail_fraction == 0.1
+    assert result.tail_beta == 3.0
+
+
 def test_fit_error_is_an_exception():
     assert issubclass(FitError, Exception)
 

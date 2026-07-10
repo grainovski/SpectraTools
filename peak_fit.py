@@ -72,6 +72,11 @@ class FitResult:
     background_slope: float
     background_intercept: float
     peaks: list
+    link_widths: bool = True
+    tail_fraction: float = None
+    tail_fraction_err: float = None
+    tail_beta: float = None
+    tail_beta_err: float = None
 
 
 def _region_centroid(x, y, region):
