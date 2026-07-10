@@ -157,3 +157,21 @@ def test_fit_rejects_too_few_points_for_peak_count():
     x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0)
     with pytest.raises(FitError):
         fit_peaks(x, y, (70.0, 85.0), (115.0, 130.0), (99.5, 100.5), [100.0, 101.0])
+
+
+def test_fit_raises_on_non_convergence():
+    # Three peaks requested at the exact same position start curve_fit with
+    # three identical parameter triplets, so their Jacobian columns are
+    # identical at every iteration (a perfectly singular Jacobian). MINPACK's
+    # Levenberg-Marquardt exhausts its default maxfev before ever breaking
+    # that symmetry, so curve_fit raises RuntimeError, which fit_peaks must
+    # convert to FitError.
+    x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0)
+    with pytest.raises(FitError):
+        fit_peaks(
+            x, y,
+            left_bg_region=(20.0, 35.0),
+            right_bg_region=(160.0, 175.0),
+            fit_region=(93.0, 107.0),
+            peak_positions=[100.0, 100.0, 100.0],
+        )

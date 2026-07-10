@@ -102,7 +102,7 @@ def fit_peaks(x, y, left_bg_region, right_bg_region, fit_region, peak_positions)
         popt, pcov = curve_fit(
             _gaussian_sum, x_fit, y_sub, p0=p0, sigma=y_err, absolute_sigma=True
         )
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         raise FitError(f"Fit did not converge: {exc}") from exc
 
     if pcov is None or not np.all(np.isfinite(pcov)):
