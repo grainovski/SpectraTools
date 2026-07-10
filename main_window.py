@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from fit_mode import FitModeController
 from histogram_io import ParseError, load_histogram
 from settings import Settings
 from spe_io import load_spe
@@ -151,6 +152,12 @@ class MainWindow(QMainWindow):
 
         self._build_zoom_buttons()
 
+        self.fit_controller = FitModeController(self)
+        self._build_fit_mode_buttons()
+        self.canvas.mpl_connect("button_press_event", self._on_canvas_press)
+        self.canvas.mpl_connect("button_release_event", self._on_canvas_release)
+        self._update_fit_mode_availability()
+
     def _build_menu(self):
         file_menu = self.menuBar().addMenu("&File")
 
@@ -254,6 +261,7 @@ class MainWindow(QMainWindow):
         # as the new "home" baseline.
         self.nav_toolbar.update()
         self.nav_toolbar.push_current()
+        self._update_fit_mode_availability()
 
     def _on_mouse_move(self, event):
         visible = [s for s in self.spectra if s.visible]
@@ -368,6 +376,7 @@ class MainWindow(QMainWindow):
             return
         for spectrum in self.spectra:
             spectrum.active = spectrum.path == path
+        self._update_fit_mode_availability()
 
     def _on_spectrum_context_menu(self, position):
         item = self.spectrum_list.itemAt(position)
@@ -400,7 +409,43 @@ class MainWindow(QMainWindow):
         full_spectrum_action.triggered.connect(self._show_full_spectrum)
         self.nav_toolbar.addAction(full_spectrum_action)
 
+    def _build_fit_mode_buttons(self):
+        self.fit_toolbar = QToolBar("Fit Peaks", self)
+        self.fit_toolbar.setMovable(False)
+
+        self.fit_mode_action = QAction("Fit Peaks", self)
+        self.fit_mode_action.setCheckable(True)
+        self.fit_mode_action.toggled.connect(self.fit_controller.toggle)
+        self.fit_toolbar.addAction(self.fit_mode_action)
+
+        self.fit_button = QAction("Fit", self)
+        self.fit_button.setEnabled(False)
+        self.fit_button.triggered.connect(self.fit_controller.run_fit)
+        self.fit_toolbar.addAction(self.fit_button)
+
+        self.clear_fit_button = QAction("Clear", self)
+        self.clear_fit_button.setEnabled(False)
+        self.clear_fit_button.triggered.connect(self.fit_controller.clear)
+        self.fit_toolbar.addAction(self.clear_fit_button)
+
+        self.addToolBar(self.fit_toolbar)
+
+    def _on_canvas_press(self, event):
+        self.fit_controller.on_press(event)
+
+    def _on_canvas_release(self, event):
+        self.fit_controller.on_release(event)
+
+    def _update_fit_mode_availability(self):
+        active = next((s for s in self.spectra if s.active), None)
+        available = active is not None and active.visible
+        self.fit_mode_action.setEnabled(available)
+        if not available and self.fit_mode_action.isChecked():
+            self.fit_mode_action.setChecked(False)
+
     def _on_scroll(self, event):
+        if self.fit_controller.enabled:
+            return
         if event.inaxes != self.axes or event.xdata is None:
             return
         factor = (1 / ZOOM_FACTOR) if event.button == "up" else ZOOM_FACTOR
