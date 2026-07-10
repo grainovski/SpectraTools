@@ -67,3 +67,93 @@ def test_compute_background_rejects_identical_mean_x():
     y = np.full(200, 15.0)
     with pytest.raises(FitError):
         _compute_background(x, y, (10.0, 20.0), (10.0, 20.0))
+
+
+from peak_fit import fit_peaks
+
+
+def _make_spectrum(channels, peaks, slope, intercept, noise_seed=None):
+    x = np.arange(channels, dtype=float)
+    y = slope * x + intercept
+    for amplitude, position, sigma in peaks:
+        y = y + amplitude * np.exp(-((x - position) ** 2) / (2 * sigma ** 2))
+    if noise_seed is not None:
+        rng = np.random.default_rng(noise_seed)
+        y = rng.poisson(np.maximum(y, 0)).astype(float)
+    return x, y
+
+
+def test_fit_single_peak_no_noise():
+    x, y = _make_spectrum(
+        channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0),
+        right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0),
+        peak_positions=[100.0],
+    )
+    assert len(result.peaks) == 1
+    peak = result.peaks[0]
+    assert peak.position == pytest.approx(100.0, abs=0.5)
+    assert peak.amplitude == pytest.approx(500.0, rel=0.05)
+    assert peak.sigma == pytest.approx(3.0, rel=0.1)
+    assert peak.fwhm == pytest.approx(3.0 * 2.3548, rel=0.1)
+    assert peak.area == pytest.approx(500.0 * 3.0 * np.sqrt(2 * np.pi), rel=0.1)
+    assert result.background_slope == pytest.approx(0.0, abs=0.5)
+    assert result.background_intercept == pytest.approx(20.0, abs=2.0)
+
+
+def test_fit_multiplet_two_peaks_no_noise():
+    x, y = _make_spectrum(
+        channels=200,
+        peaks=[(400.0, 95.0, 3.0), (300.0, 108.0, 3.0)],
+        slope=0.1, intercept=10.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(60.0, 75.0),
+        right_bg_region=(130.0, 145.0),
+        fit_region=(75.0, 130.0),
+        peak_positions=[95.0, 108.0],
+    )
+    assert len(result.peaks) == 2
+    positions = sorted(p.position for p in result.peaks)
+    assert positions[0] == pytest.approx(95.0, abs=1.0)
+    assert positions[1] == pytest.approx(108.0, abs=1.0)
+
+
+def test_fit_single_peak_with_poisson_noise():
+    x, y = _make_spectrum(
+        channels=200, peaks=[(2000.0, 100.0, 4.0)], slope=0.0, intercept=50.0,
+        noise_seed=42,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0),
+        right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0),
+        peak_positions=[100.0],
+    )
+    peak = result.peaks[0]
+    assert peak.position == pytest.approx(100.0, abs=1.0)
+    assert peak.fwhm == pytest.approx(4.0 * 2.3548, rel=0.15)
+
+
+def test_fit_rejects_no_peaks():
+    x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0)
+    with pytest.raises(FitError):
+        fit_peaks(x, y, (70.0, 85.0), (115.0, 130.0), (85.0, 115.0), [])
+
+
+def test_fit_rejects_empty_fit_region():
+    x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0)
+    with pytest.raises(FitError):
+        fit_peaks(x, y, (70.0, 85.0), (115.0, 130.0), (500.0, 501.0), [100.0])
+
+
+def test_fit_rejects_too_few_points_for_peak_count():
+    x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0)
+    with pytest.raises(FitError):
+        fit_peaks(x, y, (70.0, 85.0), (115.0, 130.0), (99.5, 100.5), [100.0, 101.0])
