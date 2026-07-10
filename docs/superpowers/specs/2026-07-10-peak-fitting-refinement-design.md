@@ -106,7 +106,7 @@ y = sigma / (β·√2)
 two new **shared** free parameters across all peaks in the region.
 `r` is bounded to `[0, 0.3]` (keeping the contribution genuinely
 "small," per the request that motivated this) and `β` is constrained
-positive (`β > 1e-6`) — verified numerically during design that a
+positive (`β ≥ 0.1`) — verified numerically during design that a
 positive `β` with this exact sign convention produces a tail biased
 toward *lower* channels (the left side), not the right: evaluating the
 tail term at equal distances on either side of a peak center (σ=3,

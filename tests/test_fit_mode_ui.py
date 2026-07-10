@@ -267,6 +267,32 @@ def test_status_message_not_immediately_clobbered_by_mouse_move(qapp):
     assert main_window.statusBar().currentMessage() == message_after_hint
 
 
+def test_status_suppression_clears_on_key_release(qapp):
+    main_window = MainWindow()
+    canvas = main_window.canvas
+    _make_active_spectrum(main_window)
+
+    press = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_B, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(canvas, press)
+
+    hint_message = main_window.statusBar().currentMessage()
+    assert hint_message != ""
+
+    # While "b" is still held, the hover readout must stay suppressed --
+    # the status bar should still show the hint, unchanged.
+    _dispatch(main_window, "motion_notify_event", 50)
+    assert main_window.statusBar().currentMessage() == hint_message
+
+    release = QKeyEvent(QEvent.Type.KeyRelease, Qt.Key.Key_B, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(canvas, release)
+
+    # Once "b" is released, the suppression window must end immediately
+    # (not linger for the rest of the 60s hint duration) so the next
+    # mouse move produces a live channel/counts readout again.
+    _dispatch(main_window, "motion_notify_event", 50)
+    assert main_window.statusBar().currentMessage() != hint_message
+
+
 def test_plot_data_draws_committed_fit_overlay(qapp):
     main_window = MainWindow()
     y = np.full(200, 20, dtype=np.int64)
@@ -503,3 +529,4 @@ def test_results_panel_shows_tail_and_width_link_info(qapp):
     text = main_window.fit_controller.results_list.item(0).text()
     assert "independent widths" in text
     assert "r=0.10" in text
+    assert "volume excludes tail" in text

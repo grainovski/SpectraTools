@@ -281,6 +281,10 @@ def fit_peaks(
         sigma_err = sigma_errs[i]
         fwhm = FWHM_FACTOR * sigma
         fwhm_err = FWHM_FACTOR * sigma_err
+        # This is the analytic integral of the plain Gaussian core only.
+        # When enable_left_tail is True, the fitted shape also carries a
+        # tail term (see hypermet_left_tail) whose own contribution to the
+        # true integral is not included here -- a known approximation.
         area = amplitude * sigma * np.sqrt(2 * np.pi)
         rel_err_sq = 0.0
         if amplitude != 0:

@@ -137,6 +137,12 @@ class FitModeController(QObject):
                 mark_type = _KEY_TO_MARK_TYPE.get(event.key())
                 if mark_type is not None and self._held_key == mark_type:
                     self._held_key = None
+                    # The "Marking ...: click to place" hint above is shown
+                    # with a 60s duration so it survives however long the
+                    # key is held -- but that also means the mouse-hover
+                    # readout stays suppressed for up to 60s after release
+                    # unless we explicitly end the suppression window here.
+                    self._status_message_until = 0.0
         return False
 
     def _show_status_message(self, message, duration_ms):
@@ -322,7 +328,8 @@ class FitModeController(QObject):
                 header += (
                     f"  (left tail: r={result.tail_fraction:.2f}"
                     f"±{result.tail_fraction_err:.2f}, "
-                    f"β={result.tail_beta:.1f}±{result.tail_beta_err:.1f})"
+                    f"β={result.tail_beta:.1f}±{result.tail_beta_err:.1f}, "
+                    f"volume excludes tail)"
                 )
             lines = [header]
             for i, peak in enumerate(result.peaks, start=1):
