@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 from matplotlib.backend_bases import _Mode
 from PySide6.QtGui import QAction
@@ -76,6 +78,11 @@ class FitModeController:
         self.state = FitModeState()
         self._drag_start = None
         self._progress_artists = []
+        self._status_message_until = 0.0
+
+    def _show_status_message(self, message, duration_ms):
+        self.main_window.statusBar().showMessage(message, duration_ms)
+        self._status_message_until = time.monotonic() + duration_ms / 1000.0
 
     def toggle(self, enabled):
         self.enabled = enabled
@@ -128,13 +135,11 @@ class FitModeController:
                 self._progress_artists.append(artist)
                 self.main_window.canvas.draw_idle()
             else:
-                self.main_window.statusBar().showMessage(
-                    "Peak position must be inside the fit region", 3000
-                )
+                self._show_status_message("Peak position must be inside the fit region", 3000)
         else:
             lo, hi = min(start, end), max(start, end)
             if hi <= lo:
-                self.main_window.statusBar().showMessage(
+                self._show_status_message(
                     "Drag to select a region (a click alone is not enough)", 3000
                 )
                 return
@@ -160,7 +165,7 @@ class FitModeController:
                 x, y, left, right, self.state.fit_region, list(self.state.peak_positions)
             )
         except FitError as exc:
-            self.main_window.statusBar().showMessage(f"Fit failed: {exc}", 5000)
+            self._show_status_message(f"Fit failed: {exc}", 5000)
             return
         active.fits.append(result)
         self._clear_progress()

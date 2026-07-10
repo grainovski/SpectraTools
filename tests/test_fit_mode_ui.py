@@ -115,3 +115,25 @@ def test_fit_failure_leaves_marks_intact_and_shows_message(qapp):
     assert main_window.fit_controller.state.step == "marking_peaks"
     assert main_window.fit_controller.state.peak_positions == [100.0, 100.0]
     assert main_window.statusBar().currentMessage() != ""
+
+
+def test_status_message_not_immediately_clobbered_by_mouse_move(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    main_window.fit_mode_action.setChecked(True)
+    # Zero-width click while awaiting the first region drag (state is
+    # still STEP_LEFT_BG right after enabling fit mode) -- triggers the
+    # "Drag to select a region" hint via the zero-width-drag check in
+    # on_release.
+    _click(main_window, 100)
+
+    message_after_hint = main_window.statusBar().currentMessage()
+    assert message_after_hint != ""
+
+    # Simulate a mouse-move immediately afterward, as would happen in real
+    # use -- the hint must survive this, not get instantly overwritten by
+    # the hover readout that _on_mouse_move normally shows.
+    _dispatch(main_window, "motion_notify_event", 50)
+
+    assert main_window.statusBar().currentMessage() == message_after_hint

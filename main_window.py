@@ -1,4 +1,5 @@
 import os
+import time
 
 import matplotlib
 
@@ -264,6 +265,8 @@ class MainWindow(QMainWindow):
         self._update_fit_mode_availability()
 
     def _on_mouse_move(self, event):
+        if time.monotonic() < self.fit_controller._status_message_until:
+            return
         visible = [s for s in self.spectra if s.visible]
         if not visible or event.inaxes != self.axes or event.xdata is None:
             self.statusBar().clearMessage()
