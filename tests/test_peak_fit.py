@@ -1,4 +1,7 @@
-from peak_fit import FitError, FitResult, PeakResult
+import numpy as np
+import pytest
+
+from peak_fit import FitError, FitResult, PeakResult, _compute_background
 
 
 def test_peak_result_holds_expected_fields():
@@ -34,12 +37,6 @@ def test_fit_result_holds_expected_fields():
 
 def test_fit_error_is_an_exception():
     assert issubclass(FitError, Exception)
-
-
-import numpy as np
-import pytest
-
-from peak_fit import _compute_background
 
 
 def test_compute_background_flat():
