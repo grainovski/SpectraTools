@@ -110,9 +110,9 @@ positive (`β > 1e-6`) — verified numerically during design that a
 positive `β` with this exact sign convention produces a tail biased
 toward *lower* channels (the left side), not the right: evaluating the
 tail term at equal distances on either side of a peak center (σ=3,
-β=5) gives roughly 45× more contribution on the left (x=−10) than the
-right (x=+10), matching the physical low-energy-tailing behavior this
-feature is for.
+β=5, r=0.1) gives roughly 14.7× more contribution on the left (x=−10)
+than the right (x=+10), matching the physical low-energy-tailing
+behavior this feature is for.
 
 **All four combinations** of the two options (linked/independent
 width × tail on/off) are valid and must be supported: parameter counts
