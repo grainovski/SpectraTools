@@ -151,6 +151,30 @@ class FitModeController:
 
         self.main_window.fit_button.setEnabled(self.state.ready_to_fit())
 
+    def draw_committed_fits(self, spectrum):
+        axes = self.main_window.axes
+        for result in spectrum.fits:
+            axes.axvspan(*result.left_bg_region, color="gray", alpha=0.15)
+            axes.axvspan(*result.right_bg_region, color="gray", alpha=0.15)
+            axes.axvspan(*result.fit_region, color="tab:blue", alpha=0.1)
+
+            lo, hi = result.fit_region
+            background_lo = result.background_slope * lo + result.background_intercept
+            background_hi = result.background_slope * hi + result.background_intercept
+            axes.plot([lo, hi], [background_lo, background_hi], color="black",
+                       linestyle="--", linewidth=1)
+
+            x_dense = np.linspace(lo, hi, 200)
+            total = result.background_slope * x_dense + result.background_intercept
+            for peak in result.peaks:
+                total = total + peak.amplitude * np.exp(
+                    -((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2)
+                )
+            axes.plot(x_dense, total, color="red", linewidth=1.5)
+
+            for peak in result.peaks:
+                axes.axvline(peak.position, color="red", linestyle=":", linewidth=1)
+
     def run_fit(self):
         if not self.state.ready_to_fit():
             return

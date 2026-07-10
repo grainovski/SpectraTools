@@ -137,3 +137,39 @@ def test_status_message_not_immediately_clobbered_by_mouse_move(qapp):
     _dispatch(main_window, "motion_notify_event", 50)
 
     assert main_window.statusBar().currentMessage() == message_after_hint
+
+
+from peak_fit import FitResult, PeakResult
+
+
+def test_plot_data_draws_committed_fit_overlay(qapp):
+    main_window = MainWindow()
+    y = np.full(200, 20, dtype=np.int64)
+    spectrum = LoadedSpectrum("synthetic.txt", y, "#1f77b4")
+    spectrum.active = True
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(10.0, 20.0),
+            right_bg_region=(180.0, 190.0),
+            fit_region=(90.0, 110.0),
+            background_slope=0.0,
+            background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1,
+                    fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0,
+                    amplitude=200.0, sigma=2.0,
+                )
+            ],
+        )
+    )
+    main_window.spectra.append(spectrum)
+
+    main_window._plot_data()
+
+    # 3 shaded spans (left bg, right bg, fit region) = 3 patches;
+    # spectrum data line + background dashed line + fitted curve +
+    # 1 peak marker = 4 lines.
+    assert len(main_window.axes.patches) == 3
+    assert len(main_window.axes.lines) == 4

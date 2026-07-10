@@ -243,6 +243,7 @@ class MainWindow(QMainWindow):
         for spectrum in visible:
             channels = np.arange(len(spectrum.data))
             self.axes.plot(channels, spectrum.data, drawstyle="steps-mid", color=spectrum.color)
+            self.fit_controller.draw_committed_fits(spectrum)
         self.axes.set_xlabel("Channel")
         self.axes.set_ylabel("Counts")
         self.axes.grid(True)
