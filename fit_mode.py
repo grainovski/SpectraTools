@@ -8,61 +8,80 @@ from PySide6.QtWidgets import QDockWidget, QListWidget, QListWidgetItem, QMenu, 
 
 from peak_fit import FitError, fit_peaks
 
-STEP_LEFT_BG = "left_bg"
-STEP_RIGHT_BG = "right_bg"
-STEP_FIT_REGION = "fit_region"
-STEP_MARKING_PEAKS = "marking_peaks"
+BG_REGION_CAP = 2
 
 
 class FitModeState:
-    """Tracks the in-progress region/peak marking sequence for one
-    fit-mode session. Pure state -- no Qt/matplotlib dependency."""
+    """Tracks in-progress background/fit-region/peak marks made via
+    independent b/r/p click actions -- order-free, no Qt/matplotlib
+    dependency. Each of add_bg_click/add_fit_click counts its own
+    pending point independently, so interleaving a different key's
+    clicks never disturbs an in-progress pair."""
 
     def __init__(self):
         self.reset()
 
     def reset(self):
-        self.step = STEP_LEFT_BG
-        self.left_bg_region = None
-        self.right_bg_region = None
+        self.bg_regions = []
+        self.pending_bg_click = None
         self.fit_region = None
+        self.pending_fit_click = None
         self.peak_positions = []
 
-    def add_region(self, lo, hi):
-        region = (min(lo, hi), max(lo, hi))
-        if self.step == STEP_LEFT_BG:
-            self.left_bg_region = region
-            self.step = STEP_RIGHT_BG
-        elif self.step == STEP_RIGHT_BG:
-            self.right_bg_region = region
-            self.step = STEP_FIT_REGION
-        elif self.step == STEP_FIT_REGION:
-            self.fit_region = region
-            self.step = STEP_MARKING_PEAKS
-        else:
-            raise ValueError("Not currently awaiting a region selection")
+    def add_bg_click(self, x):
+        """Returns the completed (lo, hi) region if this click
+        completed a pair, else None (this click becomes the pending
+        first point). A 3rd completed pair evicts the oldest region."""
+        if self.pending_bg_click is None:
+            self.pending_bg_click = x
+            return None
+        region = (min(self.pending_bg_click, x), max(self.pending_bg_click, x))
+        self.pending_bg_click = None
+        self.bg_regions.append(region)
+        if len(self.bg_regions) > BG_REGION_CAP:
+            self.bg_regions.pop(0)
+        return region
 
-    def add_peak(self, position):
-        if self.step != STEP_MARKING_PEAKS:
-            raise ValueError("Not currently marking peaks")
+    def add_fit_click(self, x):
+        """Returns the completed (lo, hi) region if this click
+        completed a pair, else None. A newly completed pair always
+        replaces any existing fit region."""
+        if self.pending_fit_click is None:
+            self.pending_fit_click = x
+            return None
+        region = (min(self.pending_fit_click, x), max(self.pending_fit_click, x))
+        self.pending_fit_click = None
+        self.fit_region = region
+        return region
+
+    def toggle_peak(self, x, proximity):
+        """Adds a peak at x, or removes an existing one within
+        `proximity` of x. Returns ("added", x), ("removed", old_x), or
+        None if there's no fit region yet or x falls outside it."""
+        if self.fit_region is None:
+            return None
         lo, hi = self.fit_region
-        if not (lo <= position <= hi):
-            return False
-        self.peak_positions.append(position)
-        return True
+        if not (lo <= x <= hi):
+            return None
+        for i, pos in enumerate(self.peak_positions):
+            if abs(pos - x) <= proximity:
+                del self.peak_positions[i]
+                return ("removed", pos)
+        self.peak_positions.append(x)
+        return ("added", x)
 
     def ready_to_fit(self):
         return (
-            self.left_bg_region is not None
-            and self.right_bg_region is not None
+            len(self.bg_regions) == BG_REGION_CAP
             and self.fit_region is not None
             and len(self.peak_positions) > 0
         )
 
     def ordered_bg_regions(self):
         """Returns (left, right) background regions ordered by mean
-        x-coordinate, regardless of which was marked first."""
-        a, b = self.left_bg_region, self.right_bg_region
+        x-coordinate, regardless of which was marked first. Only valid
+        once both regions exist."""
+        a, b = self.bg_regions
         a_mid = (a[0] + a[1]) / 2
         b_mid = (b[0] + b[1]) / 2
         return (a, b) if a_mid <= b_mid else (b, a)
