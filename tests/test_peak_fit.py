@@ -113,6 +113,35 @@ def test_fit_result_accepts_explicit_tail_fields():
     assert result.tail_beta == 3.0
 
 
+def test_peak_result_amplitude_and_sigma_err_default_to_zero():
+    peak = PeakResult(
+        position=100.0, position_err=0.1,
+        fwhm=5.0, fwhm_err=0.2,
+        area=1000.0, area_err=50.0,
+        amplitude=200.0, sigma=2.0,
+    )
+    assert peak.amplitude_err == 0.0
+    assert peak.sigma_err == 0.0
+
+
+def test_fit_result_fixed_params_defaults_to_empty_dict():
+    peak = PeakResult(
+        position=100.0, position_err=0.1,
+        fwhm=5.0, fwhm_err=0.2,
+        area=1000.0, area_err=50.0,
+        amplitude=200.0, sigma=2.0,
+    )
+    result = FitResult(
+        left_bg_region=(10.0, 20.0),
+        right_bg_region=(180.0, 190.0),
+        fit_region=(90.0, 110.0),
+        background_slope=0.0,
+        background_intercept=20.0,
+        peaks=[peak],
+    )
+    assert result.fixed_params == {}
+
+
 def test_fit_error_is_an_exception():
     assert issubclass(FitError, Exception)
 
@@ -217,6 +246,22 @@ def test_fit_single_peak_with_poisson_noise():
     peak = result.peaks[0]
     assert peak.position == pytest.approx(100.0, abs=1.0)
     assert peak.fwhm == pytest.approx(4.0 * 2.3548, rel=0.15)
+
+
+def test_fit_single_peak_reports_amplitude_and_sigma_uncertainties():
+    x, y = _make_spectrum(
+        channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0),
+        right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0),
+        peak_positions=[100.0],
+    )
+    peak = result.peaks[0]
+    assert peak.amplitude_err > 0
+    assert peak.sigma_err > 0
 
 
 def test_fit_independent_widths_recovers_different_sigmas():
@@ -330,6 +375,118 @@ def test_fit_independent_widths_with_left_tail_both_enabled():
     sigmas = {round(p.position): p.sigma for p in result.peaks}
     assert sigmas[95] == pytest.approx(2.0, rel=0.3)
     assert sigmas[115] == pytest.approx(4.0, rel=0.3)
+
+
+def test_fit_with_fixed_sigma_holds_it_constant():
+    x, y = _make_spectrum(
+        channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0),
+        right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0),
+        peak_positions=[100.0],
+        fixed_params={"sigma": 3.0},
+    )
+    peak = result.peaks[0]
+    assert peak.sigma == 3.0
+    assert peak.sigma_err == 0.0
+    assert result.fixed_params == {"sigma": 3.0}
+
+
+def test_fit_with_fixed_position_holds_it_constant():
+    x, y = _make_spectrum(
+        channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0),
+        right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0),
+        peak_positions=[100.0],
+        fixed_params={"pos_0": 100.0},
+    )
+    peak = result.peaks[0]
+    assert peak.position == 100.0
+    assert peak.position_err == 0.0
+
+
+def test_fit_with_fixed_amplitude_reduces_area_uncertainty():
+    x, y = _make_spectrum(
+        channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0,
+    )
+    free_result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0),
+        right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0),
+        peak_positions=[100.0],
+    )
+    fixed_result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0),
+        right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0),
+        peak_positions=[100.0],
+        fixed_params={"amp_0": free_result.peaks[0].amplitude},
+    )
+    assert fixed_result.peaks[0].amplitude_err == 0.0
+    # Only sigma's uncertainty contributes now, so area_err must shrink.
+    assert fixed_result.peaks[0].area_err < free_result.peaks[0].area_err
+
+
+def test_fit_with_fixed_tail_fraction_and_beta():
+    x = np.arange(200, dtype=float)
+    y = 20.0 + 500.0 * hypermet_left_tail(x, position=100.0, sigma=3.0, r=0.1, beta=4.0)
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0),
+        right_bg_region=(115.0, 130.0),
+        fit_region=(80.0, 120.0),
+        peak_positions=[100.0],
+        enable_left_tail=True,
+        fixed_params={"tail_fraction": 0.1, "tail_beta": 4.0},
+    )
+    assert result.tail_fraction == 0.1
+    assert result.tail_fraction_err == 0.0
+    assert result.tail_beta == 4.0
+    assert result.tail_beta_err == 0.0
+
+
+def test_fit_rejects_unknown_fixed_parameter_name():
+    x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0)
+    with pytest.raises(FitError):
+        fit_peaks(
+            x, y,
+            left_bg_region=(70.0, 85.0),
+            right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0),
+            peak_positions=[100.0],
+            fixed_params={"not_a_real_param": 1.0},
+        )
+
+
+def test_fit_with_all_parameters_fixed_skips_optimization():
+    x, y = _make_spectrum(
+        channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0),
+        right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0),
+        peak_positions=[100.0],
+        fixed_params={"amp_0": 500.0, "pos_0": 100.0, "sigma": 3.0},
+    )
+    peak = result.peaks[0]
+    assert peak.amplitude == 500.0
+    assert peak.position == 100.0
+    assert peak.sigma == 3.0
+    assert peak.amplitude_err == 0.0
+    assert peak.position_err == 0.0
+    assert peak.sigma_err == 0.0
+    assert peak.area_err == 0.0
 
 
 def test_fit_rejects_no_peaks():

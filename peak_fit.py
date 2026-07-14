@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from scipy.optimize import curve_fit
@@ -62,6 +62,8 @@ class PeakResult:
     area_err: float
     amplitude: float
     sigma: float
+    amplitude_err: float = 0.0
+    sigma_err: float = 0.0
 
 
 @dataclass
@@ -77,6 +79,7 @@ class FitResult:
     tail_fraction_err: float = None
     tail_beta: float = None
     tail_beta_err: float = None
+    fixed_params: dict = field(default_factory=dict)
 
 
 def _region_centroid(x, y, region):
@@ -136,9 +139,10 @@ def _unpack_named(values_by_name, n_peaks, link_widths, enable_left_tail):
     return amplitudes, positions, sigmas, tail_fraction, tail_beta
 
 
-def _make_model(names, n_peaks, link_widths, enable_left_tail):
-    def model(x, *params):
-        values_by_name = dict(zip(names, params))
+def _make_model(names, free_names, fixed_params, n_peaks, link_widths, enable_left_tail):
+    def model(x, *free_values):
+        values_by_name = dict(fixed_params)
+        values_by_name.update(zip(free_names, free_values))
         amplitudes, positions, sigmas, tail_fraction, tail_beta = _unpack_named(
             values_by_name, n_peaks, link_widths, enable_left_tail
         )
@@ -154,7 +158,7 @@ def _make_model(names, n_peaks, link_widths, enable_left_tail):
     return model
 
 
-def _initial_guess(names, x_fit, y_sub, fit_region, peak_positions, link_widths, enable_left_tail):
+def _initial_guess(free_names, x_fit, y_sub, fit_region, peak_positions, link_widths, enable_left_tail):
     lo, hi = fit_region
     region_width = hi - lo
     n_peaks = len(peak_positions)
@@ -186,10 +190,10 @@ def _initial_guess(names, x_fit, y_sub, fit_region, peak_positions, link_widths,
     if enable_left_tail:
         guess_by_name["tail_fraction"] = 0.05
         guess_by_name["tail_beta"] = max(sigma0, TAIL_BETA_MIN)
-    return [guess_by_name[name] for name in names]
+    return [guess_by_name[name] for name in free_names]
 
 
-def _bounds(names, enable_left_tail):
+def _bounds(free_names, enable_left_tail):
     """Only needed when enable_left_tail is True (to keep the tail
     fraction genuinely small and the decay constant away from zero);
     returns None otherwise so the no-tail fits keep using curve_fit's
@@ -197,7 +201,7 @@ def _bounds(names, enable_left_tail):
     if not enable_left_tail:
         return None
     bounds_by_name = {}
-    for name in names:
+    for name in free_names:
         if name == "tail_fraction":
             bounds_by_name[name] = (0.0, TAIL_FRACTION_MAX)
         elif name == "tail_beta":
@@ -206,17 +210,18 @@ def _bounds(names, enable_left_tail):
             bounds_by_name[name] = (1e-6, np.inf)
         else:
             bounds_by_name[name] = (-np.inf, np.inf)
-    lower = [bounds_by_name[name][0] for name in names]
-    upper = [bounds_by_name[name][1] for name in names]
+    lower = [bounds_by_name[name][0] for name in free_names]
+    upper = [bounds_by_name[name][1] for name in free_names]
     return (lower, upper)
 
 
 def fit_peaks(
     x, y, left_bg_region, right_bg_region, fit_region, peak_positions,
-    link_widths=True, enable_left_tail=False,
+    link_widths=True, enable_left_tail=False, fixed_params=None,
 ):
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
+    fixed_params = dict(fixed_params) if fixed_params else {}
 
     if not peak_positions:
         raise FitError("At least one peak must be marked")
@@ -232,36 +237,55 @@ def fit_peaks(
 
     n_peaks = len(peak_positions)
     names = _parameter_names(n_peaks, link_widths, enable_left_tail)
-    if x_fit.size < len(names):
+    unknown_fixed = set(fixed_params) - set(names)
+    if unknown_fixed:
+        raise FitError(f"Unknown fixed parameter name(s): {sorted(unknown_fixed)}")
+    free_names = [name for name in names if name not in fixed_params]
+
+    if free_names and x_fit.size < len(free_names):
         raise FitError(
             f"Fit region has {x_fit.size} data points, need at least "
-            f"{len(names)} for {n_peaks} peak(s)"
+            f"{len(free_names)} free parameter(s) for {n_peaks} peak(s)"
         )
 
     y_sub = y_fit - (slope * x_fit + intercept)
-    p0 = _initial_guess(names, x_fit, y_sub, fit_region, peak_positions, link_widths, enable_left_tail)
-    y_err = np.sqrt(np.maximum(y_fit, 1.0))
-    model = _make_model(names, n_peaks, link_widths, enable_left_tail)
-    bounds = _bounds(names, enable_left_tail)
 
-    try:
-        if bounds is not None:
-            popt, pcov = curve_fit(
-                model, x_fit, y_sub, p0=p0, sigma=y_err, absolute_sigma=True, bounds=bounds
-            )
-        else:
-            popt, pcov = curve_fit(
-                model, x_fit, y_sub, p0=p0, sigma=y_err, absolute_sigma=True
-            )
-    except (RuntimeError, ValueError) as exc:
-        raise FitError(f"Fit did not converge: {exc}") from exc
+    if not free_names:
+        # Every parameter is fixed -- nothing to optimize. Evaluate
+        # directly at the fixed values instead of calling curve_fit
+        # with an empty parameter vector. No fit was performed, so
+        # every value's uncertainty is exactly 0.0.
+        values_by_name = dict(fixed_params)
+        err_by_name = {name: 0.0 for name in names}
+    else:
+        p0 = _initial_guess(
+            free_names, x_fit, y_sub, fit_region, peak_positions, link_widths, enable_left_tail
+        )
+        y_err = np.sqrt(np.maximum(y_fit, 1.0))
+        model = _make_model(names, free_names, fixed_params, n_peaks, link_widths, enable_left_tail)
+        bounds = _bounds(free_names, enable_left_tail)
 
-    if pcov is None or not np.all(np.isfinite(pcov)):
-        raise FitError("Fit produced a non-finite covariance matrix")
+        try:
+            if bounds is not None:
+                popt, pcov = curve_fit(
+                    model, x_fit, y_sub, p0=p0, sigma=y_err, absolute_sigma=True, bounds=bounds
+                )
+            else:
+                popt, pcov = curve_fit(
+                    model, x_fit, y_sub, p0=p0, sigma=y_err, absolute_sigma=True
+                )
+        except (RuntimeError, ValueError) as exc:
+            raise FitError(f"Fit did not converge: {exc}") from exc
 
-    perr = np.sqrt(np.diag(pcov))
-    values_by_name = dict(zip(names, popt))
-    err_by_name = dict(zip(names, perr))
+        if pcov is None or not np.all(np.isfinite(pcov)):
+            raise FitError("Fit produced a non-finite covariance matrix")
+
+        perr = np.sqrt(np.diag(pcov))
+        values_by_name = dict(fixed_params)
+        values_by_name.update(zip(free_names, popt))
+        err_by_name = {name: 0.0 for name in fixed_params}
+        err_by_name.update(zip(free_names, perr))
+
     amplitudes, positions, sigmas, tail_fraction, tail_beta = _unpack_named(
         values_by_name, n_peaks, link_widths, enable_left_tail
     )
@@ -295,7 +319,8 @@ def fit_peaks(
                 position=float(position), position_err=float(position_err),
                 fwhm=float(fwhm), fwhm_err=float(fwhm_err),
                 area=float(area), area_err=float(area_err),
-                amplitude=float(amplitude), sigma=float(sigma),
+                amplitude=float(amplitude), amplitude_err=float(amplitude_err),
+                sigma=float(sigma), sigma_err=float(sigma_err),
             )
         )
 
@@ -308,4 +333,34 @@ def fit_peaks(
         tail_fraction_err=float(tail_fraction_err) if tail_fraction_err is not None else None,
         tail_beta=float(tail_beta) if tail_beta is not None else None,
         tail_beta_err=float(tail_beta_err) if tail_beta_err is not None else None,
+        fixed_params=dict(fixed_params),
     )
+
+
+def parameter_names(n_peaks, link_widths, enable_left_tail):
+    """Public alias of _parameter_names -- fit_mode.py's Fit Parameters
+    panel needs this exact ordering to know which rows to display."""
+    return _parameter_names(n_peaks, link_widths, enable_left_tail)
+
+
+def fit_result_values_by_name(result):
+    """Reconstructs the {name: value} mapping (matching
+    parameter_names()'s canonical naming) from an already-committed
+    FitResult -- used by the UI layer to populate the Fit Parameters
+    panel and to pre-fill fixed_params when reloading an older fit.
+    """
+    n_peaks = len(result.peaks)
+    link_widths = result.link_widths
+    enable_left_tail = result.tail_fraction is not None
+    values = {}
+    for i, peak in enumerate(result.peaks):
+        values[f"amp_{i}"] = peak.amplitude
+        values[f"pos_{i}"] = peak.position
+        if not link_widths:
+            values[f"sigma_{i}"] = peak.sigma
+    if link_widths and result.peaks:
+        values["sigma"] = result.peaks[0].sigma
+    if enable_left_tail:
+        values["tail_fraction"] = result.tail_fraction
+        values["tail_beta"] = result.tail_beta
+    return values
