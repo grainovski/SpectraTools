@@ -227,6 +227,32 @@ def test_clear_empties_the_parameters_panel(qapp):
     assert main_window.fit_controller.parameters_table.rowCount() == 0
 
 
+def test_fixing_a_parameter_in_the_panel_holds_it_for_the_next_fit(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+    table = main_window.fit_controller.parameters_table
+    table.cellWidget(2, 2).setChecked(True)  # fix "Shared sigma"
+    table.item(2, 1).setText("5.0")
+
+    main_window.fit_controller.run_fit()
+
+    assert len(spectrum.fits) == 2
+    second = spectrum.fits[1]
+    assert second.peaks[0].sigma == 5.0
+    assert second.peaks[0].sigma_err == 0.0
+    assert second.fixed_params == {"sigma": 5.0}
+
+
 def test_marking_order_is_free(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
