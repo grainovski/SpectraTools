@@ -176,7 +176,7 @@ def test_parameters_panel_rebuilds_when_row_set_changes(qapp):
 
 def test_parameters_panel_updates_values_in_place_when_row_set_is_unchanged(qapp):
     main_window = MainWindow()
-    _make_active_spectrum(main_window)
+    spectrum = _make_active_spectrum(main_window)
 
     _held_key_click(main_window, "b", 70)
     _held_key_click(main_window, "b", 85)
@@ -189,11 +189,24 @@ def test_parameters_panel_updates_values_in_place_when_row_set_is_unchanged(qapp
     main_window.fit_controller.run_fit()
     table = main_window.fit_controller.parameters_table
     table.cellWidget(2, 2).setChecked(True)  # fix "Shared sigma"
+    first_amplitude_text = table.item(0, 1).text()
+
+    # Perturb the underlying data (marks/settings untouched, so the row
+    # set stays identical) so the second fit's free amplitude value is
+    # numerically different from the first. Without this, a re-fit of
+    # unchanged data returns identical values, and this test would pass
+    # even if the in-place value refresh were deleted entirely.
+    spectrum.data[97:104] += 200
 
     main_window.fit_controller.run_fit()  # re-fit with the same checkboxes/marks
 
     assert table.rowCount() == 3
     assert table.cellWidget(2, 2).isChecked() is True  # Fix state survived
+
+    new_result = spectrum.fits[-1]
+    displayed_amplitude = table.item(0, 1).text()
+    assert displayed_amplitude == f"{new_result.peaks[0].amplitude:.6g}"
+    assert displayed_amplitude != first_amplitude_text
 
 
 def test_clear_empties_the_parameters_panel(qapp):
