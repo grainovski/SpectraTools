@@ -156,6 +156,7 @@ class MainWindow(QMainWindow):
         self.fit_controller = FitModeController(self)
         self._build_fit_mode_buttons()
         self.fit_controller.build_results_panel()
+        self.fit_controller.build_parameters_panel()
         self.canvas.mpl_connect("button_press_event", self._on_canvas_click)
         self._update_fit_mode_availability()
 

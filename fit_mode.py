@@ -3,9 +3,14 @@ import time
 import numpy as np
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QDockWidget, QListWidget, QListWidgetItem, QMenu, QToolBar
+from PySide6.QtWidgets import (
+    QCheckBox, QDockWidget, QListWidget, QListWidgetItem, QMenu, QTableWidget,
+    QTableWidgetItem, QToolBar,
+)
 
-from peak_fit import FitError, fit_peaks, hypermet_left_tail
+from peak_fit import (
+    FitError, fit_peaks, fit_result_values_by_name, hypermet_left_tail, parameter_names,
+)
 
 BG_REGION_CAP = 2
 
@@ -101,6 +106,21 @@ _MARK_TYPE_LABEL = {
 }
 
 
+def _parameter_label(name):
+    """Human-readable row label for a canonical parameter name from
+    peak_fit.parameter_names() -- e.g. "amp_0" -> "Peak 1 amplitude"."""
+    if name == "sigma":
+        return "Shared sigma"
+    if name == "tail_fraction":
+        return "Tail fraction (r)"
+    if name == "tail_beta":
+        return "Tail beta (β)"
+    prefix, index = name.rsplit("_", 1)
+    peak_num = int(index) + 1
+    kind = {"amp": "amplitude", "pos": "position", "sigma": "sigma"}[prefix]
+    return f"Peak {peak_num} {kind}"
+
+
 class FitModeController(QObject):
     """Qt/matplotlib-facing wrapper around FitModeState: tracks which of
     b/r/p is currently held via a Qt event filter on the canvas (not
@@ -118,6 +138,7 @@ class FitModeController(QObject):
         self._held_key = None
         self._progress_artists = []
         self._status_message_until = 0.0
+        self._parameter_names_shown = []
 
         canvas = main_window.canvas
         canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -171,6 +192,8 @@ class FitModeController(QObject):
                 pass
         self._progress_artists = []
         self.state.reset()
+        self.parameters_table.setRowCount(0)
+        self._parameter_names_shown = []
 
     def _redraw_progress(self):
         """Clears and fully rebuilds every in-progress marking artist
@@ -315,6 +338,72 @@ class FitModeController(QObject):
         results_tab_bar.addAction(self.toggle_results_panel_action)
         mw.addToolBar(Qt.ToolBarArea.RightToolBarArea, results_tab_bar)
 
+    def build_parameters_panel(self):
+        mw = self.main_window
+        self.parameters_table = QTableWidget(0, 3)
+        self.parameters_table.setHorizontalHeaderLabels(["Parameter", "Value", "Fix"])
+
+        self.parameters_dock = QDockWidget("Fit Parameters", mw)
+        self.parameters_dock.setWidget(self.parameters_table)
+        mw.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.parameters_dock)
+
+        self.toggle_parameters_panel_action = QAction("Fit Parameters", mw)
+        self.toggle_parameters_panel_action.setCheckable(True)
+        self.toggle_parameters_panel_action.setToolTip("Show/hide fixable fit parameters")
+        self.toggle_parameters_panel_action.toggled.connect(self.parameters_dock.setVisible)
+        self.parameters_dock.visibilityChanged.connect(
+            self.toggle_parameters_panel_action.setChecked
+        )
+        self.parameters_dock.setVisible(False)
+
+        parameters_tab_bar = QToolBar("Fit Parameters Tab", mw)
+        parameters_tab_bar.setMovable(False)
+        parameters_tab_bar.setFloatable(False)
+        parameters_tab_bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        parameters_tab_bar.addAction(self.toggle_parameters_panel_action)
+        mw.addToolBar(Qt.ToolBarArea.RightToolBarArea, parameters_tab_bar)
+
+    def update_parameters_panel(self, names, values_by_name):
+        """Rebuilds the Fit Parameters table (resetting every Fix
+        checkbox) when the set of parameter names has changed since
+        the last fit for these marks; otherwise updates displayed
+        values in place, preserving Fix checkbox state and any
+        user-edited fixed values."""
+        if names != self._parameter_names_shown:
+            self.parameters_table.setRowCount(0)
+            self._parameter_names_shown = list(names)
+            for name in names:
+                row = self.parameters_table.rowCount()
+                self.parameters_table.insertRow(row)
+
+                label_item = QTableWidgetItem(_parameter_label(name))
+                label_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                self.parameters_table.setItem(row, 0, label_item)
+
+                value_item = QTableWidgetItem(f"{values_by_name[name]:.6g}")
+                value_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                self.parameters_table.setItem(row, 1, value_item)
+
+                fix_checkbox = QCheckBox()
+                fix_checkbox.toggled.connect(
+                    lambda checked, r=row: self._on_fix_toggled(r, checked)
+                )
+                self.parameters_table.setCellWidget(row, 2, fix_checkbox)
+        else:
+            for row, name in enumerate(names):
+                fix_checkbox = self.parameters_table.cellWidget(row, 2)
+                if not fix_checkbox.isChecked():
+                    self.parameters_table.item(row, 1).setText(f"{values_by_name[name]:.6g}")
+
+    def _on_fix_toggled(self, row, checked):
+        value_item = self.parameters_table.item(row, 1)
+        if checked:
+            value_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable
+            )
+        else:
+            value_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+
     def update_results_list(self):
         self.results_list.clear()
         active = next((s for s in self.main_window.spectra if s.active), None)
@@ -378,4 +467,6 @@ class FitModeController(QObject):
             self._show_status_message(f"Fit failed: {exc}", 5000)
             return
         active.fits.append(result)
+        names = parameter_names(len(result.peaks), result.link_widths, result.tail_fraction is not None)
+        self.update_parameters_panel(names, fit_result_values_by_name(result))
         self.main_window._plot_data(preserve_view=True)

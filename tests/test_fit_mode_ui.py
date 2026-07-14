@@ -128,6 +128,92 @@ def test_refitting_same_marks_with_changed_checkbox_appends_a_new_entry(qapp):
     assert spectrum.fits[1].link_widths is False
 
 
+def test_parameters_panel_populates_after_a_fit(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+
+    table = main_window.fit_controller.parameters_table
+    assert table.rowCount() == 3  # amp_0, pos_0, sigma (linked default)
+    labels = [table.item(row, 0).text() for row in range(table.rowCount())]
+    assert labels == ["Peak 1 amplitude", "Peak 1 position", "Shared sigma"]
+
+
+def test_parameters_panel_rebuilds_when_row_set_changes(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+    table = main_window.fit_controller.parameters_table
+    table.cellWidget(2, 2).setChecked(True)  # fix "Shared sigma"
+
+    main_window.independent_widths_action.setChecked(True)
+    main_window.fit_controller.run_fit()
+
+    assert table.rowCount() == 3  # amp_0, pos_0, sigma_0 (independent now)
+    labels = [table.item(row, 0).text() for row in range(table.rowCount())]
+    assert labels == ["Peak 1 amplitude", "Peak 1 position", "Peak 1 sigma"]
+    # Row set changed, so the earlier Fix checkbox must not have survived.
+    assert table.cellWidget(2, 2).isChecked() is False
+
+
+def test_parameters_panel_updates_values_in_place_when_row_set_is_unchanged(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+    table = main_window.fit_controller.parameters_table
+    table.cellWidget(2, 2).setChecked(True)  # fix "Shared sigma"
+
+    main_window.fit_controller.run_fit()  # re-fit with the same checkboxes/marks
+
+    assert table.rowCount() == 3
+    assert table.cellWidget(2, 2).isChecked() is True  # Fix state survived
+
+
+def test_clear_empties_the_parameters_panel(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+
+    main_window.fit_controller.clear()
+
+    assert main_window.fit_controller.parameters_table.rowCount() == 0
+
+
 def test_marking_order_is_free(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
