@@ -317,6 +317,7 @@ class FitModeController(QObject):
         self.results_list = QListWidget()
         self.results_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.results_list.customContextMenuRequested.connect(self._on_results_context_menu)
+        self.results_list.itemDoubleClicked.connect(self._on_result_double_clicked)
 
         self.results_dock = QDockWidget("Fit Results", mw)
         self.results_dock.setWidget(self.results_list)
@@ -459,6 +460,38 @@ class FitModeController(QObject):
         elif chosen == clear_action:
             active.fits.clear()
             mw._plot_data(preserve_view=True)
+
+    def _on_result_double_clicked(self, item):
+        active = next((s for s in self.main_window.spectra if s.active), None)
+        if active is None:
+            return
+        index = self.results_list.row(item)
+        result = active.fits[index]
+
+        self._clear_progress()
+
+        # Bypasses the click-pairing API (add_bg_click/add_fit_click)
+        # deliberately -- this restores a previously-computed,
+        # already-valid state wholesale, not a fresh in-progress click
+        # sequence.
+        self.state.bg_regions = [result.left_bg_region, result.right_bg_region]
+        self.state.fit_region = result.fit_region
+        self.state.peak_positions = [peak.position for peak in result.peaks]
+
+        self.main_window.independent_widths_action.setChecked(not result.link_widths)
+        self.main_window.left_tail_action.setChecked(result.tail_fraction is not None)
+
+        names = parameter_names(
+            len(result.peaks), result.link_widths, result.tail_fraction is not None
+        )
+        self._parameter_names_shown = []  # force a full rebuild below
+        self.update_parameters_panel(names, fit_result_values_by_name(result))
+        for row, name in enumerate(names):
+            if name in result.fixed_params:
+                self.parameters_table.cellWidget(row, 2).setChecked(True)
+
+        self._redraw_progress()
+        self.main_window._update_fit_mode_availability()
 
     def run_fit(self):
         if not self.state.ready_to_fit():

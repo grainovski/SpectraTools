@@ -282,6 +282,42 @@ def test_stale_fixed_parameter_is_dropped_without_aborting_the_fit(qapp):
     assert spectrum.fits[1].fixed_params == {}
 
 
+def test_double_click_reloads_a_committed_fit_for_editing(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+    table = main_window.fit_controller.parameters_table
+    table.cellWidget(2, 2).setChecked(True)  # fix "Shared sigma"
+    main_window.fit_controller.run_fit()  # second entry, sigma fixed
+
+    main_window.fit_controller.clear()
+    assert main_window.fit_controller.state.bg_regions == []
+
+    item = main_window.fit_controller.results_list.item(1)
+    main_window.fit_controller._on_result_double_clicked(item)
+
+    regions = main_window.fit_controller.state.bg_regions
+    assert regions[0] == pytest.approx((70.0, 85.0))
+    assert regions[1] == pytest.approx((115.0, 130.0))
+    assert main_window.fit_controller.state.fit_region == pytest.approx((85.0, 115.0))
+    assert main_window.fit_controller.state.peak_positions == pytest.approx([100.0])
+    assert main_window.independent_widths_action.isChecked() is False
+    assert main_window.left_tail_action.isChecked() is False
+
+    reloaded_table = main_window.fit_controller.parameters_table
+    assert reloaded_table.rowCount() == 3
+    assert reloaded_table.cellWidget(2, 2).isChecked() is True  # sigma was fixed
+    assert reloaded_table.cellWidget(0, 2).isChecked() is False  # amplitude was free
+
+
 def test_marking_order_is_free(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
