@@ -378,5 +378,4 @@ class FitModeController(QObject):
             self._show_status_message(f"Fit failed: {exc}", 5000)
             return
         active.fits.append(result)
-        self._clear_progress()
         self.main_window._plot_data(preserve_view=True)

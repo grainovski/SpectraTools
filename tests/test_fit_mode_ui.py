@@ -84,6 +84,50 @@ def test_full_fit_flow_commits_a_fit_result(qapp):
     assert abs(result.peaks[0].position - 100.0) < 1.0
 
 
+def test_marks_persist_after_a_successful_fit(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+
+    assert len(spectrum.fits) == 1
+    regions = main_window.fit_controller.state.bg_regions
+    assert regions[0] == pytest.approx((70.0, 85.0))
+    assert regions[1] == pytest.approx((115.0, 130.0))
+    assert main_window.fit_controller.state.fit_region == pytest.approx((85.0, 115.0))
+    assert main_window.fit_controller.state.peak_positions == pytest.approx([100.0])
+    assert main_window.fit_button.isEnabled() is True
+
+
+def test_refitting_same_marks_with_changed_checkbox_appends_a_new_entry(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+    main_window.independent_widths_action.setChecked(True)
+    main_window.fit_controller.run_fit()
+
+    assert len(spectrum.fits) == 2
+    assert spectrum.fits[0].link_widths is True
+    assert spectrum.fits[1].link_widths is False
+
+
 def test_marking_order_is_free(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
