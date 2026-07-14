@@ -253,6 +253,35 @@ def test_fixing_a_parameter_in_the_panel_holds_it_for_the_next_fit(qapp):
     assert second.fixed_params == {"sigma": 5.0}
 
 
+def test_stale_fixed_parameter_is_dropped_without_aborting_the_fit(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+    table = main_window.fit_controller.parameters_table
+    table.cellWidget(2, 2).setChecked(True)  # fix "Shared sigma"
+
+    # Changes the valid parameter set from "sigma" to "sigma_0" --
+    # the panel hasn't rebuilt yet, so its Fix checkbox still refers
+    # to the now-stale "sigma" name.
+    main_window.independent_widths_action.setChecked(True)
+    main_window.fit_controller.run_fit()
+
+    # The fit must succeed despite the stale fixed name (not abort with
+    # a FitError), and the stale name must be silently dropped rather
+    # than passed through.
+    assert len(spectrum.fits) == 2
+    assert spectrum.fits[1].fixed_params == {}
+
+
 def test_marking_order_is_free(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
