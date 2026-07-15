@@ -423,19 +423,16 @@ class MainWindow(QMainWindow):
         self.nav_toolbar.addAction(full_spectrum_action)
 
     def _build_fit_mode_buttons(self):
-        self.fit_toolbar = QToolBar("Fit Peaks", self)
-        self.fit_toolbar.setMovable(False)
-
         self.fit_button = QAction("Fit", self)
+        self.fit_button.setShortcut("Ctrl+F")
         self.fit_button.setEnabled(False)
         self.fit_button.triggered.connect(self.fit_controller.run_fit)
-        self.fit_toolbar.addAction(self.fit_button)
+        self.addAction(self.fit_button)
 
         self.clear_fit_button = QAction("Clear", self)
+        self.clear_fit_button.setShortcut("Ctrl+C")
         self.clear_fit_button.triggered.connect(self.fit_controller.clear)
-        self.fit_toolbar.addAction(self.clear_fit_button)
-
-        self.addToolBar(self.fit_toolbar)
+        self.addAction(self.clear_fit_button)
 
     def _on_canvas_click(self, event):
         self.fit_controller.on_click(event)

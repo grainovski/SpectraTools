@@ -487,6 +487,16 @@ def test_width_link_and_left_tail_checkboxes_live_in_the_parameters_panel(qapp):
     assert main_window.left_tail_action.parentWidget() is main_window.fit_controller.parameters_dock.widget()
 
 
+def test_fit_and_clear_are_shortcut_only_with_no_toolbar(qapp):
+    main_window = MainWindow()
+
+    assert main_window.fit_button.shortcut().toString() == "Ctrl+F"
+    assert main_window.clear_fit_button.shortcut().toString() == "Ctrl+C"
+    assert main_window.fit_button in main_window.actions()
+    assert main_window.clear_fit_button in main_window.actions()
+    assert not hasattr(main_window, "fit_toolbar")
+
+
 def test_fixing_a_parameter_in_the_panel_holds_it_for_the_next_fit(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
