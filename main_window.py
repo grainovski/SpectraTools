@@ -426,20 +426,6 @@ class MainWindow(QMainWindow):
         self.fit_toolbar = QToolBar("Fit Peaks", self)
         self.fit_toolbar.setMovable(False)
 
-        self.independent_widths_action = QAction("Independent widths", self)
-        self.independent_widths_action.setCheckable(True)
-        self.independent_widths_action.setToolTip(
-            "Fit each peak's width independently instead of sharing one FWHM"
-        )
-        self.fit_toolbar.addAction(self.independent_widths_action)
-
-        self.left_tail_action = QAction("Left tail", self)
-        self.left_tail_action.setCheckable(True)
-        self.left_tail_action.setToolTip(
-            "Allow a small low-channel tail contribution to each peak's shape"
-        )
-        self.fit_toolbar.addAction(self.left_tail_action)
-
         self.fit_button = QAction("Fit", self)
         self.fit_button.setEnabled(False)
         self.fit_button.triggered.connect(self.fit_controller.run_fit)

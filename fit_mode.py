@@ -5,6 +5,7 @@ from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
     QCheckBox, QDockWidget, QMenu, QTableWidget, QTableWidgetItem, QToolBar,
+    QVBoxLayout, QWidget,
 )
 
 from peak_fit import (
@@ -349,11 +350,26 @@ class FitModeController(QObject):
 
     def build_parameters_panel(self):
         mw = self.main_window
+        mw.independent_widths_action = QCheckBox("Independent widths")
+        mw.independent_widths_action.setToolTip(
+            "Fit each peak's width independently instead of sharing one FWHM"
+        )
+        mw.left_tail_action = QCheckBox("Left tail")
+        mw.left_tail_action.setToolTip(
+            "Allow a small low-channel tail contribution to each peak's shape"
+        )
+
         self.parameters_table = QTableWidget(0, 3)
         self.parameters_table.setHorizontalHeaderLabels(["Parameter", "Value", "Fix"])
 
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.addWidget(mw.independent_widths_action)
+        layout.addWidget(mw.left_tail_action)
+        layout.addWidget(self.parameters_table)
+
         self.parameters_dock = QDockWidget("Fit Parameters", mw)
-        self.parameters_dock.setWidget(self.parameters_table)
+        self.parameters_dock.setWidget(container)
         mw.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.parameters_dock)
 
         self.toggle_parameters_panel_action = QAction("Fit Parameters", mw)

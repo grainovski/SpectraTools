@@ -3,7 +3,7 @@ import pytest
 from matplotlib.backend_bases import MouseEvent
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QApplication, QTableWidgetItem
+from PySide6.QtWidgets import QApplication, QCheckBox, QTableWidgetItem
 
 from main_window import MainWindow
 from peak_fit import FitResult, PeakResult, hypermet_left_tail
@@ -476,6 +476,15 @@ def test_clear_empties_the_parameters_panel(qapp):
     main_window.fit_controller.clear()
 
     assert main_window.fit_controller.parameters_table.rowCount() == 0
+
+
+def test_width_link_and_left_tail_checkboxes_live_in_the_parameters_panel(qapp):
+    main_window = MainWindow()
+
+    assert isinstance(main_window.independent_widths_action, QCheckBox)
+    assert isinstance(main_window.left_tail_action, QCheckBox)
+    assert main_window.independent_widths_action.parentWidget() is main_window.fit_controller.parameters_dock.widget()
+    assert main_window.left_tail_action.parentWidget() is main_window.fit_controller.parameters_dock.widget()
 
 
 def test_fixing_a_parameter_in_the_panel_holds_it_for_the_next_fit(qapp):
