@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -8,6 +9,13 @@ FWHM_FACTOR = 2.3548200450309493  # 2*sqrt(2*ln(2))
 
 TAIL_FRACTION_MAX = 0.3
 TAIL_BETA_MIN = 0.1
+
+_CUR_RATIO = 1e-12
+_CUR_LAMBDA_START = 1e-3
+_CUR_MIN_LAMBDA = 1e-20
+_CUR_MAX_LAMBDA = 1e30
+_CUR_INC_LAMBDA = 10.0
+_CUR_MAX_ITERATIONS = 50
 
 
 def hypermet_left_tail(x, position, sigma, r, beta):
@@ -365,3 +373,165 @@ def fit_result_values_by_name(result):
         values["tail_fraction"] = result.tail_fraction
         values["tail_beta"] = result.tail_beta
     return values
+
+
+class _ParamDamping:
+    """Per-parameter step-damping rule for _marquardt_fit, ported from
+    TV's CHANGE_TRY macro (tv-1.9.13/src/VsFitFct.c). `kind` selects the
+    rule: "amp" (no damping), "pos" (step capped at the peak's own
+    current sigma; needs sigma_index or sigma_value to know that sigma),
+    "sigma" (step capped at 2x current value, floored away from zero),
+    "tail_fraction"/"tail_beta" (nudged away from exactly zero, then
+    hard-clamped to this project's existing bounds)."""
+
+    __slots__ = ("kind", "sigma_index", "sigma_value")
+
+    def __init__(self, kind, sigma_index=None, sigma_value=None):
+        self.kind = kind
+        self.sigma_index = sigma_index
+        self.sigma_value = sigma_value
+
+
+def _current_sigma_for(meta, p):
+    if meta.sigma_index is not None:
+        return p[meta.sigma_index]
+    return meta.sigma_value
+
+
+def _numeric_jacobian(model, x, p):
+    """Central-difference Jacobian -- matches TV's own fallback
+    (CurNumericDerivation) for fit-function modules without an analytic
+    derivative; avoids hand-deriving hypermet's erfc-based partials."""
+    n = len(p)
+    J = np.zeros((len(x), n))
+    for i in range(n):
+        h = max(abs(p[i]), 1e-6) * 1e-6
+        p_hi = p.copy(); p_hi[i] += h
+        p_lo = p.copy(); p_lo[i] -= h
+        J[:, i] = (model(x, p_hi) - model(x, p_lo)) / (2 * h)
+    return J
+
+
+def _apply_step_damping(p, delta, damping, fit_region_bounds):
+    """TV's CHANGE_TRY, per parameter kind. Returns a new delta array;
+    does not mutate its inputs."""
+    delta = delta.copy()
+    for i, meta in enumerate(damping):
+        if meta.kind == "amp":
+            continue
+        elif meta.kind == "pos":
+            sigma = abs(_current_sigma_for(meta, p))
+            if sigma > 0 and abs(delta[i]) > sigma:
+                delta[i] = math.copysign(sigma, delta[i])
+            if fit_region_bounds is not None:
+                lo, hi = fit_region_bounds
+                old = p[i]
+                if lo <= old <= hi:
+                    new = old + delta[i]
+                    if new < lo:
+                        delta[i] = (lo - old) * 0.5
+                    elif new > hi:
+                        delta[i] = (hi - old) * 0.5
+        elif meta.kind == "sigma":
+            width = abs(p[i])
+            cap = 2.0 * width
+            if width > 0 and abs(delta[i]) > cap:
+                delta[i] = math.copysign(cap, delta[i])
+            if p[i] + delta[i] == 0.0:
+                delta[i] *= 0.5
+        elif meta.kind in ("tail_fraction", "tail_beta"):
+            if p[i] + delta[i] == 0.0:
+                delta[i] *= 0.5
+    return delta
+
+
+def _clamp_trial(p_try, damping):
+    """Hard bound enforcement after damping -- this project's existing
+    sigma/tail_fraction/tail_beta bounds (previously enforced via
+    scipy's curve_fit(..., bounds=...), now folded in here since the
+    custom solver has no separate bounds mechanism)."""
+    p_try = p_try.copy()
+    for i, meta in enumerate(damping):
+        if meta.kind == "sigma":
+            if abs(p_try[i]) < 1e-6:
+                p_try[i] = 1e-6 if p_try[i] >= 0 else -1e-6
+        elif meta.kind == "tail_fraction":
+            p_try[i] = min(max(p_try[i], 0.0), TAIL_FRACTION_MAX)
+        elif meta.kind == "tail_beta":
+            p_try[i] = max(p_try[i], TAIL_BETA_MIN)
+    return p_try
+
+
+def _marquardt_fit(model, x, y, y_err, p0, damping, fit_region_bounds=None):
+    """Damped Levenberg-Marquardt solver replicating TV's fit procedure
+    (tv-1.9.13/lib/tv/vsCurFit.c's CurFit + VsFitFct.c's CHANGE_TRY).
+    `model(x, p)` takes the full parameter array (not *args, unlike
+    scipy's curve_fit convention) and returns the model y-values.
+    `damping` is a list of _ParamDamping, one per entry in p0, telling
+    the solver how to limit each parameter's per-iteration step. Returns
+    (popt, pcov) with the same meaning as
+    scipy.optimize.curve_fit(..., absolute_sigma=True)."""
+    p = np.array(p0, dtype=float)
+    n = len(p)
+    weights = 1.0 / y_err
+
+    def measure_and_jac(pt):
+        J = _numeric_jacobian(model, x, pt)
+        r = (y - model(x, pt)) * weights
+        Jw = J * weights[:, None]
+        measure = float(np.sum(r ** 2))
+        return measure, r, Jw
+
+    measure, r, J = measure_and_jac(p)
+    lam = _CUR_LAMBDA_START
+    iterations = 0
+    give_up = False
+
+    while iterations < _CUR_MAX_ITERATIONS and not give_up:
+        old_measure = measure
+        alpha = J.T @ J
+        beta = J.T @ r
+        accepted = False
+
+        while not accepted:
+            damped = alpha.copy()
+            diag = np.diag(damped).copy()
+            diag_safe = np.where(diag == 0, 1.0, diag)
+            damped[np.diag_indices(n)] = diag_safe * (1 + lam)
+            try:
+                raw_delta = np.linalg.solve(damped, beta)
+            except np.linalg.LinAlgError:
+                raw_delta, *_ = np.linalg.lstsq(damped, beta, rcond=None)
+
+            delta = _apply_step_damping(p, raw_delta, damping, fit_region_bounds)
+            p_try = _clamp_trial(p + delta, damping)
+            try_measure, try_r, try_J = measure_and_jac(p_try)
+
+            if try_measure < measure:
+                improvement = measure - try_measure
+                p, measure, r, J = p_try, try_measure, try_r, try_J
+                lam = max(0.001 * improvement, _CUR_MIN_LAMBDA)
+                accepted = True
+            else:
+                lam *= _CUR_INC_LAMBDA
+                if lam > _CUR_MAX_LAMBDA:
+                    p_try2 = _clamp_trial(p - 0.5 * delta, damping)
+                    try_measure2, try_r2, try_J2 = measure_and_jac(p_try2)
+                    if try_measure2 < measure:
+                        p, measure, r, J = p_try2, try_measure2, try_r2, try_J2
+                    accepted = True
+                    give_up = True
+
+        iterations += 1
+        if give_up or measure <= 0:
+            break
+        ratio = (old_measure - measure) / measure
+        if ratio <= _CUR_RATIO:
+            break
+
+    alpha_final = J.T @ J
+    try:
+        pcov = np.linalg.inv(alpha_final)
+    except np.linalg.LinAlgError:
+        pcov = np.full((n, n), np.inf)
+    return p, pcov
