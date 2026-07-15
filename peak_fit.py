@@ -170,21 +170,8 @@ def _initial_guess(free_names, x_fit, y_sub, fit_region, peak_positions, link_wi
     lo, hi = fit_region
     region_width = hi - lo
     n_peaks = len(peak_positions)
-    sigma0 = max(region_width / (4 * n_peaks), 1e-6)
-    if not link_widths and n_peaks > 1:
-        # With independent per-peak sigmas, a starting width this wide
-        # (derived from the whole fit region) makes neighboring peaks
-        # overlap heavily and lets curve_fit's unconstrained
-        # Levenberg-Marquardt solver settle into a spurious local
-        # minimum instead of recovering each peak's own width. Cap the
-        # guess at a quarter of the closest peak spacing so peaks
-        # start out reasonably well-separated.
-        sorted_positions = sorted(peak_positions)
-        min_spacing = min(
-            b - a for a, b in zip(sorted_positions, sorted_positions[1:])
-        )
-        if min_spacing > 0:
-            sigma0 = max(min(sigma0, min_spacing / 4), 1e-6)
+    fallback_sigma0 = max(region_width / (4 * n_peaks), 1e-6)
+    sigma0 = _measure_width(x_fit, y_sub, peak_positions, fallback_sigma0)
 
     guess_by_name = {}
     for i, pos in enumerate(peak_positions):
@@ -401,6 +388,84 @@ def _current_sigma_for(meta, p):
     if meta.sigma_index is not None:
         return p[meta.sigma_index]
     return meta.sigma_value
+
+
+_MIN_PLAUSIBLE_FWHM_CHANNELS = 2.0
+
+
+def _measure_width(x_fit, y_sub, peak_positions, fallback):
+    """TV-style initial width estimate, ported from
+    tv-1.9.13/lib/tv/vsFitSetup.c's FSInitWidth: starting from the
+    marked peak with the largest background-subtracted amplitude, walk
+    to the true local maximum, then walk outward until counts drop
+    below half that maximum, and convert the resulting FWHM to a sigma.
+    Falls back to the caller-supplied heuristic value if the data is
+    too flat/noisy to find a clear peak, or the measured FWHM is
+    implausibly small to be a real detector peak (a simple plausibility
+    guard, not a rigorous significance test -- a pure-noise region can
+    occasionally still produce a small but "clean" half-max crossing;
+    this is an accepted, rare edge case since real usage always marks
+    an actual visible peak)."""
+    if len(x_fit) == 0:
+        return fallback
+
+    indices = [int(np.argmin(np.abs(x_fit - pos))) for pos in peak_positions]
+    amplitudes = [y_sub[i] for i in indices]
+    idx = indices[int(np.argmax(amplitudes))]
+
+    n = len(x_fit)
+    while True:
+        moved = False
+        if idx + 1 < n and y_sub[idx + 1] > y_sub[idx]:
+            idx += 1
+            moved = True
+        elif idx - 1 >= 0 and y_sub[idx - 1] > y_sub[idx]:
+            idx -= 1
+            moved = True
+        if not moved:
+            break
+
+    peak_value = y_sub[idx]
+    if peak_value <= 0:
+        return fallback
+    half = peak_value / 2.0
+
+    left = idx
+    while left - 1 >= 0 and y_sub[left - 1] >= half:
+        left -= 1
+    right = idx
+    while right + 1 < n and y_sub[right + 1] >= half:
+        right += 1
+
+    def _interp_crossing(i_inside, i_outside):
+        y_in, y_out = y_sub[i_inside], y_sub[i_outside]
+        if y_in == y_out:
+            return float(x_fit[i_inside])
+        frac = (half - y_in) / (y_out - y_in)
+        return float(x_fit[i_inside] + frac * (x_fit[i_outside] - x_fit[i_inside]))
+
+    # Measure each side's half-width independently and take the smaller
+    # one (doubled, to get a full FWHM) rather than the raw
+    # (x_right - x_left) span. A neighboring peak on one side (as with
+    # closely-spaced multiplets) slows that side's descent below half-
+    # max, inflating a naive two-sided span well past this peak's own
+    # true width -- exactly the scenario TV's FSInitWidth (same source
+    # file) guards against by using whichever side crosses half-max
+    # first. Taking the min keeps the estimate anchored to the
+    # uncontaminated side; for an isolated, symmetric peak both sides
+    # agree anyway.
+    half_widths = []
+    if left > 0:
+        half_widths.append(x_fit[idx] - _interp_crossing(left, left - 1))
+    if right < n - 1:
+        half_widths.append(_interp_crossing(right, right + 1) - x_fit[idx])
+    if not half_widths:
+        return fallback
+
+    fwhm = 2.0 * min(half_widths)
+    if fwhm < _MIN_PLAUSIBLE_FWHM_CHANNELS:
+        return fallback
+    return max(fwhm / FWHM_FACTOR, 1e-6)
 
 
 def _numeric_jacobian(model, x, p):

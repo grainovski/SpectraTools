@@ -735,8 +735,17 @@ def test_draw_committed_fits_skips_hidden_results(qapp):
 
 @pytest.mark.xfail(
     strict=True,
-    reason="depends on a better initial-width guess than the current "
-    "region_width/(4*n_peaks) heuristic; fixed by Task 3's _measure_width",
+    reason="NOT fixed by Task 3's _measure_width (verified): "
+    "_make_active_spectrum's synthetic peak has no genuine left tail, so "
+    "an accurate width guess correctly drives tail_fraction to 0, at "
+    "which point tail_beta has zero effect on the model and its "
+    "Jacobian column vanishes -- a real, expected parameter-"
+    "identifiability degeneracy (confirmed: popt lands at tail_fraction="
+    "0.0, tail_beta clamped to TAIL_BETA_MIN, pcov all-inf), not a "
+    "width-estimate defect. The old region_width/(4*n_peaks) heuristic's "
+    "badly-oversized starting sigma happened to push tail_fraction to "
+    "its upper clamp instead, which incidentally avoided this "
+    "degeneracy -- masking the issue rather than avoiding it correctly.",
 )
 def test_double_click_reloads_a_left_tail_fit_and_refitting_appends_a_new_entry(qapp):
     main_window = MainWindow()

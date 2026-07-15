@@ -348,11 +348,6 @@ def test_fit_without_left_tail_leaves_tail_fields_none():
     assert result.tail_beta is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="depends on a better initial-width guess than the current "
-    "region_width/(4*n_peaks) heuristic; fixed by Task 3's _measure_width",
-)
 def test_fit_with_left_tail_enabled_recovers_known_tail_parameters():
     # Synthetic data WITH a real left tail baked in via the same
     # hypermet_left_tail() the fitter itself uses, so this verifies
@@ -556,21 +551,25 @@ def test_fit_rejects_too_few_points_for_peak_count():
 
 
 def test_fit_raises_on_non_convergence():
-    # Three peaks requested at the exact same position, each with its own
-    # independent sigma (link_widths=False), start with three identical
-    # parameter triplets, so their Jacobian columns are numerically
+    # Four peaks requested at the exact same position, each with its own
+    # independent sigma (link_widths=False), start with four identical
+    # parameter quadruplets, so their Jacobian columns are numerically
     # identical at every iteration (a perfectly singular Jacobian). The
     # damped Marquardt solver still "converges" to a stationary point --
     # it doesn't raise on its own the way MINPACK's curve_fit used to --
     # but that point's curvature matrix is too ill-conditioned to invert
-    # into a physically valid covariance, so its diagonal goes negative.
-    # fit_peaks()'s explicit `np.any(np.diag(pcov) < 0)` check catches
-    # exactly this and converts it to FitError. (With the default
-    # link_widths=True, the shared single sigma removes enough degrees of
-    # freedom from this degenerate setup that the fit actually settles
-    # onto a stationary point along the still-undetermined
-    # amplitude/position split without a negative-diagonal covariance, so
-    # this test needs link_widths=False to keep exercising this path.)
+    # into a physically valid covariance, so fit_peaks()'s explicit
+    # `not np.all(np.isfinite(pcov)) or np.any(np.diag(pcov) < 0)` check
+    # catches it and converts it to FitError.
+    #
+    # This needs four duplicate peaks, not three: with Task 3's
+    # data-measured initial width (_measure_width), the solver starts
+    # from a near-exact sigma and settles at a numerically "clean" (if
+    # still physically indeterminate, since any amplitude split across
+    # identical peaks fits equally well) point for three duplicates,
+    # which keeps the covariance inversion just barely finite/positive.
+    # A fourth duplicate adds enough extra degeneracy to reliably push
+    # the curvature matrix back over the edge into non-invertibility.
     x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0)
     with pytest.raises(FitError):
         fit_peaks(
@@ -578,7 +577,7 @@ def test_fit_raises_on_non_convergence():
             left_bg_region=(20.0, 35.0),
             right_bg_region=(160.0, 175.0),
             fit_region=(93.0, 107.0),
-            peak_positions=[100.0, 100.0, 100.0],
+            peak_positions=[100.0, 100.0, 100.0, 100.0],
             link_widths=False,
         )
 
@@ -713,3 +712,37 @@ def test_marquardt_fit_clamps_tail_fraction_and_beta_to_bounds():
 
     assert 0.0 <= popt[3] <= TAIL_FRACTION_MAX
     assert popt[4] >= TAIL_BETA_MIN
+
+
+from peak_fit import _measure_width
+
+
+def test_measure_width_recovers_true_sigma_from_a_single_peak():
+    x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.5)], slope=0.0, intercept=20.0)
+    lo, hi = 80, 120
+    mask = (x >= lo) & (x <= hi)
+    x_fit = x[mask]
+    y_sub = y[mask] - 20.0
+    sigma = _measure_width(x_fit, y_sub, [100.0], fallback=10.0)
+    assert sigma == pytest.approx(3.5, abs=0.5)
+
+
+def test_measure_width_uses_the_largest_marked_peak_for_three_peaks():
+    x, y = _make_spectrum(
+        channels=200,
+        peaks=[(500.0, 90.0, 3.0), (350.0, 108.0, 3.0), (420.0, 117.0, 3.0)],
+        slope=0.0, intercept=20.0,
+    )
+    lo, hi = 70, 135
+    mask = (x >= lo) & (x <= hi)
+    x_fit = x[mask]
+    y_sub = y[mask] - 20.0
+    sigma = _measure_width(x_fit, y_sub, [88.0, 110.0, 119.0], fallback=5.42)
+    assert sigma == pytest.approx(3.0, abs=0.7)
+
+
+def test_measure_width_falls_back_when_no_clear_peak_is_found():
+    x = np.arange(80, 121, dtype=float)
+    y_sub = np.zeros_like(x)  # perfectly flat, background-subtracted to zero
+    sigma = _measure_width(x, y_sub, [100.0], fallback=7.0)
+    assert sigma == 7.0
