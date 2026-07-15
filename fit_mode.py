@@ -172,8 +172,11 @@ class FitModeController(QObject):
 
     def clear(self):
         self._clear_progress()
-        self.main_window._update_fit_mode_availability()
-        self.main_window.canvas.draw_idle()
+        active = next((s for s in self.main_window.spectra if s.active), None)
+        if active is not None:
+            for result in active.fits:
+                result.visible = False
+        self.main_window._plot_data(preserve_view=True)
 
     def _clear_progress(self):
         for artist in self._progress_artists:

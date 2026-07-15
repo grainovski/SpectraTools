@@ -595,6 +595,57 @@ def test_clear_discards_in_progress_marks_without_committing(qapp):
     assert len(spectrum.fits) == 0
 
 
+def test_clear_hides_every_fit_for_the_active_spectrum_without_deleting_it(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+    assert spectrum.fits[0].visible is True
+
+    main_window.fit_controller.clear()
+
+    assert len(spectrum.fits) == 1  # nothing deleted
+    assert spectrum.fits[0].visible is False  # but no longer drawn
+
+
+def test_clear_forces_a_replot_so_the_canvas_actually_goes_blank(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+
+    lines_with_fit = len(main_window.axes.lines)
+    patches_with_fit = len(main_window.axes.patches)
+
+    main_window.fit_controller.clear()
+
+    # Only the spectrum's own step line should remain -- no fit overlay,
+    # no in-progress marking artists.
+    assert len(main_window.axes.lines) == 1
+    assert len(main_window.axes.patches) == 0
+    assert len(main_window.axes.lines) < lines_with_fit
+    assert len(main_window.axes.patches) < patches_with_fit
+
+
+def test_clear_with_no_active_spectrum_does_not_crash(qapp):
+    main_window = MainWindow()
+    main_window.fit_controller.clear()
+
+
 def test_fit_button_disabled_when_active_spectrum_hidden(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
