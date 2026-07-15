@@ -5,6 +5,7 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication, QCheckBox, QTableWidgetItem
 
+import fit_mode
 from main_window import MainWindow
 from peak_fit import FitResult, PeakResult, hypermet_left_tail
 from spectrum import LoadedSpectrum
@@ -59,6 +60,43 @@ def test_key_event_filter_tracks_held_key(qapp):
 
     release = QKeyEvent(QEvent.Type.KeyRelease, Qt.Key.Key_B, Qt.KeyboardModifier.NoModifier)
     QApplication.sendEvent(canvas, release)
+    assert main_window.fit_controller._held_key is None
+
+
+def test_windows_scan_code_fallback_detects_b_when_layout_remaps_the_key(qapp, monkeypatch):
+    monkeypatch.setattr(fit_mode.sys, "platform", "win32")
+    main_window = MainWindow()
+    canvas = main_window.canvas
+
+    # Simulates a non-Latin Windows keyboard layout (e.g. Bulgarian): the
+    # physical B key produces a Qt.Key value Qt doesn't recognize as "b",
+    # but its hardware scan code (0x30, layout-independent) still
+    # identifies which physical key was actually pressed.
+    press = QKeyEvent(
+        QEvent.Type.KeyPress, Qt.Key.Key_unknown, Qt.KeyboardModifier.NoModifier,
+        0x30, 0, 0, "",
+    )
+    QApplication.sendEvent(canvas, press)
+    assert main_window.fit_controller._held_key == "b"
+
+    release = QKeyEvent(
+        QEvent.Type.KeyRelease, Qt.Key.Key_unknown, Qt.KeyboardModifier.NoModifier,
+        0x30, 0, 0, "",
+    )
+    QApplication.sendEvent(canvas, release)
+    assert main_window.fit_controller._held_key is None
+
+
+def test_scan_code_fallback_does_not_apply_outside_windows(qapp, monkeypatch):
+    monkeypatch.setattr(fit_mode.sys, "platform", "linux")
+    main_window = MainWindow()
+    canvas = main_window.canvas
+
+    press = QKeyEvent(
+        QEvent.Type.KeyPress, Qt.Key.Key_unknown, Qt.KeyboardModifier.NoModifier,
+        0x30, 0, 0, "",
+    )
+    QApplication.sendEvent(canvas, press)
     assert main_window.fit_controller._held_key is None
 
 

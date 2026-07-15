@@ -1,3 +1,4 @@
+import sys
 import time
 
 import numpy as np
@@ -99,11 +100,38 @@ _KEY_TO_MARK_TYPE = {
     Qt.Key.Key_P: "p",
 }
 
+# Windows "Scan Code Set 1" values for the physical B/R/P key positions.
+# A scan code identifies which physical key was pressed, assigned by the
+# keyboard hardware before any software layout translation -- unlike
+# QKeyEvent.key(), which some non-Latin Windows input languages (e.g.
+# Bulgarian) remap away from Qt.Key.Key_B/R/P entirely for those keys,
+# breaking b/r/p marking outright for anyone using that layout even
+# though their physical keyboard still has "B"/"R"/"P" printed on it.
+# Used only as a fallback when the primary Qt.Key lookup misses.
+_WINDOWS_SCAN_CODE_TO_MARK_TYPE = {
+    0x30: "b",
+    0x13: "r",
+    0x19: "p",
+}
+
 _MARK_TYPE_LABEL = {
     "b": "background region",
     "r": "fit region",
     "p": "peak",
 }
+
+
+def _mark_type_for_key_event(event):
+    """Resolves a key event to "b"/"r"/"p" (or None), preferring the
+    normal Qt.Key lookup and falling back to a Windows-only physical
+    scan-code match when the active keyboard layout has remapped the
+    key away from what Qt expects (see _WINDOWS_SCAN_CODE_TO_MARK_TYPE)."""
+    mark_type = _KEY_TO_MARK_TYPE.get(event.key())
+    if mark_type is not None:
+        return mark_type
+    if sys.platform.startswith("win"):
+        return _WINDOWS_SCAN_CODE_TO_MARK_TYPE.get(event.nativeScanCode())
+    return None
 
 
 def _parameter_label(name):
@@ -149,14 +177,14 @@ class FitModeController(QObject):
     def eventFilter(self, obj, event):
         if obj is self.main_window.canvas:
             if event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat():
-                mark_type = _KEY_TO_MARK_TYPE.get(event.key())
+                mark_type = _mark_type_for_key_event(event)
                 if mark_type is not None:
                     self._held_key = mark_type
                     self._show_status_message(
                         f"Marking {_MARK_TYPE_LABEL[mark_type]}: click to place", 60000
                     )
             elif event.type() == QEvent.Type.KeyRelease and not event.isAutoRepeat():
-                mark_type = _KEY_TO_MARK_TYPE.get(event.key())
+                mark_type = _mark_type_for_key_event(event)
                 if mark_type is not None and self._held_key == mark_type:
                     self._held_key = None
                     # The "Marking ...: click to place" hint above is shown
