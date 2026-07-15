@@ -746,3 +746,14 @@ def test_measure_width_falls_back_when_no_clear_peak_is_found():
     y_sub = np.zeros_like(x)  # perfectly flat, background-subtracted to zero
     sigma = _measure_width(x, y_sub, [100.0], fallback=7.0)
     assert sigma == 7.0
+
+
+def test_measure_width_uses_the_one_side_that_does_not_hit_the_data_edge():
+    # Peak center sits at the very first fit-region channel, so only the
+    # right side can cross half-max before running off the edge -- must
+    # still measure a good width from that one side rather than falling
+    # back just because the other side had nowhere to go.
+    x = np.arange(100, 140, dtype=float)
+    y_sub = 500.0 * np.exp(-((x - 100.0) ** 2) / (2 * 3.0 ** 2))
+    sigma = _measure_width(x, y_sub, [100.0], fallback=99.0)
+    assert sigma == pytest.approx(3.0, abs=0.5)
