@@ -253,6 +253,29 @@ def test_fixing_a_parameter_in_the_panel_holds_it_for_the_next_fit(qapp):
     assert second.fixed_params == {"sigma": 5.0}
 
 
+def test_invalid_fixed_value_shows_a_status_message_instead_of_crashing(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+    table = main_window.fit_controller.parameters_table
+    table.cellWidget(2, 2).setChecked(True)  # fix "Shared sigma"
+    table.item(2, 1).setText("not a number")
+
+    main_window.fit_controller.run_fit()  # must not raise
+
+    assert len(spectrum.fits) == 1  # second fit did not commit
+    assert main_window.statusBar().currentMessage() != ""
+
+
 def test_stale_fixed_parameter_is_dropped_without_aborting_the_fit(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
@@ -316,6 +339,59 @@ def test_double_click_reloads_a_committed_fit_for_editing(qapp):
     assert reloaded_table.rowCount() == 3
     assert reloaded_table.cellWidget(2, 2).isChecked() is True  # sigma was fixed
     assert reloaded_table.cellWidget(0, 2).isChecked() is False  # amplitude was free
+
+
+def test_double_click_reloads_a_left_tail_fit_and_refitting_appends_a_new_entry(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 80)
+    _held_key_click(main_window, "r", 120)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.left_tail_action.setChecked(True)
+    main_window.fit_controller.run_fit()
+
+    assert len(spectrum.fits) == 1
+    first_result = spectrum.fits[0]
+    assert first_result.tail_fraction is not None
+
+    table = main_window.fit_controller.parameters_table
+    tail_row = next(
+        row for row in range(table.rowCount())
+        if table.item(row, 0).text() == "Tail fraction (r)"
+    )
+    table.cellWidget(tail_row, 2).setChecked(True)
+    main_window.fit_controller.run_fit()
+
+    assert len(spectrum.fits) == 2
+    second_result = spectrum.fits[1]
+    assert "tail_fraction" in second_result.fixed_params
+
+    main_window.fit_controller.clear()
+
+    item = main_window.fit_controller.results_list.item(1)
+    main_window.fit_controller._on_result_double_clicked(item)
+
+    assert main_window.left_tail_action.isChecked() is True
+    reloaded_table = main_window.fit_controller.parameters_table
+    reloaded_tail_row = next(
+        row for row in range(reloaded_table.rowCount())
+        if reloaded_table.item(row, 0).text() == "Tail fraction (r)"
+    )
+    assert reloaded_table.cellWidget(reloaded_tail_row, 2).isChecked() is True
+
+    # Re-fit the reloaded entry -- must append a THIRD entry, leaving
+    # the first two untouched.
+    main_window.fit_controller.run_fit()
+
+    assert len(spectrum.fits) == 3
+    assert spectrum.fits[0] is first_result
+    assert spectrum.fits[1] is second_result
 
 
 def test_marking_order_is_free(qapp):

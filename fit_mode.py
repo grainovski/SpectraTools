@@ -410,12 +410,19 @@ class FitModeController(QObject):
         Parameters panel into a {name: value} dict for the next
         fit_peaks() call. Empty when nothing is fixed (including the
         first fit for a fresh set of marks, before the panel has ever
-        been populated)."""
+        been populated). Raises FitError if a checked row's Value cell
+        isn't a valid number."""
         fixed = {}
         for row, name in enumerate(self._parameter_names_shown):
             fix_checkbox = self.parameters_table.cellWidget(row, 2)
             if fix_checkbox is not None and fix_checkbox.isChecked():
-                fixed[name] = float(self.parameters_table.item(row, 1).text())
+                text = self.parameters_table.item(row, 1).text()
+                try:
+                    fixed[name] = float(text)
+                except ValueError:
+                    raise FitError(
+                        f"Fixed value for '{_parameter_label(name)}' is not a valid number: {text!r}"
+                    )
         return fixed
 
     def update_results_list(self):
@@ -504,21 +511,21 @@ class FitModeController(QObject):
         y = active.data
         link_widths = not self.main_window.independent_widths_action.isChecked()
         enable_left_tail = self.main_window.left_tail_action.isChecked()
-        # A Fix checkbox from a since-changed row set (e.g. independent
-        # widths or left tail toggled since the last fit) names a
-        # parameter that no longer exists under the current
-        # configuration -- drop it rather than let fit_peaks() reject
-        # the whole fit, since update_parameters_panel() would reset
-        # that checkbox anyway once this fit succeeds and rebuilds the
-        # row set.
-        current_names = set(
-            parameter_names(len(self.state.peak_positions), link_widths, enable_left_tail)
-        )
-        fixed_params = {
-            name: value for name, value in self.fixed_params_from_panel().items()
-            if name in current_names
-        }
         try:
+            # A Fix checkbox from a since-changed row set (e.g.
+            # independent widths or left tail toggled since the last
+            # fit) names a parameter that no longer exists under the
+            # current configuration -- drop it rather than let
+            # fit_peaks() reject the whole fit, since
+            # update_parameters_panel() would reset that checkbox
+            # anyway once this fit succeeds and rebuilds the row set.
+            current_names = set(
+                parameter_names(len(self.state.peak_positions), link_widths, enable_left_tail)
+            )
+            fixed_params = {
+                name: value for name, value in self.fixed_params_from_panel().items()
+                if name in current_names
+            }
             result = fit_peaks(
                 x, y, left, right, self.state.fit_region, list(self.state.peak_positions),
                 link_widths=link_widths, enable_left_tail=enable_left_tail,
