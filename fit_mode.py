@@ -379,7 +379,13 @@ class FitModeController(QObject):
         self.parameters_dock.visibilityChanged.connect(
             self.toggle_parameters_panel_action.setChecked
         )
-        self.parameters_dock.setVisible(False)
+        # Unlike the Fit Results panel (pure post-fit output, fine to
+        # start tucked away), this panel now also holds the
+        # Independent-widths/Left-tail checkboxes -- controls needed
+        # *before* marking/fitting even starts. Starting it hidden
+        # would make them undiscoverable without first finding the
+        # tab toggle.
+        self.parameters_dock.setVisible(True)
 
         parameters_tab_bar = QToolBar("Fit Parameters Tab", mw)
         parameters_tab_bar.setMovable(False)
