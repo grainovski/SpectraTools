@@ -392,8 +392,13 @@ def test_fit_recovers_from_a_deliberately_bad_initial_width_guess():
     the old region_width/(4*n_peaks) heuristic), all three peaks must
     still land near their true positions with positive amplitude."""
     x, y = _make_spectrum(
+        # _make_spectrum's peaks tuples are (amplitude, position, sigma) --
+        # confirmed against its unpacking (`for amplitude, position, sigma
+        # in peaks`) after an earlier draft of this test had them backwards
+        # and silently placed peaks at x=500/350/420, outside the fit
+        # region entirely.
         channels=300,
-        peaks=[(100.0, 500.0, 3.0), (108.0, 350.0, 3.0), (117.0, 420.0, 3.0)],
+        peaks=[(500.0, 100.0, 3.0), (350.0, 108.0, 3.0), (420.0, 117.0, 3.0)],
         slope=0.0, intercept=20.0,
     )
     result = fit_peaks(
