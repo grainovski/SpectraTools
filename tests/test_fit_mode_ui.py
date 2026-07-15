@@ -3,7 +3,7 @@ import pytest
 from matplotlib.backend_bases import MouseEvent
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QTableWidgetItem
 
 from main_window import MainWindow
 from peak_fit import FitResult, PeakResult, hypermet_left_tail
@@ -105,6 +105,179 @@ def test_marks_persist_after_a_successful_fit(qapp):
     assert main_window.fit_controller.state.fit_region == pytest.approx((85.0, 115.0))
     assert main_window.fit_controller.state.peak_positions == pytest.approx([100.0])
     assert main_window.fit_button.isEnabled() is True
+
+
+def test_results_table_shows_one_row_per_peak_with_explicit_columns(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+
+    table = main_window.fit_controller.results_table
+    assert table.rowCount() == 1
+    assert table.item(0, 1).text() == "1"  # Peak column, 1-based
+    assert table.item(0, 2).text().startswith("100.0")  # Position
+    assert "±" in table.item(0, 2).text()
+    assert "±" in table.item(0, 3).text()  # FWHM
+    assert "±" in table.item(0, 4).text()  # Volume
+
+
+def test_results_table_has_one_row_per_peak_across_a_multi_peak_fit(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(10.0, 20.0), right_bg_region=(180.0, 190.0),
+            fit_region=(90.0, 130.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0, amplitude=200.0, sigma=2.0,
+                ),
+                PeakResult(
+                    position=120.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=800.0, area_err=40.0, amplitude=160.0, sigma=2.0,
+                ),
+            ],
+        )
+    )
+    main_window.fit_controller.update_results_list()
+
+    table = main_window.fit_controller.results_table
+    assert table.rowCount() == 2
+    assert table.item(0, 1).text() == "1"
+    assert table.item(1, 1).text() == "2"
+    assert table.item(0, 0).text() == table.item(1, 0).text()  # same Fit cell
+
+
+def test_results_table_dims_hidden_fit_rows(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(10.0, 20.0), right_bg_region=(180.0, 190.0),
+            fit_region=(90.0, 110.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0, amplitude=200.0, sigma=2.0,
+                )
+            ],
+            visible=False,
+        )
+    )
+    main_window.fit_controller.update_results_list()
+
+    table = main_window.fit_controller.results_table
+    default_color = QTableWidgetItem().foreground()
+    assert table.item(0, 0).foreground() != default_color
+
+
+def test_remove_fit_from_context_menu_removes_the_correct_fit_by_row(qapp, monkeypatch):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(10.0, 20.0), right_bg_region=(180.0, 190.0),
+            fit_region=(30.0, 50.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=40.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=500.0, area_err=25.0, amplitude=100.0, sigma=2.0,
+                )
+            ],
+        )
+    )
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0, amplitude=200.0, sigma=2.0,
+                )
+            ],
+        )
+    )
+    main_window.fit_controller.update_results_list()
+    table = main_window.fit_controller.results_table
+    assert table.rowCount() == 2
+    second_row_item = table.item(1, 0)
+
+    import fit_mode
+    from PySide6.QtWidgets import QMenu
+
+    class ImmediateMenu(QMenu):
+        """Stands in for QMenu during this test. PySide6's compiled
+        QMenu.exec() can't be intercepted by monkeypatching the class
+        attribute the way addAction can -- Shiboken resolves exec()
+        for a plain QMenu instance through a C-level slot that bypasses
+        the patched Python attribute entirely, so the real (blocking,
+        modal) popup would still run and this test would hang forever
+        waiting for a selection that never comes. Overriding exec() on
+        a genuine subclass works because that's ordinary Python
+        instance-attribute resolution, not a monkeypatch of the base
+        class -- it picks "Remove Fit" out of the real actions actually
+        added via the real (unpatched) addAction, without ever opening
+        a popup."""
+
+        def exec(self, *args, **kwargs):
+            for action in self.actions():
+                if action.text() == "Remove Fit":
+                    return action
+            return None
+
+    monkeypatch.setattr(fit_mode, "QMenu", ImmediateMenu)
+
+    position = table.visualItemRect(second_row_item).center()
+    main_window.fit_controller._on_results_context_menu(position)
+
+    assert len(spectrum.fits) == 1
+    assert spectrum.fits[0].fit_region == (30.0, 50.0)
+
+
+def test_double_click_a_peak_row_reloads_its_parent_fit(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(10.0, 20.0), right_bg_region=(180.0, 190.0),
+            fit_region=(30.0, 50.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=40.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=500.0, area_err=25.0, amplitude=100.0, sigma=2.0,
+                )
+            ],
+        )
+    )
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0, amplitude=200.0, sigma=2.0,
+                )
+            ],
+        )
+    )
+    main_window.fit_controller.update_results_list()
+    table = main_window.fit_controller.results_table
+
+    main_window.fit_controller._on_result_double_clicked(table.item(1, 0))
+
+    assert main_window.fit_controller.state.fit_region == pytest.approx((85.0, 115.0))
+    assert main_window.fit_controller.state.peak_positions == pytest.approx([100.0])
 
 
 def test_refitting_same_marks_with_changed_checkbox_appends_a_new_entry(qapp):
@@ -324,7 +497,7 @@ def test_double_click_reloads_a_committed_fit_for_editing(qapp):
     main_window.fit_controller.clear()
     assert main_window.fit_controller.state.bg_regions == []
 
-    item = main_window.fit_controller.results_list.item(1)
+    item = main_window.fit_controller.results_table.item(1, 0)
     main_window.fit_controller._on_result_double_clicked(item)
 
     regions = main_window.fit_controller.state.bg_regions
@@ -458,7 +631,7 @@ def test_double_click_reloads_a_left_tail_fit_and_refitting_appends_a_new_entry(
 
     main_window.fit_controller.clear()
 
-    item = main_window.fit_controller.results_list.item(1)
+    item = main_window.fit_controller.results_table.item(1, 0)
     main_window.fit_controller._on_result_double_clicked(item)
 
     assert main_window.left_tail_action.isChecked() is True
@@ -796,10 +969,10 @@ def test_results_panel_lists_committed_fit(qapp):
 
     main_window.fit_controller.update_results_list()
 
-    assert main_window.fit_controller.results_list.count() == 1
-    text = main_window.fit_controller.results_list.item(0).text()
-    assert "100.00" in text
-    assert "5.00" in text
+    table = main_window.fit_controller.results_table
+    assert table.rowCount() == 1
+    assert "100.00" in table.item(0, 2).text()  # Position
+    assert "5.00" in table.item(0, 3).text()  # FWHM
 
 
 def test_results_panel_updates_when_active_spectrum_changes(qapp):
@@ -811,11 +984,11 @@ def test_results_panel_updates_when_active_spectrum_changes(qapp):
     spectrum_b = LoadedSpectrum("b.txt", y, "#ff7f0e")
     main_window.spectra.extend([spectrum_a, spectrum_b])
     main_window.fit_controller.update_results_list()
-    assert main_window.fit_controller.results_list.count() == 1
+    assert main_window.fit_controller.results_table.rowCount() == 1
 
     main_window._on_active_toggled("b.txt", True)
 
-    assert main_window.fit_controller.results_list.count() == 0
+    assert main_window.fit_controller.results_table.rowCount() == 0
 
 
 def test_clear_all_fits_empties_panel_and_spectrum(qapp):
@@ -831,7 +1004,7 @@ def test_clear_all_fits_empties_panel_and_spectrum(qapp):
     main_window._plot_data()
     main_window.fit_controller.update_results_list()
 
-    assert main_window.fit_controller.results_list.count() == 0
+    assert main_window.fit_controller.results_table.rowCount() == 0
 
 
 def test_clear_progress_survives_an_intervening_full_replot(qapp):
@@ -971,7 +1144,7 @@ def test_results_panel_shows_tail_and_width_link_info(qapp):
 
     main_window.fit_controller.update_results_list()
 
-    text = main_window.fit_controller.results_list.item(0).text()
-    assert "independent widths" in text
-    assert "r=0.10" in text
-    assert "volume excludes tail" in text
+    tooltip = main_window.fit_controller.results_table.item(0, 0).toolTip()
+    assert "independent widths" in tooltip
+    assert "r=0.10" in tooltip
+    assert "volume excludes tail" in tooltip

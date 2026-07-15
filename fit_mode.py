@@ -2,10 +2,9 @@ import time
 
 import numpy as np
 from PySide6.QtCore import QEvent, QObject, Qt
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QDockWidget, QListWidget, QListWidgetItem, QMenu, QTableWidget,
-    QTableWidgetItem, QToolBar,
+    QCheckBox, QDockWidget, QMenu, QTableWidget, QTableWidgetItem, QToolBar,
 )
 
 from peak_fit import (
@@ -139,6 +138,7 @@ class FitModeController(QObject):
         self._progress_artists = []
         self._status_message_until = 0.0
         self._parameter_names_shown = []
+        self._results_row_fit_index = []
 
         canvas = main_window.canvas
         canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -319,13 +319,16 @@ class FitModeController(QObject):
 
     def build_results_panel(self):
         mw = self.main_window
-        self.results_list = QListWidget()
-        self.results_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.results_list.customContextMenuRequested.connect(self._on_results_context_menu)
-        self.results_list.itemDoubleClicked.connect(self._on_result_double_clicked)
+        self.results_table = QTableWidget(0, 5)
+        self.results_table.setHorizontalHeaderLabels(
+            ["Fit", "Peak", "Position", "FWHM", "Volume"]
+        )
+        self.results_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.results_table.customContextMenuRequested.connect(self._on_results_context_menu)
+        self.results_table.itemDoubleClicked.connect(self._on_result_double_clicked)
 
         self.results_dock = QDockWidget("Fit Results", mw)
-        self.results_dock.setWidget(self.results_list)
+        self.results_dock.setWidget(self.results_table)
         mw.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.results_dock)
 
         self.toggle_results_panel_action = QAction("Fit Results", mw)
@@ -431,43 +434,59 @@ class FitModeController(QObject):
         return fixed
 
     def update_results_list(self):
-        self.results_list.clear()
+        self.results_table.setRowCount(0)
+        self._results_row_fit_index = []
         active = next((s for s in self.main_window.spectra if s.active), None)
         if active is None:
             return
-        for result in active.fits:
-            header = f"Fit region [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]"
+        for fit_index, result in enumerate(active.fits):
+            fit_label = f"{fit_index + 1} [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]"
+            tooltip_lines = []
             if not result.link_widths:
-                header += "  (independent widths)"
+                tooltip_lines.append("independent widths")
             if result.tail_fraction is not None:
-                header += (
-                    f"  (left tail: r={result.tail_fraction:.2f}"
+                tooltip_lines.append(
+                    f"left tail: r={result.tail_fraction:.2f}"
                     f"±{result.tail_fraction_err:.2f}, "
-                    f"β={result.tail_beta:.1f}±{result.tail_beta_err:.1f}, "
-                    f"volume excludes tail)"
+                    f"β={result.tail_beta:.1f}±{result.tail_beta_err:.1f} "
+                    f"(volume excludes tail)"
                 )
-            lines = [header]
-            for i, peak in enumerate(result.peaks, start=1):
-                lines.append(
-                    f"  Peak {i}: pos={peak.position:.2f}±{peak.position_err:.2f}  "
-                    f"FWHM={peak.fwhm:.2f}±{peak.fwhm_err:.2f}  "
-                    f"volume={peak.area:.1f}±{peak.area_err:.1f}"
-                )
-            self.results_list.addItem(QListWidgetItem("\n".join(lines)))
+            tooltip = "\n".join(tooltip_lines)
+
+            for peak_index, peak in enumerate(result.peaks):
+                row = self.results_table.rowCount()
+                self.results_table.insertRow(row)
+                self._results_row_fit_index.append(fit_index)
+
+                values = [
+                    fit_label,
+                    str(peak_index + 1),
+                    f"{peak.position:.2f} ± {peak.position_err:.2f}",
+                    f"{peak.fwhm:.2f} ± {peak.fwhm_err:.2f}",
+                    f"{peak.area:.1f} ± {peak.area_err:.1f}",
+                ]
+                for col, text in enumerate(values):
+                    item = QTableWidgetItem(text)
+                    item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                    if col == 0:
+                        item.setToolTip(tooltip)
+                    if not result.visible:
+                        item.setForeground(QColor("gray"))
+                    self.results_table.setItem(row, col, item)
 
     def _on_results_context_menu(self, position):
         mw = self.main_window
-        item = self.results_list.itemAt(position)
+        item = self.results_table.itemAt(position)
         menu = QMenu(mw)
         remove_action = menu.addAction("Remove Fit") if item is not None else None
         clear_action = menu.addAction("Clear All Fits")
-        chosen = menu.exec(self.results_list.viewport().mapToGlobal(position))
+        chosen = menu.exec(self.results_table.viewport().mapToGlobal(position))
         active = next((s for s in mw.spectra if s.active), None)
         if active is None:
             return
         if item is not None and chosen == remove_action:
-            index = self.results_list.row(item)
-            del active.fits[index]
+            fit_index = self._results_row_fit_index[item.row()]
+            del active.fits[fit_index]
             mw._plot_data(preserve_view=True)
         elif chosen == clear_action:
             active.fits.clear()
@@ -477,8 +496,8 @@ class FitModeController(QObject):
         active = next((s for s in self.main_window.spectra if s.active), None)
         if active is None:
             return
-        index = self.results_list.row(item)
-        result = active.fits[index]
+        fit_index = self._results_row_fit_index[item.row()]
+        result = active.fits[fit_index]
 
         self._clear_progress()
 
