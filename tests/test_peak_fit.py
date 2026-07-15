@@ -557,16 +557,20 @@ def test_fit_rejects_too_few_points_for_peak_count():
 
 def test_fit_raises_on_non_convergence():
     # Three peaks requested at the exact same position, each with its own
-    # independent sigma (link_widths=False), start curve_fit with three
-    # identical parameter triplets, so their Jacobian columns are identical
-    # at every iteration (a perfectly singular Jacobian). MINPACK's
-    # Levenberg-Marquardt exhausts its default maxfev before ever breaking
-    # that symmetry, so curve_fit raises RuntimeError, which fit_peaks must
-    # convert to FitError. (With the default link_widths=True, the shared
-    # single sigma removes enough degrees of freedom from this degenerate
-    # setup that curve_fit actually settles onto a stationary point along
-    # the still-undetermined amplitude/position split, so this test needs
-    # link_widths=False to keep exercising the non-convergence path.)
+    # independent sigma (link_widths=False), start with three identical
+    # parameter triplets, so their Jacobian columns are numerically
+    # identical at every iteration (a perfectly singular Jacobian). The
+    # damped Marquardt solver still "converges" to a stationary point --
+    # it doesn't raise on its own the way MINPACK's curve_fit used to --
+    # but that point's curvature matrix is too ill-conditioned to invert
+    # into a physically valid covariance, so its diagonal goes negative.
+    # fit_peaks()'s explicit `np.any(np.diag(pcov) < 0)` check catches
+    # exactly this and converts it to FitError. (With the default
+    # link_widths=True, the shared single sigma removes enough degrees of
+    # freedom from this degenerate setup that the fit actually settles
+    # onto a stationary point along the still-undetermined
+    # amplitude/position split without a negative-diagonal covariance, so
+    # this test needs link_widths=False to keep exercising this path.)
     x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0)
     with pytest.raises(FitError):
         fit_peaks(
