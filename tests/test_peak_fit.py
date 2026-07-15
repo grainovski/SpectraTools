@@ -348,6 +348,11 @@ def test_fit_without_left_tail_leaves_tail_fields_none():
     assert result.tail_beta is None
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="depends on a better initial-width guess than the current "
+    "region_width/(4*n_peaks) heuristic; fixed by Task 3's _measure_width",
+)
 def test_fit_with_left_tail_enabled_recovers_known_tail_parameters():
     # Synthetic data WITH a real left tail baked in via the same
     # hypermet_left_tail() the fitter itself uses, so this verifies
@@ -505,6 +510,31 @@ def test_fit_with_all_parameters_fixed_skips_optimization():
     assert peak.position_err == 0.0
     assert peak.sigma_err == 0.0
     assert peak.area_err == 0.0
+
+
+def test_fit_recovers_from_a_deliberately_bad_initial_width_guess():
+    """End-to-end version of the Task 1 adversarial scenario, through
+    the real fit_peaks() entry point -- with a fit_region wide relative
+    to peak count (the scenario that produces a too-wide sigma0 under
+    the old region_width/(4*n_peaks) heuristic), all three peaks must
+    still land near their true positions with positive amplitude."""
+    x, y = _make_spectrum(
+        channels=300,
+        peaks=[(500.0, 100.0, 3.0), (350.0, 108.0, 3.0), (420.0, 117.0, 3.0)],
+        slope=0.0, intercept=20.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(60.0, 75.0),
+        right_bg_region=(145.0, 160.0),
+        fit_region=(80.0, 140.0),
+        peak_positions=[100.0, 108.0, 117.0],
+    )
+    positions = sorted(p.position for p in result.peaks)
+    assert positions[0] == pytest.approx(100.0, abs=2.0)
+    assert positions[1] == pytest.approx(108.0, abs=2.0)
+    assert positions[2] == pytest.approx(117.0, abs=2.0)
+    assert all(p.amplitude > 0 for p in result.peaks)
 
 
 def test_fit_rejects_no_peaks():

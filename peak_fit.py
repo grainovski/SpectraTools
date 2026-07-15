@@ -2,7 +2,6 @@ import math
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy.optimize import curve_fit
 from scipy.special import erfc
 
 FWHM_FACTOR = 2.3548200450309493  # 2*sqrt(2*ln(2))
@@ -202,26 +201,30 @@ def _initial_guess(free_names, x_fit, y_sub, fit_region, peak_positions, link_wi
     return [guess_by_name[name] for name in free_names]
 
 
-def _bounds(free_names, enable_left_tail):
-    """Only needed when enable_left_tail is True (to keep the tail
-    fraction genuinely small and the decay constant away from zero);
-    returns None otherwise so the no-tail fits keep using curve_fit's
-    default unconstrained method, unchanged from v1's behavior."""
-    if not enable_left_tail:
-        return None
-    bounds_by_name = {}
+def _build_param_damping(free_names, fixed_params, link_widths):
+    """Translates the free-parameter name list into _ParamDamping
+    metadata for _marquardt_fit, dispatching on each name's prefix --
+    the same naming _parameter_names() already establishes as the
+    single source of truth for parameter identity."""
+    free_index = {name: i for i, name in enumerate(free_names)}
+    damping = []
     for name in free_names:
-        if name == "tail_fraction":
-            bounds_by_name[name] = (0.0, TAIL_FRACTION_MAX)
-        elif name == "tail_beta":
-            bounds_by_name[name] = (TAIL_BETA_MIN, np.inf)
+        if name.startswith("amp_"):
+            damping.append(_ParamDamping("amp"))
+        elif name.startswith("pos_"):
+            peak_idx = name.split("_", 1)[1]
+            sigma_name = "sigma" if link_widths else f"sigma_{peak_idx}"
+            if sigma_name in free_index:
+                damping.append(_ParamDamping("pos", sigma_index=free_index[sigma_name]))
+            else:
+                damping.append(_ParamDamping("pos", sigma_value=fixed_params[sigma_name]))
         elif name == "sigma" or name.startswith("sigma_"):
-            bounds_by_name[name] = (1e-6, np.inf)
-        else:
-            bounds_by_name[name] = (-np.inf, np.inf)
-    lower = [bounds_by_name[name][0] for name in free_names]
-    upper = [bounds_by_name[name][1] for name in free_names]
-    return (lower, upper)
+            damping.append(_ParamDamping("sigma"))
+        elif name == "tail_fraction":
+            damping.append(_ParamDamping("tail_fraction"))
+        elif name == "tail_beta":
+            damping.append(_ParamDamping("tail_beta"))
+    return damping
 
 
 def fit_peaks(
@@ -271,22 +274,24 @@ def fit_peaks(
             free_names, x_fit, y_sub, fit_region, peak_positions, link_widths, enable_left_tail
         )
         y_err = np.sqrt(np.maximum(y_fit, 1.0))
-        model = _make_model(names, free_names, fixed_params, n_peaks, link_widths, enable_left_tail)
-        bounds = _bounds(free_names, enable_left_tail)
+        model_named = _make_model(names, free_names, fixed_params, n_peaks, link_widths, enable_left_tail)
+        model = lambda xx, pp: model_named(xx, *pp)
+        damping = _build_param_damping(free_names, fixed_params, link_widths)
 
         try:
-            if bounds is not None:
-                popt, pcov = curve_fit(
-                    model, x_fit, y_sub, p0=p0, sigma=y_err, absolute_sigma=True, bounds=bounds
-                )
-            else:
-                popt, pcov = curve_fit(
-                    model, x_fit, y_sub, p0=p0, sigma=y_err, absolute_sigma=True
-                )
-        except (RuntimeError, ValueError) as exc:
+            popt, pcov = _marquardt_fit(
+                model, x_fit, y_sub, y_err, p0, damping, fit_region_bounds=fit_region,
+            )
+        except np.linalg.LinAlgError as exc:
             raise FitError(f"Fit did not converge: {exc}") from exc
 
-        if pcov is None or not np.all(np.isfinite(pcov)):
+        if pcov is None or not np.all(np.isfinite(pcov)) or np.any(np.diag(pcov) < 0):
+            # A covariance matrix's diagonal holds variances, which
+            # become perr via sqrt() below -- a negative diagonal entry
+            # is never physically valid (it would silently corrupt the
+            # UI with NaN uncertainties). Off-diagonal negative entries
+            # are untouched by this check -- those are legitimate for
+            # correlated parameters.
             raise FitError("Fit produced a non-finite covariance matrix")
 
         perr = np.sqrt(np.diag(pcov))

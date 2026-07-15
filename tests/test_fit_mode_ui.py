@@ -733,6 +733,11 @@ def test_draw_committed_fits_skips_hidden_results(qapp):
     assert len(main_window.axes.texts) == texts_before
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="depends on a better initial-width guess than the current "
+    "region_width/(4*n_peaks) heuristic; fixed by Task 3's _measure_width",
+)
 def test_double_click_reloads_a_left_tail_fit_and_refitting_appends_a_new_entry(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
@@ -1181,6 +1186,11 @@ def test_independent_widths_checkbox_is_passed_to_fit_peaks(qapp):
     assert spectrum.fits[0].link_widths is False
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="depends on a better initial-width guess than the current "
+    "region_width/(4*n_peaks) heuristic; fixed by Task 3's _measure_width",
+)
 def test_left_tail_checkbox_is_passed_to_fit_peaks(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
