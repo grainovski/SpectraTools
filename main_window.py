@@ -160,6 +160,19 @@ class MainWindow(QMainWindow):
         self.canvas.mpl_connect("button_press_event", self._on_canvas_click)
         self._update_fit_mode_availability()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        # b/r/p marking depends entirely on the canvas holding keyboard
+        # focus (see FitModeController.eventFilter). The Fit Parameters
+        # dock is visible from app startup and contains focusable
+        # checkboxes/a table, so on some window managers the initial
+        # focus assignment on first show can land there instead of the
+        # canvas -- explicitly reclaim it every time the window is shown
+        # rather than relying solely on figure_enter_event (mouse-move
+        # into the plot), which only fires after the user has already
+        # moved the cursor there.
+        self.canvas.setFocus()
+
     def _build_menu(self):
         file_menu = self.menuBar().addMenu("&File")
 
