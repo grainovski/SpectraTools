@@ -278,6 +278,8 @@ class FitModeController(QObject):
         # current y-axis scale (linear or log) or zoom level.
         label_transform = axes.get_xaxis_transform()
         for result in spectrum.fits:
+            if not result.visible:
+                continue
             axes.axvspan(*result.left_bg_region, color="gray", alpha=0.15)
             axes.axvspan(*result.right_bg_region, color="gray", alpha=0.15)
             axes.axvspan(*result.fit_region, color="tab:blue", alpha=0.1)
@@ -534,6 +536,19 @@ class FitModeController(QObject):
         except FitError as exc:
             self._show_status_message(f"Fit failed: {exc}", 5000)
             return
+        # Re-fitting the exact same marks (e.g. after toggling a
+        # checkbox) is a supported workflow, not a mistake -- but
+        # drawing every attempt at the identical region on top of the
+        # others is just visual clutter. Only the latest attempt at a
+        # given region is drawn; every attempt stays listed in Fit
+        # Results.
+        for earlier in active.fits:
+            if (
+                earlier.left_bg_region == result.left_bg_region
+                and earlier.right_bg_region == result.right_bg_region
+                and earlier.fit_region == result.fit_region
+            ):
+                earlier.visible = False
         active.fits.append(result)
         names = parameter_names(len(result.peaks), result.link_widths, result.tail_fraction is not None)
         self.update_parameters_panel(names, fit_result_values_by_name(result))

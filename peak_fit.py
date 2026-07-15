@@ -80,6 +80,7 @@ class FitResult:
     tail_beta: float = None
     tail_beta_err: float = None
     fixed_params: dict = field(default_factory=dict)
+    visible: bool = True
 
 
 def _region_centroid(x, y, region):

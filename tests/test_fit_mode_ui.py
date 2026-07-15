@@ -341,6 +341,90 @@ def test_double_click_reloads_a_committed_fit_for_editing(qapp):
     assert reloaded_table.cellWidget(0, 2).isChecked() is False  # amplitude was free
 
 
+def test_refitting_same_marks_hides_the_earlier_result(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+    main_window.independent_widths_action.setChecked(True)
+    main_window.fit_controller.run_fit()
+
+    assert len(spectrum.fits) == 2
+    assert spectrum.fits[0].visible is False
+    assert spectrum.fits[1].visible is True
+
+
+def test_refitting_a_different_region_does_not_hide_the_first(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+
+    _held_key_click(main_window, "b", 20)
+    _held_key_click(main_window, "b", 35)
+    _held_key_click(main_window, "b", 165)
+    _held_key_click(main_window, "b", 180)
+    _held_key_click(main_window, "r", 35)
+    _held_key_click(main_window, "r", 165)
+    # Peak marks persist across fits (see the 2026-07-14 "marks persist"
+    # change), so the x=100 mark from the first fit is still present and
+    # within pixel-proximity of this same x -- one "p" click here would
+    # just remove that stale mark instead of adding a fresh one. Click
+    # twice: the first click removes the stale mark, the second re-adds
+    # it, leaving a single peak at x=100 as intended.
+    _held_key_click(main_window, "p", 100)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+
+    assert len(spectrum.fits) == 2
+    assert spectrum.fits[0].visible is True
+    assert spectrum.fits[1].visible is True
+
+
+def test_draw_committed_fits_skips_hidden_results(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1,
+                    fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0,
+                    amplitude=200.0, sigma=2.0,
+                )
+            ],
+            visible=False,
+        )
+    )
+
+    lines_before = len(main_window.axes.lines)
+    patches_before = len(main_window.axes.patches)
+    texts_before = len(main_window.axes.texts)
+    main_window.fit_controller.draw_committed_fits(spectrum)
+
+    assert len(main_window.axes.lines) == lines_before
+    assert len(main_window.axes.patches) == patches_before
+    assert len(main_window.axes.texts) == texts_before
+
+
 def test_double_click_reloads_a_left_tail_fit_and_refitting_appends_a_new_entry(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
