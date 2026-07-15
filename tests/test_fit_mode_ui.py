@@ -280,6 +280,84 @@ def test_double_click_a_peak_row_reloads_its_parent_fit(qapp):
     assert main_window.fit_controller.state.peak_positions == pytest.approx([100.0])
 
 
+def test_row_to_fit_index_mapping_survives_an_earlier_multi_peak_fit(qapp, monkeypatch):
+    # The first fit contributes TWO rows (0 and 1); the second fit's
+    # single peak lands on row 2. A naive `item.row()`-as-fit-index
+    # (i.e. skipping the self._results_row_fit_index[...] lookup) would
+    # read active.fits[2], which doesn't exist for a 2-fit spectrum, or
+    # would otherwise misattribute row 2 to the wrong fit -- every other
+    # row-mapping test in this file uses only single-peak fits, so row
+    # index and fit index always coincide there by construction and
+    # can't catch this class of bug.
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(10.0, 20.0), right_bg_region=(60.0, 70.0),
+            fit_region=(30.0, 50.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=40.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=500.0, area_err=25.0, amplitude=100.0, sigma=2.0,
+                ),
+                PeakResult(
+                    position=45.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=400.0, area_err=20.0, amplitude=80.0, sigma=2.0,
+                ),
+            ],
+        )
+    )
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0, amplitude=200.0, sigma=2.0,
+                )
+            ],
+        )
+    )
+    main_window.fit_controller.update_results_list()
+    table = main_window.fit_controller.results_table
+    assert table.rowCount() == 3
+    third_row_item = table.item(2, 0)
+
+    # Double-clicking row 2 must reload the SECOND fit (fit_region
+    # 85-115, single peak at 100.0) -- not raise an IndexError from
+    # active.fits[2], and not silently reload the first fit instead.
+    main_window.fit_controller._on_result_double_clicked(third_row_item)
+
+    assert main_window.fit_controller.state.fit_region == pytest.approx((85.0, 115.0))
+    assert main_window.fit_controller.state.peak_positions == pytest.approx([100.0])
+
+    import fit_mode
+    from PySide6.QtWidgets import QMenu
+
+    class ImmediateMenu(QMenu):
+        """See test_remove_fit_from_context_menu_removes_the_correct_fit_by_row
+        for why this subclass -- rather than monkeypatching QMenu.exec
+        directly -- is needed to avoid hanging on a real modal popup."""
+
+        def exec(self, *args, **kwargs):
+            for action in self.actions():
+                if action.text() == "Remove Fit":
+                    return action
+            return None
+
+    monkeypatch.setattr(fit_mode, "QMenu", ImmediateMenu)
+
+    # Removing via row 2's context menu must delete the SECOND fit only,
+    # leaving the first (2-peak) fit untouched.
+    position = table.visualItemRect(third_row_item).center()
+    main_window.fit_controller._on_results_context_menu(position)
+
+    assert len(spectrum.fits) == 1
+    assert len(spectrum.fits[0].peaks) == 2
+    assert spectrum.fits[0].fit_region == (30.0, 50.0)
+
+
 def test_refitting_same_marks_with_changed_checkbox_appends_a_new_entry(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
