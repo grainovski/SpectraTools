@@ -343,6 +343,25 @@ class FitModeController(QObject):
                     )
             axes.plot(x_dense, total, color="red", linewidth=1.5)
 
+            # Peak decomposition: each peak's own contribution (background
+            # + that single peak), so a multi-peak fit visually shows how
+            # the total curve above decomposes into its components.
+            background_dense = result.background_slope * x_dense + result.background_intercept
+            for peak in result.peaks:
+                if result.tail_fraction is not None:
+                    component = peak.amplitude * hypermet_left_tail(
+                        x_dense, peak.position, peak.sigma,
+                        result.tail_fraction, result.tail_beta,
+                    )
+                else:
+                    component = peak.amplitude * np.exp(
+                        -((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2)
+                    )
+                axes.plot(
+                    x_dense, background_dense + component,
+                    color="red", linewidth=0.75, linestyle="--", alpha=0.6,
+                )
+
             for peak in result.peaks:
                 axes.axvline(peak.position, color="red", linestyle=":", linewidth=1)
                 axes.annotate(

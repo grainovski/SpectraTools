@@ -733,6 +733,39 @@ def test_draw_committed_fits_skips_hidden_results(qapp):
     assert len(main_window.axes.texts) == texts_before
 
 
+def test_draw_committed_fits_draws_one_component_line_per_peak(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(10.0, 20.0), right_bg_region=(180.0, 190.0),
+            fit_region=(90.0, 130.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0, amplitude=200.0, sigma=2.0,
+                ),
+                PeakResult(
+                    position=115.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=800.0, area_err=40.0, amplitude=160.0, sigma=2.0,
+                ),
+            ],
+        )
+    )
+
+    lines_before = len(main_window.axes.lines)
+    main_window.fit_controller.draw_committed_fits(spectrum)
+
+    # Background dashed line (1) + total curve (1) + one axvline position
+    # marker per peak (2, pre-existing) + one new component line per peak
+    # (2) = 6 new lines for this 2-peak fit, on top of whatever was
+    # already there. Confirmed against the current (pre-Task-4) code
+    # directly: for this exact 2-peak fixture, draw_committed_fits adds
+    # exactly 4 lines before this task's change (1+1+2), so the 2 new
+    # component lines bring it to 6.
+    assert len(main_window.axes.lines) == lines_before + 6
+
+
 @pytest.mark.xfail(
     strict=True,
     reason="NOT fixed by Task 3's _measure_width (verified): "
@@ -1087,7 +1120,9 @@ def test_plot_data_draws_committed_fit_overlay(qapp):
     main_window._plot_data()
 
     assert len(main_window.axes.patches) == 3
-    assert len(main_window.axes.lines) == 4
+    # spectrum step line + background dashed line + total curve +
+    # one component line per peak (1) + one axvline per peak (1) = 5.
+    assert len(main_window.axes.lines) == 5
 
 
 def _fit_result_with_one_peak():
@@ -1257,15 +1292,18 @@ def test_plot_data_draws_committed_fit_overlay_with_left_tail(qapp):
     main_window._plot_data()  # must not raise
 
     assert len(main_window.axes.patches) == 3
-    assert len(main_window.axes.lines) == 4
+    # spectrum step line + background dashed line + total curve +
+    # one component line per peak (1) + one axvline per peak (1) = 5.
+    assert len(main_window.axes.lines) == 5
 
     # The drawn curve must reflect the tail-aware formula, not a plain
     # Gaussian -- otherwise this test would pass even if the
     # tail_fraction branch in draw_committed_fits were broken/skipped.
     # Line order from draw_committed_fits: [0] spectrum step line,
-    # [1] background dashed line, [2] total fit curve, [3] peak-position
-    # axvline (one per peak) -- the curve is second-to-last, not last.
-    drawn_curve = main_window.axes.lines[-2].get_ydata()
+    # [1] background dashed line, [2] total fit curve, [3] per-peak
+    # component line, [4] peak-position axvline (one per peak) -- the
+    # total curve is third-from-last here.
+    drawn_curve = main_window.axes.lines[-3].get_ydata()
     x_dense = np.linspace(90.0, 110.0, 200)
     expected_curve = 20.0 + fit_result.peaks[0].amplitude * hypermet_left_tail(
         x_dense, fit_result.peaks[0].position, fit_result.peaks[0].sigma,
