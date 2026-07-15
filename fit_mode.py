@@ -15,6 +15,11 @@ from peak_fit import (
 
 BG_REGION_CAP = 2
 
+BG_REGION_COLOR = "tab:green"
+BG_REGION_ALPHA = 0.3
+FIT_REGION_COLOR = "tab:blue"
+FIT_REGION_ALPHA = 0.2
+
 
 class FitModeState:
     """Tracks in-progress background/fit-region/peak marks made via
@@ -249,7 +254,9 @@ class FitModeController(QObject):
                 axes.axvline(state.pending_bg_click, color="gray", linestyle="--", linewidth=1)
             )
         for region in state.bg_regions:
-            self._progress_artists.append(axes.axvspan(*region, color="gray", alpha=0.15))
+            self._progress_artists.append(
+                axes.axvspan(*region, color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA)
+            )
 
         if state.pending_fit_click is not None:
             self._progress_artists.append(
@@ -257,7 +264,7 @@ class FitModeController(QObject):
             )
         if state.fit_region is not None:
             self._progress_artists.append(
-                axes.axvspan(*state.fit_region, color="tab:blue", alpha=0.1)
+                axes.axvspan(*state.fit_region, color=FIT_REGION_COLOR, alpha=FIT_REGION_ALPHA)
             )
 
         for x in state.peak_positions:
@@ -312,9 +319,9 @@ class FitModeController(QObject):
         for result in spectrum.fits:
             if not result.visible:
                 continue
-            axes.axvspan(*result.left_bg_region, color="gray", alpha=0.15)
-            axes.axvspan(*result.right_bg_region, color="gray", alpha=0.15)
-            axes.axvspan(*result.fit_region, color="tab:blue", alpha=0.1)
+            axes.axvspan(*result.left_bg_region, color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA)
+            axes.axvspan(*result.right_bg_region, color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA)
+            axes.axvspan(*result.fit_region, color=FIT_REGION_COLOR, alpha=FIT_REGION_ALPHA)
 
             lo, hi = result.fit_region
             background_lo = result.background_slope * lo + result.background_intercept
