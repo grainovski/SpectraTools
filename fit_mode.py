@@ -1,5 +1,6 @@
 import sys
 import time
+from datetime import datetime
 
 import numpy as np
 from PySide6.QtCore import QEvent, QObject, Qt
@@ -10,7 +11,8 @@ from PySide6.QtWidgets import (
 )
 
 from peak_fit import (
-    FitError, fit_peaks, fit_result_values_by_name, hypermet_left_tail, parameter_names,
+    FWHM_FACTOR, FitError, fit_peaks, fit_result_values_by_name, hypermet_left_tail,
+    parameter_names,
 )
 
 BG_REGION_CAP = 2
@@ -141,17 +143,40 @@ def _mark_type_for_key_event(event):
 
 def _parameter_label(name):
     """Human-readable row label for a canonical parameter name from
-    peak_fit.parameter_names() -- e.g. "amp_0" -> "Peak 1 amplitude"."""
+    peak_fit.parameter_names() -- e.g. "amp_0" -> "Peak 1 amplitude".
+    Sigma-family names are labeled as FWHM: the panel displays and
+    accepts FWHM, converting to/from the fitting engine's internal
+    sigma at the UI boundary (see _display_value/_panel_value_to_internal
+    below) -- peak_fit.py's own parameter naming and optimizer are
+    untouched."""
     if name == "sigma":
-        return "Shared sigma"
+        return "Shared FWHM"
     if name == "tail_fraction":
         return "Tail fraction (r)"
     if name == "tail_beta":
         return "Tail beta (β)"
     prefix, index = name.rsplit("_", 1)
     peak_num = int(index) + 1
-    kind = {"amp": "amplitude", "pos": "position", "sigma": "sigma"}[prefix]
+    kind = {"amp": "amplitude", "pos": "position", "sigma": "FWHM"}[prefix]
     return f"Peak {peak_num} {kind}"
+
+
+def _is_sigma_name(name):
+    return name == "sigma" or name.startswith("sigma_")
+
+
+def _display_value(name, value):
+    """Converts a canonical parameter's internal value to what the Fit
+    Parameters panel displays -- sigma-family values are shown as FWHM,
+    everything else unchanged."""
+    return value * FWHM_FACTOR if _is_sigma_name(name) else value
+
+
+def _panel_value_to_internal(name, value):
+    """Inverse of _display_value -- converts a value read back from the
+    panel (FWHM for sigma-family rows) to the sigma-space value
+    fit_peaks() expects."""
+    return value / FWHM_FACTOR if _is_sigma_name(name) else value
 
 
 class FitModeController(QObject):
@@ -453,7 +478,12 @@ class FitModeController(QObject):
         checkbox) when the set of parameter names has changed since
         the last fit for these marks; otherwise updates displayed
         values in place, preserving Fix checkbox state and any
-        user-edited fixed values."""
+        user-edited value. Every row's Value cell is always editable:
+        a checked row's edited value is read as a fixed value for the
+        next fit (fixed_params_from_panel); an unchecked row's edited
+        value is read as that parameter's starting guess for the next
+        fit (initial_guess_overrides_from_panel) -- the parameter stays
+        free, the optimizer can still move it."""
         if names != self._parameter_names_shown:
             self.parameters_table.setRowCount(0)
             self._parameter_names_shown = list(names)
@@ -465,49 +495,65 @@ class FitModeController(QObject):
                 label_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 self.parameters_table.setItem(row, 0, label_item)
 
-                value_item = QTableWidgetItem(f"{values_by_name[name]:.6g}")
-                value_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                value_item = QTableWidgetItem(f"{_display_value(name, values_by_name[name]):.6g}")
+                value_item.setFlags(
+                    Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable
+                )
                 self.parameters_table.setItem(row, 1, value_item)
 
                 fix_checkbox = QCheckBox()
-                fix_checkbox.toggled.connect(
-                    lambda checked, r=row: self._on_fix_toggled(r, checked)
-                )
                 self.parameters_table.setCellWidget(row, 2, fix_checkbox)
         else:
             for row, name in enumerate(names):
                 fix_checkbox = self.parameters_table.cellWidget(row, 2)
                 if not fix_checkbox.isChecked():
-                    self.parameters_table.item(row, 1).setText(f"{values_by_name[name]:.6g}")
-
-    def _on_fix_toggled(self, row, checked):
-        value_item = self.parameters_table.item(row, 1)
-        if checked:
-            value_item.setFlags(
-                Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable
-            )
-        else:
-            value_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                    self.parameters_table.item(row, 1).setText(
+                        f"{_display_value(name, values_by_name[name]):.6g}"
+                    )
 
     def fixed_params_from_panel(self):
         """Reads the current Fix checkboxes/values from the Fit
         Parameters panel into a {name: value} dict for the next
         fit_peaks() call. Empty when nothing is fixed (including the
         first fit for a fresh set of marks, before the panel has ever
-        been populated). Raises FitError if a checked row's Value cell
-        isn't a valid number."""
+        been populated). A sigma-family row's Value cell holds FWHM;
+        this converts it back to sigma before returning. Raises
+        FitError if a checked row's Value cell isn't a valid number."""
         fixed = {}
         for row, name in enumerate(self._parameter_names_shown):
             fix_checkbox = self.parameters_table.cellWidget(row, 2)
             if fix_checkbox is not None and fix_checkbox.isChecked():
                 text = self.parameters_table.item(row, 1).text()
                 try:
-                    fixed[name] = float(text)
+                    value = float(text)
                 except ValueError:
                     raise FitError(
                         f"Fixed value for '{_parameter_label(name)}' is not a valid number: {text!r}"
                     )
+                fixed[name] = _panel_value_to_internal(name, value)
         return fixed
+
+    def initial_guess_overrides_from_panel(self):
+        """Mirrors fixed_params_from_panel for unchecked rows: reads
+        each unfixed row's current Value cell as the starting guess for
+        that parameter in the next fit (the parameter stays free -- the
+        optimizer can still move it). Converts a sigma-family row's
+        displayed FWHM back to sigma, same as fixed_params_from_panel.
+        Raises FitError if an unchecked row's Value cell isn't a valid
+        number."""
+        overrides = {}
+        for row, name in enumerate(self._parameter_names_shown):
+            fix_checkbox = self.parameters_table.cellWidget(row, 2)
+            if fix_checkbox is not None and not fix_checkbox.isChecked():
+                text = self.parameters_table.item(row, 1).text()
+                try:
+                    value = float(text)
+                except ValueError:
+                    raise FitError(
+                        f"Value for '{_parameter_label(name)}' is not a valid number: {text!r}"
+                    )
+                overrides[name] = _panel_value_to_internal(name, value)
+        return overrides
 
     def update_results_list(self):
         self.results_table.setRowCount(0)
@@ -612,13 +658,13 @@ class FitModeController(QObject):
         link_widths = not self.main_window.independent_widths_action.isChecked()
         enable_left_tail = self.main_window.left_tail_action.isChecked()
         try:
-            # A Fix checkbox from a since-changed row set (e.g.
-            # independent widths or left tail toggled since the last
-            # fit) names a parameter that no longer exists under the
-            # current configuration -- drop it rather than let
-            # fit_peaks() reject the whole fit, since
-            # update_parameters_panel() would reset that checkbox
-            # anyway once this fit succeeds and rebuilds the row set.
+            # A Fix checkbox (or an edited value) from a since-changed
+            # row set (e.g. independent widths or left tail toggled
+            # since the last fit) names a parameter that no longer
+            # exists under the current configuration -- drop it rather
+            # than let fit_peaks() reject the whole fit, since
+            # update_parameters_panel() would reset that row anyway
+            # once this fit succeeds and rebuilds the row set.
             current_names = set(
                 parameter_names(len(self.state.peak_positions), link_widths, enable_left_tail)
             )
@@ -626,14 +672,19 @@ class FitModeController(QObject):
                 name: value for name, value in self.fixed_params_from_panel().items()
                 if name in current_names
             }
+            initial_guess_overrides = {
+                name: value for name, value in self.initial_guess_overrides_from_panel().items()
+                if name in current_names
+            }
             result = fit_peaks(
                 x, y, left, right, self.state.fit_region, list(self.state.peak_positions),
                 link_widths=link_widths, enable_left_tail=enable_left_tail,
-                fixed_params=fixed_params,
+                fixed_params=fixed_params, initial_guess_overrides=initial_guess_overrides,
             )
         except FitError as exc:
             self._show_status_message(f"Fit failed: {exc}", 5000)
             return
+        result.timestamp = datetime.now().isoformat(timespec="seconds")
         # Re-fitting the exact same marks (e.g. after toggling a
         # checkbox) is a supported workflow, not a mistake -- but
         # drawing every attempt at the identical region on top of the

@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QApplication, QCheckBox, QTableWidgetItem
 
 import fit_mode
 from main_window import MainWindow
-from peak_fit import FitResult, PeakResult, hypermet_left_tail
+from peak_fit import FWHM_FACTOR, FitResult, PeakResult, hypermet_left_tail
 from spectrum import LoadedSpectrum
 
 _QT_KEY = {"b": Qt.Key.Key_B, "r": Qt.Key.Key_R, "p": Qt.Key.Key_P}
@@ -434,7 +434,7 @@ def test_parameters_panel_populates_after_a_fit(qapp):
     table = main_window.fit_controller.parameters_table
     assert table.rowCount() == 3  # amp_0, pos_0, sigma (linked default)
     labels = [table.item(row, 0).text() for row in range(table.rowCount())]
-    assert labels == ["Peak 1 amplitude", "Peak 1 position", "Shared sigma"]
+    assert labels == ["Peak 1 amplitude", "Peak 1 position", "Shared FWHM"]
 
 
 def test_parameters_panel_rebuilds_when_row_set_changes(qapp):
@@ -458,7 +458,7 @@ def test_parameters_panel_rebuilds_when_row_set_changes(qapp):
 
     assert table.rowCount() == 3  # amp_0, pos_0, sigma_0 (independent now)
     labels = [table.item(row, 0).text() for row in range(table.rowCount())]
-    assert labels == ["Peak 1 amplitude", "Peak 1 position", "Peak 1 sigma"]
+    assert labels == ["Peak 1 amplitude", "Peak 1 position", "Peak 1 FWHM"]
     # Row set changed, so the earlier Fix checkbox must not have survived.
     assert table.cellWidget(2, 2).isChecked() is False
 
@@ -549,16 +549,127 @@ def test_fixing_a_parameter_in_the_panel_holds_it_for_the_next_fit(qapp):
 
     main_window.fit_controller.run_fit()
     table = main_window.fit_controller.parameters_table
-    table.cellWidget(2, 2).setChecked(True)  # fix "Shared sigma"
-    table.item(2, 1).setText("5.0")
+    table.cellWidget(2, 2).setChecked(True)  # fix "Shared FWHM"
+    table.item(2, 1).setText("7.0")  # FWHM, not sigma -- the panel now displays/accepts FWHM
 
     main_window.fit_controller.run_fit()
 
     assert len(spectrum.fits) == 2
     second = spectrum.fits[1]
-    assert second.peaks[0].sigma == 5.0
+    assert second.peaks[0].fwhm == pytest.approx(7.0)
     assert second.peaks[0].sigma_err == 0.0
-    assert second.fixed_params == {"sigma": 5.0}
+    assert second.fixed_params.keys() == {"sigma"}
+    assert second.fixed_params["sigma"] == pytest.approx(7.0 / FWHM_FACTOR)
+
+
+def test_parameters_panel_displays_fwhm_not_sigma(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+
+    table = main_window.fit_controller.parameters_table
+    fwhm = spectrum.fits[0].peaks[0].fwhm
+    assert table.item(2, 0).text() == "Shared FWHM"
+    assert table.item(2, 1).text() == f"{fwhm:.6g}"
+
+
+def test_parameters_panel_displays_fwhm_per_peak_when_independent(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window.independent_widths_action.setChecked(True)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+
+    table = main_window.fit_controller.parameters_table
+    labels = [table.item(row, 0).text() for row in range(table.rowCount())]
+    assert labels == ["Peak 1 amplitude", "Peak 1 position", "Peak 1 FWHM"]
+
+
+def test_every_row_value_cell_is_editable_regardless_of_fix_state(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+
+    table = main_window.fit_controller.parameters_table
+    for row in range(table.rowCount()):  # every row unchecked at this point
+        assert table.item(row, 1).flags() & Qt.ItemFlag.ItemIsEditable
+
+    table.cellWidget(0, 2).setChecked(True)
+    assert table.item(0, 1).flags() & Qt.ItemFlag.ItemIsEditable  # still editable once checked
+
+
+def test_run_fit_passes_an_edited_unchecked_row_as_an_initial_guess_override(qapp, monkeypatch):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()  # first fit populates the panel
+
+    table = main_window.fit_controller.parameters_table
+    table.item(0, 1).setText("777")  # edit "Peak 1 amplitude", left unchecked
+
+    captured = {}
+    original_fit_peaks = fit_mode.fit_peaks
+
+    def _spy(*args, **kwargs):
+        captured.update(kwargs)
+        return original_fit_peaks(*args, **kwargs)
+
+    monkeypatch.setattr(fit_mode, "fit_peaks", _spy)
+    main_window.fit_controller.run_fit()
+
+    assert captured["initial_guess_overrides"]["amp_0"] == 777.0
+
+
+def test_run_fit_sets_a_timestamp_on_the_result(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+
+    assert spectrum.fits[0].timestamp is not None
+    assert spectrum.fits[0].timestamp[:4].isdigit()  # sane ISO-8601-ish prefix, not an exact match
 
 
 def test_invalid_fixed_value_shows_a_status_message_instead_of_crashing(qapp):
