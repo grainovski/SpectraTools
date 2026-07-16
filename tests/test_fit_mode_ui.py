@@ -1,3 +1,6 @@
+import os
+import tempfile
+
 import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseEvent
@@ -38,12 +41,20 @@ def _held_key_click(main_window, key_char, xdata, ydata=10.0):
     main_window.fit_controller._held_key = None
 
 
-def _make_active_spectrum(main_window):
+def _make_active_spectrum(main_window, path=None):
+    """`path` should point at a real (or plausible) location on disk --
+    run_fit() writes an auto-log file next to it on every successful
+    fit (see fit_export.append_auto_log). Defaults to a fresh temp
+    directory per call so the many tests that don't care about export
+    behavior never write into the repo; tests that DO care pass an
+    explicit tmp_path-based path."""
+    if path is None:
+        path = os.path.join(tempfile.mkdtemp(), "synthetic.txt")
     y = np.full(200, 20, dtype=np.int64)
     y[97:104] += (
         500 * np.exp(-((np.arange(97, 104) - 100.0) ** 2) / (2 * 3.0 ** 2))
     ).astype(np.int64)
-    spectrum = LoadedSpectrum("synthetic.txt", y, "#1f77b4")
+    spectrum = LoadedSpectrum(path, y, "#1f77b4")
     spectrum.active = True
     main_window.spectra.append(spectrum)
     main_window._plot_data()
@@ -1460,3 +1471,69 @@ def test_results_panel_shows_tail_and_width_link_info(qapp):
     assert "independent widths" in tooltip
     assert "r=0.10" in tooltip
     assert "volume excludes tail" in tooltip
+
+
+def test_run_fit_appends_to_the_auto_log_next_to_the_spectrum_file(qapp, tmp_path):
+    main_window = MainWindow()
+    spectrum_path = str(tmp_path / "eu.spe")
+    _make_active_spectrum(main_window, path=spectrum_path)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+
+    log_path = tmp_path / "eu_fits.jsonl"
+    assert log_path.exists()
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+
+
+def test_run_fit_appends_a_second_line_for_a_second_fit(qapp, tmp_path):
+    main_window = MainWindow()
+    spectrum_path = str(tmp_path / "eu.spe")
+    _make_active_spectrum(main_window, path=spectrum_path)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+    main_window.independent_widths_action.setChecked(True)
+    main_window.fit_controller.run_fit()
+
+    log_path = tmp_path / "eu_fits.jsonl"
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+
+
+def test_run_fit_shows_a_status_message_when_the_auto_log_write_fails(qapp, tmp_path, monkeypatch):
+    main_window = MainWindow()
+    spectrum_path = str(tmp_path / "eu.spe")
+    spectrum = _make_active_spectrum(main_window, path=spectrum_path)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    def _raise(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(fit_mode.fit_export, "append_auto_log", _raise)
+    main_window.fit_controller.run_fit()  # must not raise
+
+    assert len(spectrum.fits) == 1  # the fit still committed
+    assert main_window.statusBar().currentMessage() != ""

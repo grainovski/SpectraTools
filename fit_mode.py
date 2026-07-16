@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+import fit_export
 from peak_fit import (
     FWHM_FACTOR, FitError, fit_peaks, fit_result_values_by_name, hypermet_left_tail,
     parameter_names,
@@ -699,6 +700,10 @@ class FitModeController(QObject):
             ):
                 earlier.visible = False
         active.fits.append(result)
+        try:
+            fit_export.append_auto_log(active.path, result)
+        except OSError as exc:
+            self._show_status_message(f"Could not write fit log: {exc}", 5000)
         names = parameter_names(len(result.peaks), result.link_widths, result.tail_fraction is not None)
         self.update_parameters_panel(names, fit_result_values_by_name(result))
         self.main_window._plot_data(preserve_view=True)
