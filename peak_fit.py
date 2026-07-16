@@ -88,6 +88,7 @@ class FitResult:
     tail_beta_err: float = None
     fixed_params: dict = field(default_factory=dict)
     visible: bool = True
+    timestamp: str = None
 
 
 def _region_centroid(x, y, region):
@@ -166,7 +167,10 @@ def _make_model(names, free_names, fixed_params, n_peaks, link_widths, enable_le
     return model
 
 
-def _initial_guess(free_names, x_fit, y_sub, fit_region, peak_positions, link_widths, enable_left_tail):
+def _initial_guess(
+    free_names, x_fit, y_sub, fit_region, peak_positions, link_widths, enable_left_tail,
+    initial_guess_overrides=None,
+):
     lo, hi = fit_region
     region_width = hi - lo
     n_peaks = len(peak_positions)
@@ -185,6 +189,8 @@ def _initial_guess(free_names, x_fit, y_sub, fit_region, peak_positions, link_wi
     if enable_left_tail:
         guess_by_name["tail_fraction"] = 0.05
         guess_by_name["tail_beta"] = max(sigma0, TAIL_BETA_MIN)
+    if initial_guess_overrides:
+        guess_by_name.update(initial_guess_overrides)
     return [guess_by_name[name] for name in free_names]
 
 
@@ -217,6 +223,7 @@ def _build_param_damping(free_names, fixed_params, link_widths):
 def fit_peaks(
     x, y, left_bg_region, right_bg_region, fit_region, peak_positions,
     link_widths=True, enable_left_tail=False, fixed_params=None,
+    initial_guess_overrides=None,
 ):
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -258,7 +265,8 @@ def fit_peaks(
         err_by_name = {name: 0.0 for name in names}
     else:
         p0 = _initial_guess(
-            free_names, x_fit, y_sub, fit_region, peak_positions, link_widths, enable_left_tail
+            free_names, x_fit, y_sub, fit_region, peak_positions, link_widths, enable_left_tail,
+            initial_guess_overrides=initial_guess_overrides,
         )
         y_err = np.sqrt(np.maximum(y_fit, 1.0))
         model_named = _make_model(names, free_names, fixed_params, n_peaks, link_widths, enable_left_tail)

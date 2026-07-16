@@ -160,6 +160,24 @@ def test_fit_result_visible_defaults_to_true():
     assert result.visible is True
 
 
+def test_fit_result_timestamp_defaults_to_none():
+    peak = PeakResult(
+        position=100.0, position_err=0.1,
+        fwhm=5.0, fwhm_err=0.2,
+        area=1000.0, area_err=50.0,
+        amplitude=200.0, sigma=2.0,
+    )
+    result = FitResult(
+        left_bg_region=(10.0, 20.0),
+        right_bg_region=(180.0, 190.0),
+        fit_region=(90.0, 110.0),
+        background_slope=0.0,
+        background_intercept=20.0,
+        peaks=[peak],
+    )
+    assert result.timestamp is None
+
+
 def test_fit_error_is_an_exception():
     assert issubclass(FitError, Exception)
 
@@ -505,6 +523,55 @@ def test_fit_with_all_parameters_fixed_skips_optimization():
     assert peak.position_err == 0.0
     assert peak.sigma_err == 0.0
     assert peak.area_err == 0.0
+
+
+from peak_fit import _initial_guess
+
+
+def test_initial_guess_overrides_replace_only_the_named_parameters():
+    x, y = _make_spectrum(
+        channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0,
+    )
+    lo, hi = 85.0, 115.0
+    mask = (x >= lo) & (x <= hi)
+    x_fit = x[mask]
+    y_sub = y[mask] - 20.0
+    free_names = ["amp_0", "pos_0", "sigma"]
+
+    p0_default = _initial_guess(
+        free_names, x_fit, y_sub, (lo, hi), [100.0], link_widths=True, enable_left_tail=False,
+    )
+    p0_overridden = _initial_guess(
+        free_names, x_fit, y_sub, (lo, hi), [100.0], link_widths=True, enable_left_tail=False,
+        initial_guess_overrides={"sigma": 7.5},
+    )
+
+    assert p0_overridden[free_names.index("sigma")] == 7.5
+    assert p0_overridden[free_names.index("amp_0")] == p0_default[free_names.index("amp_0")]
+    assert p0_overridden[free_names.index("pos_0")] == p0_default[free_names.index("pos_0")]
+
+
+def test_fit_peaks_accepts_initial_guess_overrides_without_disturbing_a_fixed_value():
+    x, y = _make_spectrum(
+        channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0),
+        right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0),
+        peak_positions=[100.0],
+        fixed_params={"pos_0": 100.0},
+        initial_guess_overrides={"pos_0": 999.0, "sigma": 6.0},
+    )
+    peak = result.peaks[0]
+    # pos_0 is fixed, so its override is never consulted -- the fixed
+    # value wins.
+    assert peak.position == 100.0
+    # sigma is free and started far (6.0) from its true value (3.0) via
+    # the override -- it must still converge to the true value, proving
+    # the override is only a *starting point*, not a held constant.
+    assert peak.sigma == pytest.approx(3.0, rel=0.2)
 
 
 def test_fit_recovers_from_a_deliberately_bad_initial_width_guess():
