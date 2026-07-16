@@ -1709,4 +1709,3 @@ def test_export_shows_a_status_message_when_the_write_fails(qapp, monkeypatch, t
     controller._export_fits(main_window.spectra[0], [0])  # must not raise
 
     assert main_window.statusBar().currentMessage() != ""
-    assert main_window.statusBar().currentMessage() != ""
