@@ -1,0 +1,109 @@
+import json
+import os
+
+
+def auto_log_path(spectrum_path):
+    """Derives the auto-log path from a spectrum's file path -- e.g.
+    ".../eu.spe" -> ".../eu_fits.jsonl", next to the spectrum file."""
+    directory = os.path.dirname(spectrum_path)
+    stem = os.path.splitext(os.path.basename(spectrum_path))[0]
+    return os.path.join(directory, f"{stem}_fits.jsonl")
+
+
+def _peak_record(peak):
+    return {
+        "position": peak.position, "position_err": peak.position_err,
+        "fwhm": peak.fwhm, "fwhm_err": peak.fwhm_err,
+        "amplitude": peak.amplitude, "amplitude_err": peak.amplitude_err,
+        "sigma": peak.sigma, "sigma_err": peak.sigma_err,
+        "area": peak.area, "area_err": peak.area_err,
+    }
+
+
+def fit_result_to_json_record(result, spectrum_path):
+    """Converts one FitResult into a plain dict covering every
+    parameter and uncertainty, ready for json.dumps() -- used by the
+    automatic per-fit log. `spectrum_path` is recorded so a later
+    re-read of the log can be traced back to its source spectrum."""
+    return {
+        "timestamp": result.timestamp,
+        "spectrum_path": spectrum_path,
+        "left_bg_region": list(result.left_bg_region),
+        "right_bg_region": list(result.right_bg_region),
+        "fit_region": list(result.fit_region),
+        "background_slope": result.background_slope,
+        "background_intercept": result.background_intercept,
+        "link_widths": result.link_widths,
+        "tail_fraction": result.tail_fraction,
+        "tail_fraction_err": result.tail_fraction_err,
+        "tail_beta": result.tail_beta,
+        "tail_beta_err": result.tail_beta_err,
+        "fixed_params": dict(result.fixed_params),
+        "peaks": [_peak_record(peak) for peak in result.peaks],
+    }
+
+
+def append_auto_log(spectrum_path, result):
+    """Appends one JSON-Lines record for `result` to
+    `<spectrum_stem>_fits.jsonl`, next to the spectrum file. Raises
+    OSError on failure (e.g. read-only directory) -- the caller must
+    turn that into a non-blocking status message, since a failed log
+    write must never invalidate an already-successful fit."""
+    record = fit_result_to_json_record(result, spectrum_path)
+    path = auto_log_path(spectrum_path)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\n")
+
+
+def _format_err(value, err):
+    return f"{value:.6g} ± {err:.6g}"
+
+
+def fit_result_to_text_report(result, spectrum_path, fit_number=1):
+    """Human-readable report for one fit -- one block, used for both a
+    single-fit export and (joined by write_text_report) an all-fits
+    export. `fit_number` is the fit's 1-based index in the Fit Results
+    list, for the block's heading only."""
+    lines = [
+        f"Fit {fit_number}",
+        f"Spectrum: {spectrum_path}",
+        f"Timestamp: {result.timestamp}",
+        f"Fit region: [{result.fit_region[0]:.2f}, {result.fit_region[1]:.2f}]",
+        f"Left background region: [{result.left_bg_region[0]:.2f}, {result.left_bg_region[1]:.2f}]",
+        f"Right background region: [{result.right_bg_region[0]:.2f}, {result.right_bg_region[1]:.2f}]",
+        f"Background: slope={result.background_slope:.6g}, intercept={result.background_intercept:.6g}",
+        f"Independent widths: {not result.link_widths}",
+    ]
+    if result.tail_fraction is not None:
+        lines.append(
+            f"Left tail: r={_format_err(result.tail_fraction, result.tail_fraction_err)}, "
+            f"beta={_format_err(result.tail_beta, result.tail_beta_err)}"
+        )
+    if result.fixed_params:
+        fixed_text = ", ".join(
+            f"{name}={value:.6g}" for name, value in sorted(result.fixed_params.items())
+        )
+        lines.append(f"Fixed parameters: {fixed_text}")
+    else:
+        lines.append("Fixed parameters: none")
+    lines.append("")
+    for i, peak in enumerate(result.peaks):
+        lines.append(f"  Peak {i + 1}:")
+        lines.append(f"    Position:  {_format_err(peak.position, peak.position_err)}")
+        lines.append(f"    FWHM:      {_format_err(peak.fwhm, peak.fwhm_err)}")
+        lines.append(f"    Amplitude: {_format_err(peak.amplitude, peak.amplitude_err)}")
+        lines.append(f"    Sigma:     {_format_err(peak.sigma, peak.sigma_err)}")
+        lines.append(f"    Area:      {_format_err(peak.area, peak.area_err)}")
+    return "\n".join(lines)
+
+
+def write_text_report(path, results, spectrum_path):
+    """Writes a plain-text report for one or more fits to `path`,
+    overwriting any existing file. `results` is a list of (fit_number,
+    FitResult) pairs, in the order they should appear in the report."""
+    blocks = [
+        fit_result_to_text_report(result, spectrum_path, fit_number=fit_number)
+        for fit_number, result in results
+    ]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n\n".join(blocks) + "\n")
