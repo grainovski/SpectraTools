@@ -91,6 +91,40 @@ class FitResult:
     timestamp: str = None
 
 
+@dataclass
+class IntegrationResult:
+    left_bg_region: tuple
+    right_bg_region: tuple
+    fit_region: tuple
+    background_density: float
+    gross_area: float
+    gross_area_err: float
+    gross_centroid: float
+    gross_centroid_err: float
+    gross_fwhm: float
+    gross_fwhm_err: float
+    gross_skewness: float
+    gross_skewness_err: float
+    background_area: float
+    background_area_err: float
+    background_centroid: float
+    background_centroid_err: float
+    background_fwhm: float
+    background_fwhm_err: float
+    background_skewness: float
+    background_skewness_err: float
+    net_area: float
+    net_area_err: float
+    net_centroid: float
+    net_centroid_err: float
+    net_fwhm: float
+    net_fwhm_err: float
+    net_skewness: float
+    net_skewness_err: float
+    timestamp: str = None
+    visible: bool = True
+
+
 def _region_centroid(x, y, region):
     lo, hi = region
     mask = (x >= lo) & (x <= hi)
@@ -390,6 +424,179 @@ def fit_result_values_by_name(result):
         values["tail_fraction"] = result.tail_fraction
         values["tail_beta"] = result.tail_beta
     return values
+
+
+def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
+    """TV-style direct background-subtracted region sum, ported
+    line-by-line from FIIntegrateRegion's no-fitted-background branch
+    (tv-1.9.13/lib/tv/vsFitInt.c:19-51,194-309) plus the sigma/FWHM
+    conversion from ParseIntPeak (tv-1.9.13/lib/tv/vsFitFmt.c:340-392).
+    Several arithmetic choices below look unusual (asymmetric plain-sum
+    vs abs(sum) normalization between layers/moments; the background's
+    own higher-moment uncertainty terms reusing the *net* distribution's
+    2nd moment rather than its own; the background-sum uncertainty
+    scaling linearly rather than quadratically with region width) --
+    these are deliberate, source-verified TV-parity choices, not bugs,
+    per the design spec. Independently validated (hand-computed moments,
+    flat-background/analytic-peak sanity checks, and a dedicated
+    cross-check proving the moment-reuse quirk is real) before this
+    function was written -- see the design spec's Testing section."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    lo, hi = fit_region
+    mask = (x >= lo) & (x <= hi)
+    idx = x[mask]
+    s = y[mask]
+    ds = s.copy()  # Poisson variance per channel = the count itself
+    n = idx.size
+    if n == 0:
+        raise FitError(f"Fit region {fit_region} contains no data")
+
+    # ---- gross sum & variance (vsFitInt.c:41-43) ----
+    gross_sum = float(np.sum(s))
+    gross_dsum = float(np.sum(ds))
+    gross_area = gross_sum
+    gross_area_err = math.sqrt(gross_dsum)
+
+    # ---- gross moments (vsFitInt.c:45-83) ----
+    g_M1 = g_DM1 = g_M2 = g_DM2 = g_M3 = g_DM3 = 0.0
+    if gross_sum != 0.0:
+        g_M1 = float(np.sum(idx * s)) / gross_sum
+
+        dlt = idx - g_M1
+        dlt2 = dlt ** 2
+        dMom1 = float(np.sum(dlt2 * ds))
+        mom2_raw = float(np.sum(dlt2 * s))
+        g_DM1 = math.sqrt(dMom1) / abs(gross_sum)
+        g_M2 = mom2_raw / gross_sum  # plain sum, not abs
+
+        dlt3 = dlt2 * dlt
+        dDlt_m2 = dlt2 - g_M2
+        dMom2 = float(np.sum((dDlt_m2 ** 2) * ds))
+        mom3_raw = float(np.sum(dlt3 * s))
+        g_DM2 = math.sqrt(dMom2) / abs(gross_sum)
+        g_M3 = mom3_raw / abs(gross_sum)  # abs this time
+
+        term = dlt * (dlt2 - 3.0 * g_M2) - g_M3
+        dMom3 = float(np.sum((term ** 2) * ds))
+        g_DM3 = math.sqrt(dMom3) / abs(gross_sum)
+
+    # ---- background: pooled flat density across BOTH bg regions ----
+    bg_chn = 0
+    bg_count = 0.0
+    bg_dcount = 0.0
+    for region in (left_bg_region, right_bg_region):
+        blo, bhi = region
+        bmask = (x >= blo) & (x <= bhi)
+        bg_chn += int(np.sum(bmask))
+        bg_y = y[bmask]
+        bg_count += float(np.sum(bg_y))
+        bg_dcount += float(np.sum(bg_y))
+
+    if bg_chn > 0:
+        bg_density = bg_count / bg_chn
+        bg_density_var = bg_dcount / (bg_chn * bg_chn)
+    else:
+        bg_density = 0.0
+        bg_density_var = 0.0
+
+    background_area = bg_density * n
+    background_area_var = bg_density_var * n  # linear, not squared (TV quirk, kept)
+    background_area_err = math.sqrt(background_area_var)
+
+    net_sum = gross_sum - background_area
+    net_dsum = gross_dsum + background_area_var
+    net_area = net_sum
+    net_area_err = math.sqrt(net_dsum)
+
+    # ---- background & net moments (vsFitInt.c:223-309) ----
+    bg_M1 = bg_DM1 = bg_M2 = bg_DM2 = bg_M3 = bg_DM3 = 0.0
+    n_M1 = n_DM1 = n_M2 = n_DM2 = n_M3 = n_DM3 = 0.0
+    if net_sum != 0.0 or background_area != 0.0:
+        b = bg_density
+        db = bg_density_var
+        bg_sum = background_area
+
+        mom1_raw = float(np.sum(idx * (s - b)))
+        bgmom1_raw = float(np.sum(idx * b))
+        if bg_sum != 0.0:
+            bg_M1 = bgmom1_raw / abs(bg_sum)
+        if net_sum != 0.0:
+            n_M1 = mom1_raw / abs(net_sum)
+
+        dlt = idx - n_M1
+        dltb = idx - bg_M1
+        dMom1 = float(np.sum((dlt ** 2) * (ds + db)))
+        mom2_raw = float(np.sum((dlt ** 2) * (s - b)))
+        dBgMom1 = float(np.sum((dltb ** 2) * db))
+        bgmom2_raw = float(np.sum((dltb ** 2) * b))
+        if bg_sum != 0.0:
+            bg_DM1 = math.sqrt(dBgMom1) / abs(bg_sum)
+            bg_M2 = bgmom2_raw / abs(bg_sum)  # abs (unlike gross's plain-sum M2)
+        if net_sum != 0.0:
+            n_DM1 = math.sqrt(dMom1) / abs(net_sum)
+            n_M2 = mom2_raw / net_sum  # plain sum, matches gross's convention
+
+        dlt2 = dlt ** 2
+        dltb2 = dltb ** 2
+        dDlt_m2 = dlt2 - n_M2
+        dDltb_m2 = dltb2 - n_M2  # CONFIRMED TV QUIRK: net's M2, not bg's own
+        dMom2 = float(np.sum((dDlt_m2 ** 2) * (ds + db)))
+        mom3_raw = float(np.sum((dlt2 * dlt) * (s - b)))
+        dBgMom2 = float(np.sum((dDltb_m2 ** 2) * db))
+        bgmom3_raw = float(np.sum((dltb2 * dltb) * b))
+        if bg_sum != 0.0:
+            bg_DM2 = math.sqrt(dBgMom2) / abs(bg_sum)
+            bg_M3 = bgmom3_raw / abs(bg_sum)
+        if net_sum != 0.0:
+            n_DM2 = math.sqrt(dMom2) / abs(net_sum)
+            n_M3 = mom3_raw / abs(net_sum)
+
+        term = dlt * (dlt2 - 3.0 * n_M2) - n_M3
+        # CONFIRMED TV QUIRK: net's M2 again, but bg's OWN M3 here.
+        termb = dltb * (dltb2 - 3.0 * n_M2) - bg_M3
+        dMom3 = float(np.sum((term ** 2) * (ds + db)))
+        dBgMom3 = float(np.sum((termb ** 2) * db))
+        if bg_sum != 0.0:
+            bg_DM3 = math.sqrt(dBgMom3) / abs(bg_sum)
+        if net_sum != 0.0:
+            n_DM3 = math.sqrt(dMom3) / abs(net_sum)
+
+    def _to_reported(M1, DM1, M2, DM2, M3, DM3):
+        centroid, centroid_err = M1, DM1
+        sigma = math.sqrt(M2) if M2 >= 0.0 else -math.sqrt(-M2)
+        sigma_err = DM2 / abs(sigma) if sigma != 0.0 else 0.0
+        fwhm = sigma * FWHM_FACTOR
+        fwhm_err = sigma_err * FWHM_FACTOR
+        return centroid, centroid_err, fwhm, fwhm_err, M3, DM3
+
+    g_centroid, g_centroid_err, g_fwhm, g_fwhm_err, g_skew, g_skew_err = _to_reported(
+        g_M1, g_DM1, g_M2, g_DM2, g_M3, g_DM3
+    )
+    bg_centroid, bg_centroid_err, bg_fwhm, bg_fwhm_err, bg_skew, bg_skew_err = _to_reported(
+        bg_M1, bg_DM1, bg_M2, bg_DM2, bg_M3, bg_DM3
+    )
+    n_centroid, n_centroid_err, n_fwhm, n_fwhm_err, n_skew, n_skew_err = _to_reported(
+        n_M1, n_DM1, n_M2, n_DM2, n_M3, n_DM3
+    )
+
+    return IntegrationResult(
+        left_bg_region=tuple(left_bg_region), right_bg_region=tuple(right_bg_region),
+        fit_region=tuple(fit_region), background_density=float(bg_density),
+        gross_area=float(gross_area), gross_area_err=float(gross_area_err),
+        gross_centroid=float(g_centroid), gross_centroid_err=float(g_centroid_err),
+        gross_fwhm=float(g_fwhm), gross_fwhm_err=float(g_fwhm_err),
+        gross_skewness=float(g_skew), gross_skewness_err=float(g_skew_err),
+        background_area=float(background_area), background_area_err=float(background_area_err),
+        background_centroid=float(bg_centroid), background_centroid_err=float(bg_centroid_err),
+        background_fwhm=float(bg_fwhm), background_fwhm_err=float(bg_fwhm_err),
+        background_skewness=float(bg_skew), background_skewness_err=float(bg_skew_err),
+        net_area=float(net_area), net_area_err=float(net_area_err),
+        net_centroid=float(n_centroid), net_centroid_err=float(n_centroid_err),
+        net_fwhm=float(n_fwhm), net_fwhm_err=float(n_fwhm_err),
+        net_skewness=float(n_skew), net_skewness_err=float(n_skew_err),
+    )
 
 
 class _ParamDamping:

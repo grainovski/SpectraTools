@@ -824,3 +824,134 @@ def test_measure_width_uses_the_one_side_that_does_not_hit_the_data_edge():
     y_sub = 500.0 * np.exp(-((x - 100.0) ** 2) / (2 * 3.0 ** 2))
     sigma = _measure_width(x, y_sub, [100.0], fallback=99.0)
     assert sigma == pytest.approx(3.0, abs=0.5)
+
+
+from peak_fit import FWHM_FACTOR, IntegrationResult, integrate_region
+
+
+def test_integration_result_holds_expected_fields():
+    result = IntegrationResult(
+        left_bg_region=(10.0, 20.0), right_bg_region=(180.0, 190.0),
+        fit_region=(90.0, 110.0), background_density=5.0,
+        gross_area=100.0, gross_area_err=10.0,
+        gross_centroid=100.0, gross_centroid_err=1.0,
+        gross_fwhm=5.0, gross_fwhm_err=0.5,
+        gross_skewness=0.1, gross_skewness_err=0.05,
+        background_area=20.0, background_area_err=4.0,
+        background_centroid=100.0, background_centroid_err=2.0,
+        background_fwhm=3.0, background_fwhm_err=0.3,
+        background_skewness=0.0, background_skewness_err=0.02,
+        net_area=80.0, net_area_err=11.0,
+        net_centroid=100.0, net_centroid_err=1.2,
+        net_fwhm=5.0, net_fwhm_err=0.6,
+        net_skewness=0.1, net_skewness_err=0.06,
+    )
+    assert result.net_area == 80.0
+    assert result.timestamp is None
+    assert result.visible is True
+
+
+def test_integrate_region_flat_background_gives_near_zero_net_area():
+    x = np.arange(200, dtype=float)
+    y = np.full(200, 20.0)
+    result = integrate_region(
+        x, y, left_bg_region=(10.0, 30.0), right_bg_region=(170.0, 190.0),
+        fit_region=(85.0, 115.0),
+    )
+    assert result.net_area == pytest.approx(0.0, abs=1e-6)
+    assert result.background_centroid == pytest.approx(100.0, abs=0.6)
+
+
+def test_integrate_region_recovers_analytic_peak_area():
+    x, y = _make_spectrum(
+        channels=200, peaks=[(5000.0, 100.0, 4.0)], slope=0.0, intercept=50.0,
+    )
+    result = integrate_region(
+        x, y, left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0),
+    )
+    analytic_area = 5000.0 * 4.0 * np.sqrt(2 * np.pi)
+    assert result.net_area == pytest.approx(analytic_area, rel=0.05)
+    assert result.net_centroid == pytest.approx(100.0, abs=1.0)
+    assert result.net_fwhm == pytest.approx(FWHM_FACTOR * 4.0, abs=1.0)
+
+
+def test_integrate_region_matches_hand_computed_moments():
+    x = np.arange(10, dtype=float)
+    y = np.array([0., 0., 10., 20., 10., 0., 0., 0., 0., 0.])
+    result = integrate_region(
+        x, y, left_bg_region=(8.0, 8.0), right_bg_region=(9.0, 9.0),
+        fit_region=(2.0, 4.0),
+    )
+    # s=[10,20,10] at i=[2,3,4]: gross_area=40, centroid=(20+60+40)/40=3.0,
+    # mom2=((2-3)^2*10+(3-3)^2*20+(4-3)^2*10)/40=20/40=0.5
+    assert result.gross_area == 40.0
+    assert result.gross_centroid == pytest.approx(3.0)
+    assert result.gross_fwhm == pytest.approx(np.sqrt(0.5) * FWHM_FACTOR)
+    # Both bg regions are exactly 0, so net == gross exactly.
+    assert result.net_area == 40.0
+    assert result.net_centroid == pytest.approx(3.0)
+
+
+def test_integrate_region_all_zero_does_not_raise():
+    x = np.arange(50, dtype=float)
+    y = np.zeros(50)
+    result = integrate_region(
+        x, y, left_bg_region=(5.0, 8.0), right_bg_region=(40.0, 43.0),
+        fit_region=(20.0, 25.0),
+    )
+    assert result.gross_area == 0.0
+    assert result.net_area == 0.0
+
+
+def test_integrate_region_rejects_empty_fit_region():
+    x = np.arange(200, dtype=float)
+    y = np.full(200, 20.0)
+    with pytest.raises(FitError):
+        integrate_region(
+            x, y, left_bg_region=(10.0, 30.0), right_bg_region=(170.0, 190.0),
+            fit_region=(500.0, 501.0),
+        )
+
+
+def test_integrate_region_background_uncertainty_scales_linearly_with_region_width():
+    """Deliberately verifies TV's own (statistically non-standard)
+    background-uncertainty formula is preserved exactly: background_area_err
+    squared scales linearly with the fit region's channel count, not
+    quadratically as strict error propagation for a scaled mean would
+    require -- a future "fix" of this would break this test on purpose."""
+    x = np.arange(20, dtype=float)
+    y = np.full(20, 5.0)
+    y[2] = 100.0
+    y[17] = 100.0
+    result = integrate_region(
+        x, y, left_bg_region=(2.0, 2.0), right_bg_region=(17.0, 17.0),
+        fit_region=(8.0, 10.0),
+    )
+    # bg_chn=2, bg_count=200, bg_density=100, bg_density_var=200/(2*2)=50
+    # n_region=3 channels (8,9,10) -> background_area=300,
+    # background_area_err^2 = 50*3 = 150 (linear, not 50*3^2=450)
+    assert result.background_area == pytest.approx(300.0)
+    assert result.background_area_err == pytest.approx(np.sqrt(150.0))
+
+
+def test_integrate_region_background_moment_uncertainty_reuses_net_second_moment():
+    """Deliberately verifies another TV quirk: the background layer's own
+    width/skewness uncertainty terms reuse the *net* distribution's 2nd
+    moment rather than the background's own -- confirmed against TV's
+    source (vsFitInt.c:281,303) and cross-checked numerically against an
+    independently-coded "corrected" alternative during design (the two
+    differ by more than 30% for this fixture; this test pins the exact
+    TV-parity value so a future "fix" would fail loudly)."""
+    x = np.arange(60, dtype=float)
+    y = np.full(60, 30.0)
+    y[5] = 40.0
+    y[6] = 20.0
+    y[50] = 25.0
+    y[51] = 35.0
+    y[25:31] += np.array([50, 150, 300, 300, 150, 50])
+    result = integrate_region(
+        x, y, left_bg_region=(5.0, 6.0), right_bg_region=(50.0, 51.0),
+        fit_region=(20.0, 36.0),
+    )
+    assert result.background_fwhm_err == pytest.approx(0.3305131157646951)
