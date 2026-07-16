@@ -66,24 +66,48 @@ subtracted yet):
   of a sum of independent counts is the sum of the counts).
 
 **Gross moments** (`vsFitInt.c:45-83`, computed on raw `y[i]`, independent
-of any background estimate):
-- `gross_centroid (mom1) = Σ(i·y[i]) / gross_area`.
-- `gross_centroid_err = sqrt(Σ (i−mom1)²·ds[i]) / |gross_area|`, computed
-  in the same pass as `gross_variance (mom2) = Σ(i−mom1)²·y[i] /
-  gross_area` — note: mom2 normalizes by **plain** `gross_area`, not its
-  absolute value.
-- `gross_fwhm = FWHM_FACTOR * sqrt(gross_variance)` (reusing the existing
-  constant; `sqrt(mom2)` is a "sigma"-like quantity of the channel
-  distribution, not a fitted Gaussian sigma).
-- `gross_fwhm_err = FWHM_FACTOR * sqrt(Σ (dDlt−mom2)²·ds[i]) /
-  |gross_area|` where `dDlt = (i−mom1)²` per channel (`dMom2` in source),
-  computed alongside `gross_skewness_raw (mom3) = Σ(i−mom1)³·y[i]`, which
-  is then normalized by `|gross_area|` — **absolute value this time**,
-  the asymmetric normalization (plain sum for mom2, `abs(sum)` for mom3
-  and all `_err` terms) is exactly how TV does it and is preserved as-is.
-- `gross_skewness_err = sqrt(Σ (dlt·(dlt²−3·mom2)−mom3)²·ds[i]) /
-  |gross_area|` where `dlt = (i−mom1)`, using the already-normalized
-  `mom2`/`mom3` from the prior passes.
+of any background estimate) produce *internal* moment values (`M1`, `M2`,
+`M3` and raw uncertainty terms `DM1`, `DM2`, `DM3`) that get converted to
+the reported centroid/width/skewness in a **separate step**, mirroring
+TV's own two-file split (`vsFitInt.c` computes the moments; `vsFitFmt.c`'s
+`ParseIntPeak` converts them for display). This app has no separate
+"format" layer, so both stages happen inside `integrate_region()`, kept
+clearly separate rather than conflated into one formula:
+
+- Internal: `M1 = Σ(i·y[i]) / gross_area`.
+- Internal: `DM1 = sqrt(Σ (i−M1)²·ds[i])`, computed in the same pass as
+  `M2 = Σ(i−M1)²·y[i] / gross_area` — note: `M2` normalizes by **plain**
+  `gross_area`, not its absolute value.
+- Internal: `DM2 = sqrt(Σ (dDlt−M2)²·ds[i])` where `dDlt = (i−M1)²` per
+  channel, computed alongside `M3_raw = Σ(i−M1)³·y[i]`, then
+  `M3 = M3_raw / |gross_area|` — **absolute value this time**; the
+  asymmetric normalization (plain sum for `M2`, `abs(sum)` for `M3`) is
+  exactly how TV does it and is preserved as-is.
+- Internal: `DM3 = sqrt(Σ (dlt·(dlt²−3·M2)−M3)²·ds[i])` where
+  `dlt = (i−M1)`, using the already-normalized `M2`/`M3` from the prior
+  passes. `DM1`/`DM2`/`DM3` above are each divided by `|gross_area|`
+  (`vsFitInt.c:61,73,83`).
+
+**Converting internal moments to reported values** (`vsFitFmt.c:340-392`,
+TV's `ParseIntPeak`), applied identically to gross/background/net using
+each layer's own `M1`/`DM1`/`M2`/`DM2`/`M3`/`DM3`:
+- `centroid = M1`, `centroid_err = DM1` — used directly, no transform.
+- `sigma = sqrt(M2)` if `M2 >= 0` else `-sqrt(-M2)` (signed sqrt, a purely
+  defensive case for a hypothetically negative `M2` — never triggered by
+  real, non-negative count data).
+- `sigma_err = DM2 / |sigma|` if `sigma != 0` else `0.0` — **this is the
+  step an earlier draft of this spec got wrong**: `DM2` is *not* directly
+  the FWHM uncertainty; TV's display-formatting code (`vsFitFmt.c:372-376`)
+  re-derives `sigma` from `M2` and divides `DM2` by it before scaling — a
+  step easy to miss reading `vsFitInt.c` alone, caught by reading
+  `vsFitFmt.c` before finalizing this spec.
+- `fwhm = sigma * FWHM_FACTOR`, `fwhm_err = sigma_err * FWHM_FACTOR`
+  (`vsFitFmt.c:377-378`; TV's own `SIGMA_TO_FWHM` constant is
+  `2.35482004503094930000` — identical to this app's existing
+  `FWHM_FACTOR`, confirmed by direct comparison, so no new constant is
+  needed).
+- `skewness = M3`, `skewness_err = DM3` — used directly
+  (`vsFitFmt.c:356-358`), no transform.
 
 **Background** (`vsFitInt.c:194-221`, the no-pre-fit-function branch):
 pool BOTH marked background regions' channels together into one flat
@@ -104,13 +128,17 @@ density estimate:
 gross_area_err² + background_area_err²` (independent variances add).
 
 **Background and net moments** (`vsFitInt.c:223-309`): the same
-mom1→mom2→mom3 moment machinery as the gross block, but now over
-`(y[i] − bg_density)` for net and treating the background as the flat
-level `bg_density` at every channel for its own moments. One quirk
-confirmed for exact replication (not a fix): **the background's own
-`gross_fwhm_err`/`skewness_err`-equivalent terms use the *net*
-distribution's 2nd moment (`mom2`) rather than the background's own
-(`bgMom2`)** — `vsFitInt.c:281,303`, `dDltb -= mom2` where `bgMom2` would
+`M1`/`DM1`/`M2`/`DM2`/`M3`/`DM3` internal-moment machinery as the gross
+block above, but now over `(y[i] − bg_density)` for net and treating the
+background as the flat level `bg_density` at every channel for its own
+moments — each layer's own internal moments then go through the identical
+sigma/FWHM conversion step described above to produce
+`background_centroid`/`background_fwhm`/`background_skewness` and
+`net_centroid`/`net_fwhm`/`net_skewness` (plus their `_err`s). One quirk
+confirmed for exact replication (not a fix): **the background's own `M2`-
+derived `DM2`/`DM3` terms use the *net* distribution's `M2` rather than
+the background's own (`bgMom2`)** — `vsFitInt.c:281,303`, `dDltb -= mom2`
+where `bgMom2` would
 be locally consistent. This looks like a copy-paste slip in the original
 C but is replicated exactly per explicit decision, alongside the
 background-scaling quirk above.
