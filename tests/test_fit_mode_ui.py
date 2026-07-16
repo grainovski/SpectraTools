@@ -1537,3 +1537,176 @@ def test_run_fit_shows_a_status_message_when_the_auto_log_write_fails(qapp, tmp_
 
     assert len(spectrum.fits) == 1  # the fit still committed
     assert main_window.statusBar().currentMessage() != ""
+
+
+def test_export_actions_appear_when_right_clicking_an_existing_fit(qapp, monkeypatch):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+
+    from PySide6.QtWidgets import QMenu
+
+    captured = {}
+
+    class CapturingMenu(QMenu):
+        def exec(self, *args, **kwargs):
+            captured["actions"] = [a.text() for a in self.actions()]
+            return None
+
+    monkeypatch.setattr(fit_mode, "QMenu", CapturingMenu)
+
+    table = main_window.fit_controller.results_table
+    position = table.visualItemRect(table.item(0, 0)).center()
+    main_window.fit_controller._on_results_context_menu(position)
+
+    assert captured["actions"] == [
+        "Remove Fit", "Export This Fit...", "Export All Fits...", "Clear All Fits",
+    ]
+
+
+def test_export_all_fits_action_absent_when_there_are_no_fits(qapp, monkeypatch):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    from PySide6.QtWidgets import QMenu
+
+    captured = {}
+
+    class CapturingMenu(QMenu):
+        def exec(self, *args, **kwargs):
+            captured["actions"] = [a.text() for a in self.actions()]
+            return None
+
+    monkeypatch.setattr(fit_mode, "QMenu", CapturingMenu)
+
+    table = main_window.fit_controller.results_table
+    main_window.fit_controller._on_results_context_menu(table.rect().center())
+
+    assert captured["actions"] == ["Clear All Fits"]
+
+
+def test_export_this_fit_writes_a_report_to_the_chosen_path(qapp, monkeypatch, tmp_path):
+    main_window = MainWindow()
+    spectrum_path = str(tmp_path / "eu.spe")
+    _make_active_spectrum(main_window, path=spectrum_path)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+
+    from PySide6.QtWidgets import QMenu
+
+    class ImmediateExportMenu(QMenu):
+        def exec(self, *args, **kwargs):
+            for action in self.actions():
+                if action.text() == "Export This Fit...":
+                    return action
+            return None
+
+    monkeypatch.setattr(fit_mode, "QMenu", ImmediateExportMenu)
+    out_path = tmp_path / "chosen_report.txt"
+    monkeypatch.setattr(fit_mode.QFileDialog, "getSaveFileName", lambda *a, **k: (str(out_path), ""))
+
+    table = main_window.fit_controller.results_table
+    position = table.visualItemRect(table.item(0, 0)).center()
+    main_window.fit_controller._on_results_context_menu(position)
+
+    text = out_path.read_text(encoding="utf-8")
+    assert "Fit 1" in text
+    assert spectrum_path in text
+
+
+def test_export_all_fits_writes_every_fit_in_order(qapp, monkeypatch, tmp_path):
+    main_window = MainWindow()
+    spectrum_path = str(tmp_path / "eu.spe")
+    _make_active_spectrum(main_window, path=spectrum_path)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+    main_window.independent_widths_action.setChecked(True)
+    main_window.fit_controller.run_fit()
+
+    from PySide6.QtWidgets import QMenu
+
+    class ImmediateExportAllMenu(QMenu):
+        def exec(self, *args, **kwargs):
+            for action in self.actions():
+                if action.text() == "Export All Fits...":
+                    return action
+            return None
+
+    monkeypatch.setattr(fit_mode, "QMenu", ImmediateExportAllMenu)
+    out_path = tmp_path / "all_report.txt"
+    monkeypatch.setattr(fit_mode.QFileDialog, "getSaveFileName", lambda *a, **k: (str(out_path), ""))
+
+    table = main_window.fit_controller.results_table
+    position = table.visualItemRect(table.item(0, 0)).center()
+    main_window.fit_controller._on_results_context_menu(position)
+
+    text = out_path.read_text(encoding="utf-8")
+    assert text.index("Fit 1") < text.index("Fit 2")
+
+
+def test_export_cancelled_dialog_does_not_write_a_report_file(qapp, monkeypatch, tmp_path):
+    main_window = MainWindow()
+    spectrum_path = str(tmp_path / "eu.spe")
+    _make_active_spectrum(main_window, path=spectrum_path)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()  # writes eu_fits.jsonl (the auto-log)
+
+    monkeypatch.setattr(fit_mode.QFileDialog, "getSaveFileName", lambda *a, **k: ("", ""))
+
+    controller = main_window.fit_controller
+    controller._export_fits(main_window.spectra[0], [0])  # must not raise
+
+    assert [p.name for p in tmp_path.iterdir()] == ["eu_fits.jsonl"]
+
+
+def test_export_shows_a_status_message_when_the_write_fails(qapp, monkeypatch, tmp_path):
+    main_window = MainWindow()
+    spectrum_path = str(tmp_path / "eu.spe")
+    _make_active_spectrum(main_window, path=spectrum_path)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+
+    bad_path = str(tmp_path / "missing_dir" / "report.txt")
+    monkeypatch.setattr(fit_mode.QFileDialog, "getSaveFileName", lambda *a, **k: (bad_path, ""))
+
+    controller = main_window.fit_controller
+    controller._export_fits(main_window.spectra[0], [0])  # must not raise
+
+    assert main_window.statusBar().currentMessage() != ""
+    assert main_window.statusBar().currentMessage() != ""

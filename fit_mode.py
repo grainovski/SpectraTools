@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 from datetime import datetime
@@ -6,7 +7,7 @@ import numpy as np
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QDockWidget, QMenu, QTableWidget, QTableWidgetItem, QToolBar,
+    QCheckBox, QDockWidget, QFileDialog, QMenu, QTableWidget, QTableWidgetItem, QToolBar,
     QVBoxLayout, QWidget,
 )
 
@@ -600,20 +601,52 @@ class FitModeController(QObject):
     def _on_results_context_menu(self, position):
         mw = self.main_window
         item = self.results_table.itemAt(position)
+        active = next((s for s in mw.spectra if s.active), None)
         menu = QMenu(mw)
         remove_action = menu.addAction("Remove Fit") if item is not None else None
+        export_one_action = menu.addAction("Export This Fit...") if item is not None else None
+        export_all_action = (
+            menu.addAction("Export All Fits...") if active is not None and active.fits else None
+        )
         clear_action = menu.addAction("Clear All Fits")
         chosen = menu.exec(self.results_table.viewport().mapToGlobal(position))
-        active = next((s for s in mw.spectra if s.active), None)
         if active is None:
             return
         if item is not None and chosen == remove_action:
             fit_index = self._results_row_fit_index[item.row()]
             del active.fits[fit_index]
             mw._plot_data(preserve_view=True)
+        elif item is not None and chosen == export_one_action:
+            fit_index = self._results_row_fit_index[item.row()]
+            self._export_fits(active, [fit_index])
+        elif export_all_action is not None and chosen == export_all_action:
+            self._export_fits(active, list(range(len(active.fits))))
         elif chosen == clear_action:
             active.fits.clear()
             mw._plot_data(preserve_view=True)
+
+    def _export_fits(self, active, fit_indices):
+        """Opens a save-file dialog and writes a plain-text report
+        covering the given 0-based indices into active.fits -- used by
+        both "Export This Fit..." (a single index) and "Export All
+        Fits..." (every index, in Fit Results order)."""
+        stem = os.path.splitext(os.path.basename(active.path))[0]
+        if len(fit_indices) == 1:
+            default_name = f"{stem}_fit{fit_indices[0] + 1}_report.txt"
+        else:
+            default_name = f"{stem}_fits_report.txt"
+        directory = os.path.dirname(active.path)
+        path, _ = QFileDialog.getSaveFileName(
+            self.main_window, "Export Fit Report", os.path.join(directory, default_name),
+            "Text files (*.txt);;All files (*)",
+        )
+        if not path:
+            return
+        results = [(i + 1, active.fits[i]) for i in fit_indices]
+        try:
+            fit_export.write_text_report(path, results, active.path)
+        except OSError as exc:
+            self._show_status_message(f"Could not write export: {exc}", 5000)
 
     def _on_result_double_clicked(self, item):
         active = next((s for s in self.main_window.spectra if s.active), None)
