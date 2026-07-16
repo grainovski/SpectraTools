@@ -276,10 +276,27 @@ def fit_peaks(
             # A covariance matrix's diagonal holds variances, which
             # become perr via sqrt() below -- a negative diagonal entry
             # is never physically valid (it would silently corrupt the
-            # UI with NaN uncertainties). Off-diagonal negative entries
-            # are untouched by this check -- those are legitimate for
-            # correlated parameters.
-            raise FitError("Fit produced a non-finite covariance matrix")
+            # UI with NaN uncertainties), even though the matrix itself
+            # is finite in that case (hence the message below covers
+            # both, distinctly, rather than calling a negative variance
+            # "non-finite"). Off-diagonal negative entries are untouched
+            # by this check -- those are legitimate for correlated
+            # parameters.
+            if pcov is not None and np.all(np.isfinite(pcov)):
+                detail = (
+                    "the fit converged but one or more parameters are not "
+                    "well-determined by this data (invalid negative "
+                    "uncertainty)"
+                )
+                if enable_left_tail:
+                    detail += (
+                        "; if the peak has no real tail, this is often the "
+                        "tail parameters specifically -- try unchecking "
+                        "Left tail"
+                    )
+            else:
+                detail = "the fit produced a non-finite covariance matrix"
+            raise FitError(detail[0].upper() + detail[1:])
 
         perr = np.sqrt(np.diag(pcov))
         values_by_name = dict(fixed_params)
