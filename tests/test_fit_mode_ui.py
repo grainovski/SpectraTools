@@ -462,7 +462,7 @@ def test_parameters_panel_rebuilds_when_row_set_changes(qapp):
 
     main_window.fit_controller.run_fit()
     table = main_window.fit_controller.parameters_table
-    table.cellWidget(2, 2).setChecked(True)  # fix "Shared sigma"
+    table.cellWidget(2, 2).setChecked(True)  # fix "Shared FWHM"
 
     main_window.independent_widths_action.setChecked(True)
     main_window.fit_controller.run_fit()
@@ -488,7 +488,7 @@ def test_parameters_panel_updates_values_in_place_when_row_set_is_unchanged(qapp
 
     main_window.fit_controller.run_fit()
     table = main_window.fit_controller.parameters_table
-    table.cellWidget(2, 2).setChecked(True)  # fix "Shared sigma"
+    table.cellWidget(2, 2).setChecked(True)  # fix "Shared FWHM"
     first_amplitude_text = table.item(0, 1).text()
 
     # Perturb the underlying data (marks/settings untouched, so the row
@@ -697,7 +697,7 @@ def test_invalid_fixed_value_shows_a_status_message_instead_of_crashing(qapp):
 
     main_window.fit_controller.run_fit()
     table = main_window.fit_controller.parameters_table
-    table.cellWidget(2, 2).setChecked(True)  # fix "Shared sigma"
+    table.cellWidget(2, 2).setChecked(True)  # fix "Shared FWHM"
     table.item(2, 1).setText("not a number")
 
     main_window.fit_controller.run_fit()  # must not raise
@@ -720,7 +720,7 @@ def test_stale_fixed_parameter_is_dropped_without_aborting_the_fit(qapp):
 
     main_window.fit_controller.run_fit()
     table = main_window.fit_controller.parameters_table
-    table.cellWidget(2, 2).setChecked(True)  # fix "Shared sigma"
+    table.cellWidget(2, 2).setChecked(True)  # fix "Shared FWHM"
 
     # Changes the valid parameter set from "sigma" to "sigma_0" --
     # the panel hasn't rebuilt yet, so its Fix checkbox still refers
@@ -748,7 +748,7 @@ def test_double_click_reloads_a_committed_fit_for_editing(qapp):
     _held_key_click(main_window, "p", 100)
     main_window.fit_controller.run_fit()
     table = main_window.fit_controller.parameters_table
-    table.cellWidget(2, 2).setChecked(True)  # fix "Shared sigma"
+    table.cellWidget(2, 2).setChecked(True)  # fix "Shared FWHM"
     main_window.fit_controller.run_fit()  # second entry, sigma fixed
 
     main_window.fit_controller.clear()
