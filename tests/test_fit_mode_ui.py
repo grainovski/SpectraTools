@@ -1559,10 +1559,12 @@ def test_results_panel_shows_full_and_net_area_for_a_gaussian_fit(qapp):
                     fwhm=5.0, fwhm_err=0.2,
                     area=1000.0, area_err=50.0,
                     amplitude=200.0, sigma=2.0,
+                    full_area=1420.0, full_area_err=50.0,
                 )
             ],
             gross_area=1420.0, gross_area_err=37.7,
             net_area=1000.0, net_area_err=50.0,
+            reduced_chi2=1.42,
         )
     )
     main_window.spectra.append(spectrum)
@@ -1570,8 +1572,11 @@ def test_results_panel_shows_full_and_net_area_for_a_gaussian_fit(qapp):
     main_window.fit_controller.update_results_list()
 
     tooltip = main_window.fit_controller.results_table.item(0, 0).toolTip()
-    assert "full (no bg subtracted): 1420.0 ± 37.7" in tooltip
-    assert "net (bg subtracted): 1000.0 ± 50.0" in tooltip
+    assert "peak full (no bg subtracted): 1420.0 ± 50.0" in tooltip
+    assert "peak net (bg subtracted): 1000.0 ± 50.0" in tooltip
+    assert "region full (no bg subtracted): 1420.0 ± 37.7" in tooltip
+    assert "region net (bg subtracted): 1000.0 ± 50.0" in tooltip
+    assert "reduced chi^2: 1.42" in tooltip
 
 
 def test_run_fit_appends_to_the_auto_log_next_to_the_spectrum_file(qapp, tmp_path):

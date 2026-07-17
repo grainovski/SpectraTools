@@ -19,6 +19,7 @@ def _peak_record(peak):
         "amplitude": peak.amplitude, "amplitude_err": peak.amplitude_err,
         "sigma": peak.sigma, "sigma_err": peak.sigma_err,
         "area": peak.area, "area_err": peak.area_err,
+        "full_area": peak.full_area, "full_area_err": peak.full_area_err,
     }
 
 
@@ -58,6 +59,7 @@ def fit_result_to_json_record(result, spectrum_path):
         "peaks": [_peak_record(peak) for peak in result.peaks],
         "gross_area": result.gross_area, "gross_area_err": result.gross_area_err,
         "net_area": result.net_area, "net_area_err": result.net_area_err,
+        "reduced_chi2": result.reduced_chi2,
     }
 
 
@@ -115,6 +117,8 @@ def fit_result_to_text_report(result, spectrum_path, fit_number=1):
         f"Right background region: [{result.right_bg_region[0]:.2f}, {result.right_bg_region[1]:.2f}]",
         f"Background: slope={result.background_slope:.6g}, intercept={result.background_intercept:.6g}",
         f"Independent widths: {not result.link_widths}",
+        f"Reduced chi^2: {result.reduced_chi2:.4g}" if result.reduced_chi2 is not None
+        else "Reduced chi^2: undefined (zero degrees of freedom)",
     ]
     if result.tail_fraction is not None:
         lines.append(
@@ -128,8 +132,8 @@ def fit_result_to_text_report(result, spectrum_path, fit_number=1):
         lines.append(f"Fixed parameters: {fixed_text}")
     else:
         lines.append("Fixed parameters: none")
-    lines.append(f"Full area (no background subtracted): {_format_err(result.gross_area, result.gross_area_err)}")
-    lines.append(f"Net area (background subtracted):     {_format_err(result.net_area, result.net_area_err)}")
+    lines.append(f"Region full area (no background subtracted): {_format_err(result.gross_area, result.gross_area_err)}")
+    lines.append(f"Region net area (background subtracted):     {_format_err(result.net_area, result.net_area_err)}")
     lines.append("")
     for i, peak in enumerate(result.peaks):
         lines.append(f"  Peak {i + 1}:")
@@ -137,7 +141,8 @@ def fit_result_to_text_report(result, spectrum_path, fit_number=1):
         lines.append(f"    FWHM:      {_format_err(peak.fwhm, peak.fwhm_err)}")
         lines.append(f"    Amplitude: {_format_err(peak.amplitude, peak.amplitude_err)}")
         lines.append(f"    Sigma:     {_format_err(peak.sigma, peak.sigma_err)}")
-        lines.append(f"    Area:      {_format_err(peak.area, peak.area_err)}")
+        lines.append(f"    Full area (no background subtracted): {_format_err(peak.full_area, peak.full_area_err)}")
+        lines.append(f"    Net area (background subtracted):     {_format_err(peak.area, peak.area_err)}")
     return "\n".join(lines)
 
 

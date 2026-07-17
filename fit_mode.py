@@ -16,6 +16,7 @@ from peak_fit import (
     FWHM_FACTOR, FitError, IntegrationResult, fit_peaks, fit_result_values_by_name,
     hypermet_left_tail, integrate_region, parameter_names,
 )
+from theme import NEUTRAL_LINE_COLOR
 
 BG_REGION_CAP = 2
 
@@ -380,7 +381,7 @@ class FitModeController(QObject):
                 lo, hi = result.fit_region
                 axes.plot(
                     [lo, hi], [result.background_density, result.background_density],
-                    color="black", linestyle="--", linewidth=1,
+                    color=NEUTRAL_LINE_COLOR, linestyle="--", linewidth=1,
                 )
                 axes.annotate(
                     f"centroid={result.net_centroid:.1f}\n"
@@ -396,7 +397,7 @@ class FitModeController(QObject):
             lo, hi = result.fit_region
             background_lo = result.background_slope * lo + result.background_intercept
             background_hi = result.background_slope * hi + result.background_intercept
-            axes.plot([lo, hi], [background_lo, background_hi], color="black",
+            axes.plot([lo, hi], [background_lo, background_hi], color=NEUTRAL_LINE_COLOR,
                        linestyle="--", linewidth=1)
 
             x_dense = np.linspace(lo, hi, 200)
@@ -631,25 +632,33 @@ class FitModeController(QObject):
                 continue
 
             fit_label = f"{fit_index + 1} [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]"
-            tooltip_lines = [
-                f"full (no bg subtracted): {result.gross_area:.1f} ± {result.gross_area_err:.1f}",
-                f"net (bg subtracted): {result.net_area:.1f} ± {result.net_area_err:.1f}",
+            shared_tooltip_lines = [
+                f"region full (no bg subtracted): {result.gross_area:.1f} ± {result.gross_area_err:.1f}",
+                f"region net (bg subtracted): {result.net_area:.1f} ± {result.net_area_err:.1f}",
+                f"reduced chi^2: {result.reduced_chi2:.3g}" if result.reduced_chi2 is not None
+                else "reduced chi^2: undefined (zero degrees of freedom)",
             ]
             if not result.link_widths:
-                tooltip_lines.append("independent widths")
+                shared_tooltip_lines.append("independent widths")
             if result.tail_fraction is not None:
-                tooltip_lines.append(
+                shared_tooltip_lines.append(
                     f"left tail: r={result.tail_fraction:.2f}"
                     f"±{result.tail_fraction_err:.2f}, "
                     f"β={result.tail_beta:.1f}±{result.tail_beta_err:.1f} "
                     f"(volume excludes tail)"
                 )
-            tooltip = "\n".join(tooltip_lines)
 
             for peak_index, peak in enumerate(result.peaks):
                 row = self.results_table.rowCount()
                 self.results_table.insertRow(row)
                 self._results_row_fit_index.append(fit_index)
+
+                peak_tooltip_lines = [
+                    f"peak full (no bg subtracted): {peak.full_area:.1f} ± {peak.full_area_err:.1f}",
+                    f"peak net (bg subtracted): {peak.area:.1f} ± {peak.area_err:.1f}",
+                    *shared_tooltip_lines,
+                ]
+                tooltip = "\n".join(peak_tooltip_lines)
 
                 values = [
                     fit_label,

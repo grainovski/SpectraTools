@@ -71,6 +71,8 @@ class PeakResult:
     sigma: float
     amplitude_err: float = 0.0
     sigma_err: float = 0.0
+    full_area: float = 0.0
+    full_area_err: float = 0.0
 
 
 @dataclass
@@ -93,6 +95,7 @@ class FitResult:
     gross_area_err: float = 0.0
     net_area: float = 0.0
     net_area_err: float = 0.0
+    reduced_chi2: float = None
 
 
 @dataclass
@@ -293,6 +296,8 @@ def fit_peaks(
         )
 
     y_sub = y_fit - (slope * x_fit + intercept)
+    y_err = np.sqrt(np.maximum(y_fit, 1.0))
+    model_named = _make_model(names, free_names, fixed_params, n_peaks, link_widths, enable_left_tail)
 
     if not free_names:
         # Every parameter is fixed -- nothing to optimize. Evaluate
@@ -306,8 +311,6 @@ def fit_peaks(
             free_names, x_fit, y_sub, fit_region, peak_positions, link_widths, enable_left_tail,
             initial_guess_overrides=initial_guess_overrides,
         )
-        y_err = np.sqrt(np.maximum(y_fit, 1.0))
-        model_named = _make_model(names, free_names, fixed_params, n_peaks, link_widths, enable_left_tail)
         model = lambda xx, pp: model_named(xx, *pp)
         damping = _build_param_damping(free_names, fixed_params, link_widths)
 
@@ -350,6 +353,20 @@ def fit_peaks(
         err_by_name = {name: 0.0 for name in fixed_params}
         err_by_name.update(zip(free_names, perr))
 
+    # Reduced chi-square of the final (fitted or fully-fixed) model
+    # against the background-subtracted data, weighted the same way the
+    # solver itself weighted residuals. None (undisplayable) rather than
+    # a divide-by-zero when there are exactly as many data points as free
+    # parameters (zero degrees of freedom) -- mirrors TV's own refusal to
+    # fit at all in that case (vsCurFit.c's CurFreedom <= 0 check), except
+    # this app already allows the fit to proceed and only the chi-square
+    # reporting is affected.
+    free_values = [values_by_name[name] for name in free_names]
+    model_curve = model_named(x_fit, *free_values)
+    chi2 = float(np.sum(((y_sub - model_curve) / y_err) ** 2))
+    dof = x_fit.size - len(free_names)
+    reduced_chi2 = chi2 / dof if dof > 0 else None
+
     amplitudes, positions, sigmas, tail_fraction, tail_beta = _unpack_named(
         values_by_name, n_peaks, link_widths, enable_left_tail
     )
@@ -378,6 +395,18 @@ def fit_peaks(
         if sigma != 0:
             rel_err_sq += (sigma_err / sigma) ** 2
         area_err = abs(area) * np.sqrt(rel_err_sq)
+        # Full (background-included) area for this one peak: its own net
+        # area plus the background "under" it, using the standard
+        # gamma-spectroscopy convention of the local linear-background
+        # level at the peak's own center times that peak's own FWHM --
+        # the per-peak analog of Integration mode's flat
+        # density-times-width background area. The background term is a
+        # deterministic function of the (unweighted, uncertainty-free)
+        # linear fit, so it adds no uncertainty of its own: full_area_err
+        # is exactly area_err.
+        background_under_peak = (slope * position + intercept) * fwhm
+        full_area = area + background_under_peak
+        full_area_err = area_err
         peaks.append(
             PeakResult(
                 position=float(position), position_err=float(position_err),
@@ -385,6 +414,7 @@ def fit_peaks(
                 area=float(area), area_err=float(area_err),
                 amplitude=float(amplitude), amplitude_err=float(amplitude_err),
                 sigma=float(sigma), sigma_err=float(sigma_err),
+                full_area=float(full_area), full_area_err=float(full_area_err),
             )
         )
 
@@ -414,6 +444,7 @@ def fit_peaks(
         fixed_params=dict(fixed_params),
         gross_area=gross_area, gross_area_err=gross_area_err,
         net_area=net_area, net_area_err=net_area_err,
+        reduced_chi2=reduced_chi2,
     )
 
 

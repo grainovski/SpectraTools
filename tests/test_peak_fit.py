@@ -276,6 +276,76 @@ def test_fit_peaks_reports_full_and_net_region_areas():
     assert result.gross_area > result.net_area
 
 
+def test_fit_peaks_reports_full_area_per_peak():
+    """Each peak's own full_area is its net area plus the local linear
+    background (evaluated at the peak's own center) integrated over that
+    peak's own FWHM -- the standard gamma-spectroscopy way to split a
+    shared background back out per peak. full_area_err equals area_err
+    since the background term is a deterministic offset with no
+    uncertainty of its own."""
+    x, y = _make_spectrum(
+        channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0),
+        right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0),
+        peak_positions=[100.0],
+    )
+    peak = result.peaks[0]
+    background_under_peak = (
+        result.background_slope * peak.position + result.background_intercept
+    ) * peak.fwhm
+    assert peak.full_area == pytest.approx(peak.area + background_under_peak)
+    assert peak.full_area_err == pytest.approx(peak.area_err)
+
+
+def test_fit_peaks_reports_reduced_chi2():
+    """A noiseless single-peak fit should recover chi^2 essentially at
+    zero (the model reproduces the data almost exactly); a Poisson-noisy
+    fit of a well-specified model should land near reduced chi^2 ~ 1, the
+    textbook signature of a good fit under correct weighting."""
+    x, y = _make_spectrum(
+        channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0,
+    )
+    noiseless = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0), peak_positions=[100.0],
+    )
+    assert noiseless.reduced_chi2 == pytest.approx(0.0, abs=1e-6)
+
+    x2, y2 = _make_spectrum(
+        channels=200, peaks=[(2000.0, 100.0, 4.0)], slope=0.0, intercept=50.0,
+        noise_seed=42,
+    )
+    noisy = fit_peaks(
+        x2, y2,
+        left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0), peak_positions=[100.0],
+    )
+    assert noisy.reduced_chi2 == pytest.approx(1.0, abs=0.5)
+
+
+def test_fit_peaks_reduced_chi2_is_none_at_zero_degrees_of_freedom():
+    """When the fit region has exactly as many data points as free
+    parameters, degrees of freedom is zero -- reduced_chi2 must be None
+    (undefined), not a divide-by-zero crash or a silently wrong value.
+    Fixing sigma leaves amp_0/pos_0 free (2 params); a 2-channel fit
+    region gives exactly 2 data points."""
+    x, y = _make_spectrum(
+        channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+        fit_region=(100.0, 101.0), peak_positions=[100.0],
+        fixed_params={"sigma": 3.0},
+    )
+    assert result.reduced_chi2 is None
+
+
 def test_fit_multiplet_two_peaks_no_noise():
     x, y = _make_spectrum(
         channels=200,

@@ -39,3 +39,11 @@ class Settings:
             files.remove(path)
             self._settings.setValue("recent_files", files)
             self._settings.sync()
+
+    def theme(self) -> str:
+        value = self._settings.value("theme", "light")
+        return value if value in ("light", "dark") else "light"
+
+    def set_theme(self, theme: str) -> None:
+        self._settings.setValue("theme", theme)
+        self._settings.sync()

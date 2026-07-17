@@ -11,6 +11,7 @@ from matplotlib.figure import Figure
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QDockWidget,
@@ -34,6 +35,7 @@ from settings import Settings
 from spe_io import load_spe
 from spectrum import LoadedSpectrum, next_color
 from spk_io import load_spk
+from theme import qt_stylesheet, style_axes
 
 ZOOM_FACTOR = 1.5
 _ICON_SIZE = 24
@@ -143,6 +145,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(container)
 
         self.settings = Settings()
+        self._theme = self.settings.theme()
+        self._apply_theme(self._theme)
 
         self._build_spectrum_panel()
         self._build_menu()
@@ -196,6 +200,29 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.log_scale_action)
 
         view_menu.addAction(self.toggle_spectrum_panel_action)
+
+        view_menu.addSeparator()
+        self.dark_theme_action = QAction("Dark theme", self)
+        self.dark_theme_action.setCheckable(True)
+        self.dark_theme_action.setChecked(self._theme == "dark")
+        self.dark_theme_action.toggled.connect(self._on_theme_toggled)
+        view_menu.addAction(self.dark_theme_action)
+
+    def _apply_theme(self, theme):
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(qt_stylesheet(theme))
+        style_axes(self.axes, theme)
+        self._theme = theme
+
+    def _on_theme_toggled(self, checked):
+        theme = "dark" if checked else "light"
+        self._apply_theme(theme)
+        self.settings.set_theme(theme)
+        if self.spectra:
+            self._plot_data(preserve_view=True)
+        else:
+            self.canvas.draw()
 
     def _open_file_dialog(self):
         paths, _ = QFileDialog.getOpenFileNames(
@@ -258,6 +285,7 @@ class MainWindow(QMainWindow):
         # committing or removing a peak fit.
         saved_xlim = self.axes.get_xlim() if preserve_view else None
         self.axes.clear()
+        style_axes(self.axes, self._theme)
         visible = [s for s in self.spectra if s.visible]
         for spectrum in visible:
             channels = np.arange(len(spectrum.data))

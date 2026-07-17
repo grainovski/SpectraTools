@@ -15,6 +15,7 @@ def _make_result(timestamp="2026-07-16T12:00:00"):
         area=1000.0, area_err=50.0,
         amplitude=200.0, sigma=3.0,
         amplitude_err=5.0, sigma_err=0.05,
+        full_area=1200.0, full_area_err=50.0,
     )
     return FitResult(
         left_bg_region=(70.0, 85.0),
@@ -27,6 +28,7 @@ def _make_result(timestamp="2026-07-16T12:00:00"):
         timestamp=timestamp,
         gross_area=1200.0, gross_area_err=34.6,
         net_area=1000.0, net_area_err=50.0,
+        reduced_chi2=1.15,
     )
 
 
@@ -51,6 +53,7 @@ def test_fit_result_to_json_record_includes_every_field_and_uncertainty():
     assert record["gross_area_err"] == 34.6
     assert record["net_area"] == 1000.0
     assert record["net_area_err"] == 50.0
+    assert record["reduced_chi2"] == 1.15
     assert record["peaks"] == [
         {
             "position": 100.0, "position_err": 0.1,
@@ -58,6 +61,7 @@ def test_fit_result_to_json_record_includes_every_field_and_uncertainty():
             "amplitude": 200.0, "amplitude_err": 5.0,
             "sigma": 3.0, "sigma_err": 0.05,
             "area": 1000.0, "area_err": 50.0,
+            "full_area": 1200.0, "full_area_err": 50.0,
         }
     ]
 
@@ -102,10 +106,14 @@ def test_fit_result_to_text_report_includes_every_parameter_and_uncertainty():
     assert "FWHM:" in report and "7" in report
     assert "Amplitude:" in report and "200" in report
     assert "Sigma:" in report
-    assert "Area:" in report and "1000" in report
     assert "Fixed parameters: sigma=3" in report
-    assert "Full area (no background subtracted):" in report and "1200" in report
-    assert "Net area (background subtracted):" in report and "1000" in report
+    assert "Reduced chi^2: 1.15" in report
+    assert "Region full area (no background subtracted):" in report
+    assert "Region net area (background subtracted):" in report
+    # Both the region-level totals and this single peak's own full/net
+    # area resolve to the same numbers here (one peak fills the region).
+    assert report.count("1200") == 2  # region gross_area + peak full_area
+    assert report.count("1000") == 2  # region net_area + peak area (net)
 
 
 def test_write_text_report_joins_multiple_fit_blocks_in_order(tmp_path):
