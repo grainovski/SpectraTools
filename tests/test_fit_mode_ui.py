@@ -1761,6 +1761,31 @@ def test_run_integration_appends_an_integration_result(qapp):
     assert result.timestamp is not None
 
 
+def test_results_table_shows_a_region_row_for_an_integration_result(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    main_window.fit_controller.run_integration()
+
+    table = main_window.fit_controller.results_table
+    assert table.rowCount() == 1
+    result = spectrum.fits[0]
+    assert table.item(0, 1).text() == "region"
+    assert table.item(0, 2).text() == f"{result.net_centroid:.2f} ± {result.net_centroid_err:.2f}"
+    assert table.item(0, 3).text() == f"{result.net_fwhm:.2f} ± {result.net_fwhm_err:.2f}"
+    assert table.item(0, 4).text() == f"{result.net_area:.1f} ± {result.net_area_err:.1f}"
+    tooltip = table.item(0, 0).toolTip()
+    assert "Gross:" in tooltip
+    assert "Background:" in tooltip
+    assert "Net:" in tooltip
+
+
 def test_run_integration_ignores_any_marked_peaks(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)

@@ -166,6 +166,29 @@ def _parameter_label(name):
     return f"Peak {peak_num} {kind}"
 
 
+def _integration_tooltip(result):
+    """Full gross/background/net breakdown for an IntegrationResult's Fit
+    Results row tooltip -- mirrors the level of detail the existing
+    left-tail-info tooltip gives for a Gaussian fit."""
+    lines = []
+    for label, prefix in (("Gross", "gross"), ("Background", "background"), ("Net", "net")):
+        area = getattr(result, f"{prefix}_area")
+        area_err = getattr(result, f"{prefix}_area_err")
+        centroid = getattr(result, f"{prefix}_centroid")
+        centroid_err = getattr(result, f"{prefix}_centroid_err")
+        fwhm = getattr(result, f"{prefix}_fwhm")
+        fwhm_err = getattr(result, f"{prefix}_fwhm_err")
+        skewness = getattr(result, f"{prefix}_skewness")
+        skewness_err = getattr(result, f"{prefix}_skewness_err")
+        lines.append(
+            f"{label}: area={area:.1f}±{area_err:.1f}, "
+            f"centroid={centroid:.2f}±{centroid_err:.2f}, "
+            f"FWHM={fwhm:.2f}±{fwhm_err:.2f}, "
+            f"skewness={skewness:.3g}±{skewness_err:.3g}"
+        )
+    return "\n".join(lines)
+
+
 def _is_sigma_name(name):
     return name == "sigma" or name.startswith("sigma_")
 
@@ -575,10 +598,26 @@ class FitModeController(QObject):
             return
         for fit_index, result in enumerate(active.fits):
             if isinstance(result, IntegrationResult):
-                # A dedicated "region" row is added by a later task -- this
-                # guard only prevents update_results_list() from crashing
-                # on the FitResult-only fields below when an integration
-                # has been committed.
+                fit_label = f"{fit_index + 1} [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]"
+                tooltip = _integration_tooltip(result)
+                row = self.results_table.rowCount()
+                self.results_table.insertRow(row)
+                self._results_row_fit_index.append(fit_index)
+                values = [
+                    fit_label,
+                    "region",
+                    f"{result.net_centroid:.2f} ± {result.net_centroid_err:.2f}",
+                    f"{result.net_fwhm:.2f} ± {result.net_fwhm_err:.2f}",
+                    f"{result.net_area:.1f} ± {result.net_area_err:.1f}",
+                ]
+                for col, text in enumerate(values):
+                    item = QTableWidgetItem(text)
+                    item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                    if col == 0:
+                        item.setToolTip(tooltip)
+                    if not result.visible:
+                        item.setForeground(QColor("gray"))
+                    self.results_table.setItem(row, col, item)
                 continue
 
             fit_label = f"{fit_index + 1} [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]"
