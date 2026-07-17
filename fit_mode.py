@@ -836,4 +836,8 @@ class FitModeController(QObject):
             ):
                 earlier.visible = False
         active.fits.append(result)
+        try:
+            fit_export.append_auto_log(active.path, result)
+        except OSError as exc:
+            self._show_status_message(f"Could not write fit log: {exc}", 5000)
         self.main_window._plot_data(preserve_view=True)

@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 
@@ -1971,4 +1972,24 @@ def test_double_click_reloads_an_integration_result_marks_only(qapp):
     assert regions[0] == pytest.approx((70.0, 85.0))
     assert regions[1] == pytest.approx((115.0, 130.0))
     assert main_window.fit_controller.state.fit_region == pytest.approx((85.0, 115.0))
+
+
+def test_run_integration_appends_to_the_auto_log(qapp, tmp_path):
+    main_window = MainWindow()
+    spectrum_path = str(tmp_path / "eu.spe")
+    _make_active_spectrum(main_window, path=spectrum_path)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    main_window.fit_controller.run_integration()
+
+    log_path = tmp_path / "eu_fits.jsonl"
+    assert log_path.exists()
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["type"] == "integration"
     assert main_window.fit_controller.state.peak_positions == []

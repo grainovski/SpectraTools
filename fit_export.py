@@ -1,6 +1,8 @@
 import json
 import os
 
+from peak_fit import IntegrationResult
+
 
 def auto_log_path(spectrum_path):
     """Derives the auto-log path from a spectrum's file path -- e.g.
@@ -20,12 +22,26 @@ def _peak_record(peak):
     }
 
 
+def _integration_layer_record(result, prefix):
+    return {
+        "area": getattr(result, f"{prefix}_area"),
+        "area_err": getattr(result, f"{prefix}_area_err"),
+        "centroid": getattr(result, f"{prefix}_centroid"),
+        "centroid_err": getattr(result, f"{prefix}_centroid_err"),
+        "fwhm": getattr(result, f"{prefix}_fwhm"),
+        "fwhm_err": getattr(result, f"{prefix}_fwhm_err"),
+        "skewness": getattr(result, f"{prefix}_skewness"),
+        "skewness_err": getattr(result, f"{prefix}_skewness_err"),
+    }
+
+
 def fit_result_to_json_record(result, spectrum_path):
     """Converts one FitResult into a plain dict covering every
     parameter and uncertainty, ready for json.dumps() -- used by the
     automatic per-fit log. `spectrum_path` is recorded so a later
     re-read of the log can be traced back to its source spectrum."""
     return {
+        "type": "fit",
         "timestamp": result.timestamp,
         "spectrum_path": spectrum_path,
         "left_bg_region": list(result.left_bg_region),
@@ -43,13 +59,37 @@ def fit_result_to_json_record(result, spectrum_path):
     }
 
 
+def integration_result_to_json_record(result, spectrum_path):
+    """Converts one IntegrationResult into a plain dict covering the
+    full gross/background/net breakdown, ready for json.dumps() -- the
+    Integration-mode analog of fit_result_to_json_record."""
+    return {
+        "type": "integration",
+        "timestamp": result.timestamp,
+        "spectrum_path": spectrum_path,
+        "left_bg_region": list(result.left_bg_region),
+        "right_bg_region": list(result.right_bg_region),
+        "fit_region": list(result.fit_region),
+        "background_density": result.background_density,
+        "gross": _integration_layer_record(result, "gross"),
+        "background": _integration_layer_record(result, "background"),
+        "net": _integration_layer_record(result, "net"),
+    }
+
+
+def _to_json_record(result, spectrum_path):
+    if isinstance(result, IntegrationResult):
+        return integration_result_to_json_record(result, spectrum_path)
+    return fit_result_to_json_record(result, spectrum_path)
+
+
 def append_auto_log(spectrum_path, result):
     """Appends one JSON-Lines record for `result` to
     `<spectrum_stem>_fits.jsonl`, next to the spectrum file. Raises
     OSError on failure (e.g. read-only directory) -- the caller must
     turn that into a non-blocking status message, since a failed log
     write must never invalidate an already-successful fit."""
-    record = fit_result_to_json_record(result, spectrum_path)
+    record = _to_json_record(result, spectrum_path)
     path = auto_log_path(spectrum_path)
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
@@ -97,12 +137,49 @@ def fit_result_to_text_report(result, spectrum_path, fit_number=1):
     return "\n".join(lines)
 
 
+def integration_result_to_text_report(result, spectrum_path, fit_number=1):
+    """Human-readable report for one Integration result -- the
+    Integration-mode analog of fit_result_to_text_report."""
+    lines = [
+        f"Fit {fit_number} (Integration)",
+        f"Spectrum: {spectrum_path}",
+        f"Timestamp: {result.timestamp}",
+        f"Fit region: [{result.fit_region[0]:.2f}, {result.fit_region[1]:.2f}]",
+        f"Left background region: [{result.left_bg_region[0]:.2f}, {result.left_bg_region[1]:.2f}]",
+        f"Right background region: [{result.right_bg_region[0]:.2f}, {result.right_bg_region[1]:.2f}]",
+        f"Background density: {result.background_density:.6g}",
+        "",
+    ]
+    for label, prefix in (("Gross", "gross"), ("Background", "background"), ("Net", "net")):
+        lines.append(f"  {label}:")
+        lines.append(
+            f"    Area:      {_format_err(getattr(result, f'{prefix}_area'), getattr(result, f'{prefix}_area_err'))}"
+        )
+        lines.append(
+            f"    Centroid:  {_format_err(getattr(result, f'{prefix}_centroid'), getattr(result, f'{prefix}_centroid_err'))}"
+        )
+        lines.append(
+            f"    FWHM:      {_format_err(getattr(result, f'{prefix}_fwhm'), getattr(result, f'{prefix}_fwhm_err'))}"
+        )
+        lines.append(
+            f"    Skewness:  {_format_err(getattr(result, f'{prefix}_skewness'), getattr(result, f'{prefix}_skewness_err'))}"
+        )
+    return "\n".join(lines)
+
+
+def _to_text_report(result, spectrum_path, fit_number):
+    if isinstance(result, IntegrationResult):
+        return integration_result_to_text_report(result, spectrum_path, fit_number)
+    return fit_result_to_text_report(result, spectrum_path, fit_number)
+
+
 def write_text_report(path, results, spectrum_path):
-    """Writes a plain-text report for one or more fits to `path`,
-    overwriting any existing file. `results` is a list of (fit_number,
-    FitResult) pairs, in the order they should appear in the report."""
+    """Writes a plain-text report for one or more fits/integrations to
+    `path`, overwriting any existing file. `results` is a list of
+    (fit_number, result) pairs, in the order they should appear in the
+    report."""
     blocks = [
-        fit_result_to_text_report(result, spectrum_path, fit_number=fit_number)
+        _to_text_report(result, spectrum_path, fit_number)
         for fit_number, result in results
     ]
     with open(path, "w", encoding="utf-8") as f:
