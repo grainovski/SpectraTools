@@ -436,7 +436,7 @@ class FitModeController(QObject):
             for peak in result.peaks:
                 axes.axvline(peak.position, color="red", linestyle=":", linewidth=1)
                 axes.annotate(
-                    f"pos={peak.position:.1f}\nFWHM={peak.fwhm:.1f}\nvol={peak.area:.0f}",
+                    f"pos={peak.position:.1f}",
                     xy=(peak.position, 0.95),
                     xycoords=label_transform,
                     ha="center", va="top",
@@ -447,7 +447,7 @@ class FitModeController(QObject):
         mw = self.main_window
         self.results_table = QTableWidget(0, 5)
         self.results_table.setHorizontalHeaderLabels(
-            ["Fit", "Peak", "Position", "FWHM", "Volume"]
+            ["Fit", "Position", "FWHM", "Volume", "chi^2"]
         )
         self.results_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.results_table.customContextMenuRequested.connect(self._on_results_context_menu)
@@ -616,10 +616,10 @@ class FitModeController(QObject):
                 self._results_row_fit_index.append(fit_index)
                 values = [
                     fit_label,
-                    "region",
                     f"{result.net_centroid:.2f} ± {result.net_centroid_err:.2f}",
                     f"{result.net_fwhm:.2f} ± {result.net_fwhm_err:.2f}",
                     f"{result.net_area:.1f} ± {result.net_area_err:.1f}",
+                    "—",  # no chi^2 concept for a direct-sum Integration result
                 ]
                 for col, text in enumerate(values):
                     item = QTableWidgetItem(text)
@@ -648,7 +648,7 @@ class FitModeController(QObject):
                     f"(volume excludes tail)"
                 )
 
-            for peak_index, peak in enumerate(result.peaks):
+            for peak in result.peaks:
                 row = self.results_table.rowCount()
                 self.results_table.insertRow(row)
                 self._results_row_fit_index.append(fit_index)
@@ -662,10 +662,10 @@ class FitModeController(QObject):
 
                 values = [
                     fit_label,
-                    str(peak_index + 1),
                     f"{peak.position:.2f} ± {peak.position_err:.2f}",
                     f"{peak.fwhm:.2f} ± {peak.fwhm_err:.2f}",
                     f"{peak.area:.1f} ± {peak.area_err:.1f}",
+                    f"{result.reduced_chi2:.3g}" if result.reduced_chi2 is not None else "—",
                 ]
                 for col, text in enumerate(values):
                     item = QTableWidgetItem(text)

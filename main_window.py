@@ -214,11 +214,21 @@ class MainWindow(QMainWindow):
             app.setStyleSheet(qt_stylesheet(theme))
         style_axes(self.axes, theme)
         self._theme = theme
+        # Re-derive each already-loaded spectrum's trace color from the
+        # new theme's palette, using the index remembered at load time --
+        # spectra loaded via a direct LoadedSpectrum(...) construction
+        # (e.g. in tests) have no color_index and are left as-is.
+        for spectrum in self.spectra:
+            color_index = getattr(spectrum, "color_index", None)
+            if color_index is not None:
+                spectrum.color = next_color(color_index, theme)
 
     def _on_theme_toggled(self, checked):
         theme = "dark" if checked else "light"
         self._apply_theme(theme)
         self.settings.set_theme(theme)
+        if hasattr(self, "spectrum_list"):
+            self._update_spectrum_list()
         if self.spectra:
             self._plot_data(preserve_view=True)
         else:
@@ -249,9 +259,14 @@ class MainWindow(QMainWindow):
             return None, f"{os.path.basename(path)}: {exc}"
         except OSError as exc:
             return None, f"{os.path.basename(path)}: {exc}"
-        color = next_color(self._next_color_index)
+        color_index = self._next_color_index
         self._next_color_index += 1
-        return LoadedSpectrum(path, data, color), None
+        spectrum = LoadedSpectrum(path, data, next_color(color_index, self._theme))
+        # Remembered so _apply_theme can re-derive this spectrum's color
+        # from the new theme's palette without needing to reload the file
+        # or renumber already-loaded spectra.
+        spectrum.color_index = color_index
+        return spectrum, None
 
     def _load_files(self, paths):
         failures = []

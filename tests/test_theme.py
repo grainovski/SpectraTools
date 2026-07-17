@@ -3,6 +3,7 @@ matplotlib.use("Agg")
 from matplotlib.figure import Figure
 
 from main_window import MainWindow
+from spectrum import DARK_COLOR_CYCLE, LIGHT_COLOR_CYCLE, LoadedSpectrum, next_color
 from theme import DARK_BG, qt_stylesheet, style_axes
 
 
@@ -14,6 +15,38 @@ def test_qt_stylesheet_is_nonempty_and_dark_for_dark_theme():
     css = qt_stylesheet("dark")
     assert css != ""
     assert DARK_BG in css
+
+
+def test_qt_stylesheet_styles_checkbox_and_radio_indicators_for_dark_theme():
+    """Regression guard: Qt's default checkbox/radio indicators can be
+    effectively invisible against a dark stylesheet unless explicitly
+    styled -- this is what the "Show"/"Active" spectrum-panel controls
+    and the Fit Parameters checkboxes rely on."""
+    css = qt_stylesheet("dark")
+    assert "QCheckBox::indicator" in css
+    assert "QRadioButton::indicator" in css
+    assert "QCheckBox::indicator:checked" in css
+    assert "QRadioButton::indicator:checked" in css
+
+
+def test_next_color_light_theme_matches_existing_palette():
+    assert next_color(0) == LIGHT_COLOR_CYCLE[0]
+    assert next_color(0, "light") == "#1f77b4"
+
+
+def test_next_color_dark_theme_uses_tv_palette():
+    # TV's own "colored" X11 resource scheme (tv-1.9.13/etc/Xtv):
+    # foreground0 is yellow against a black background.
+    assert next_color(0, "dark") == "#FFFF00"
+    assert next_color(0, "dark") == DARK_COLOR_CYCLE[0]
+    assert next_color(0, "dark") != next_color(0, "light")
+
+
+def test_next_color_wraps_and_differs_by_theme_at_every_index():
+    for i in range(len(DARK_COLOR_CYCLE)):
+        assert next_color(i, "dark") == DARK_COLOR_CYCLE[i]
+    # Wraps past the palette length, same as the light-theme cycle.
+    assert next_color(len(DARK_COLOR_CYCLE), "dark") == DARK_COLOR_CYCLE[0]
 
 
 def test_style_axes_applies_light_colors():
@@ -30,6 +63,29 @@ def test_style_axes_applies_dark_colors():
     assert round(r, 3) == round(30 / 255, 3)
     assert round(g, 3) == round(30 / 255, 3)
     assert round(b, 3) == round(30 / 255, 3)
+
+
+def test_toggling_dark_theme_recolors_already_loaded_spectra(qapp):
+    """A spectrum's trace color should switch to the TV palette the
+    moment dark theme is toggled on -- not just for newly-loaded files --
+    using the color_index remembered at load time, and switch back when
+    toggled off."""
+    main_window = MainWindow()
+    original_theme = main_window.settings.theme()
+    try:
+        main_window.dark_theme_action.setChecked(False)  # start from light
+        spectrum = LoadedSpectrum("synthetic.txt", [1, 2, 3], next_color(0, "light"))
+        spectrum.color_index = 0
+        main_window.spectra.append(spectrum)
+
+        main_window.dark_theme_action.setChecked(True)
+        assert spectrum.color == "#FFFF00"
+
+        main_window.dark_theme_action.setChecked(False)
+        assert spectrum.color == LIGHT_COLOR_CYCLE[0]
+    finally:
+        main_window.settings.set_theme(original_theme)
+        qapp.setStyleSheet(qt_stylesheet(original_theme))
 
 
 def test_toggling_dark_theme_action_applies_and_persists(qapp):

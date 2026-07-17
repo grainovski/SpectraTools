@@ -157,6 +157,13 @@ def test_marks_persist_after_a_successful_fit(qapp):
     assert main_window.fit_button.isEnabled() is True
 
 
+def test_results_table_headers_have_no_peak_column_and_have_chi2(qapp):
+    main_window = MainWindow()
+    table = main_window.fit_controller.results_table
+    headers = [table.horizontalHeaderItem(i).text() for i in range(table.columnCount())]
+    assert headers == ["Fit", "Position", "FWHM", "Volume", "chi^2"]
+
+
 def test_results_table_shows_one_row_per_peak_with_explicit_columns(qapp):
     main_window = MainWindow()
     _make_active_spectrum(main_window)
@@ -172,11 +179,11 @@ def test_results_table_shows_one_row_per_peak_with_explicit_columns(qapp):
 
     table = main_window.fit_controller.results_table
     assert table.rowCount() == 1
-    assert table.item(0, 1).text() == "1"  # Peak column, 1-based
-    assert table.item(0, 2).text().startswith("100.0")  # Position
-    assert "±" in table.item(0, 2).text()
-    assert "±" in table.item(0, 3).text()  # FWHM
-    assert "±" in table.item(0, 4).text()  # Volume
+    assert table.item(0, 1).text().startswith("100.0")  # Position
+    assert "±" in table.item(0, 1).text()
+    assert "±" in table.item(0, 2).text()  # FWHM
+    assert "±" in table.item(0, 3).text()  # Volume
+    assert table.item(0, 4).text() != ""  # chi^2
 
 
 def test_results_table_has_one_row_per_peak_across_a_multi_peak_fit(qapp):
@@ -202,8 +209,8 @@ def test_results_table_has_one_row_per_peak_across_a_multi_peak_fit(qapp):
 
     table = main_window.fit_controller.results_table
     assert table.rowCount() == 2
-    assert table.item(0, 1).text() == "1"
-    assert table.item(1, 1).text() == "2"
+    assert table.item(0, 1).text().startswith("100.0")  # Position, peak 1
+    assert table.item(1, 1).text().startswith("120.0")  # Position, peak 2
     assert table.item(0, 0).text() == table.item(1, 0).text()  # same Fit cell
 
 
@@ -1345,8 +1352,8 @@ def test_results_panel_lists_committed_fit(qapp):
 
     table = main_window.fit_controller.results_table
     assert table.rowCount() == 1
-    assert "100.00" in table.item(0, 2).text()  # Position
-    assert "5.00" in table.item(0, 3).text()  # FWHM
+    assert "100.00" in table.item(0, 1).text()  # Position
+    assert "5.00" in table.item(0, 2).text()  # FWHM
 
 
 def test_results_panel_updates_when_active_spectrum_changes(qapp):
@@ -1882,10 +1889,10 @@ def test_results_table_shows_a_region_row_for_an_integration_result(qapp):
     table = main_window.fit_controller.results_table
     assert table.rowCount() == 1
     result = spectrum.fits[0]
-    assert table.item(0, 1).text() == "region"
-    assert table.item(0, 2).text() == f"{result.net_centroid:.2f} ± {result.net_centroid_err:.2f}"
-    assert table.item(0, 3).text() == f"{result.net_fwhm:.2f} ± {result.net_fwhm_err:.2f}"
-    assert table.item(0, 4).text() == f"{result.net_area:.1f} ± {result.net_area_err:.1f}"
+    assert table.item(0, 1).text() == f"{result.net_centroid:.2f} ± {result.net_centroid_err:.2f}"
+    assert table.item(0, 2).text() == f"{result.net_fwhm:.2f} ± {result.net_fwhm_err:.2f}"
+    assert table.item(0, 3).text() == f"{result.net_area:.1f} ± {result.net_area_err:.1f}"
+    assert table.item(0, 4).text() == "—"  # no chi^2 concept for Integration
     tooltip = table.item(0, 0).toolTip()
     assert "Gross:" in tooltip
     assert "Background:" in tooltip

@@ -328,6 +328,42 @@ def test_fit_peaks_reports_reduced_chi2():
     assert noisy.reduced_chi2 == pytest.approx(1.0, abs=0.5)
 
 
+def test_fit_peaks_reduced_chi2_is_actually_divided_by_degrees_of_freedom():
+    """Direct proof that FitResult.reduced_chi2 is really reduced (raw
+    chi^2 / degrees of freedom), not just raw chi^2 under another name:
+    independently reconstructs the model from the fitted peak's own
+    values (no call into any peak_fit.py internals) and hand-computes
+    both raw chi^2 and degrees of freedom (data points minus free
+    parameters, matching TV's own CurFreedom convention) separately."""
+    from peak_fit import parameter_names
+
+    x, y = _make_spectrum(
+        channels=200, peaks=[(2000.0, 100.0, 4.0)], slope=0.0, intercept=50.0,
+        noise_seed=42,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0), peak_positions=[100.0],
+    )
+    peak = result.peaks[0]
+
+    mask = (x >= 85.0) & (x <= 115.0)
+    x_fit, y_fit = x[mask], y[mask]
+    y_err = np.sqrt(np.maximum(y_fit, 1.0))
+    model = (
+        result.background_slope * x_fit + result.background_intercept
+        + peak.amplitude * np.exp(-((x_fit - peak.position) ** 2) / (2 * peak.sigma ** 2))
+    )
+    raw_chi2 = float(np.sum(((y_fit - model) / y_err) ** 2))
+    n_free_params = len(parameter_names(1, link_widths=True, enable_left_tail=False))
+    dof = x_fit.size - n_free_params
+
+    assert dof > 0
+    assert raw_chi2 / dof != pytest.approx(raw_chi2)  # sanity: dof != 1 for this fixture
+    assert result.reduced_chi2 == pytest.approx(raw_chi2 / dof)
+
+
 def test_fit_peaks_reduced_chi2_is_none_at_zero_degrees_of_freedom():
     """When the fit region has exactly as many data points as free
     parameters, degrees of freedom is zero -- reduced_chi2 must be None

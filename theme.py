@@ -79,6 +79,22 @@ QLineEdit, QTextEdit, QAbstractSpinBox {{
 QCheckBox, QRadioButton, QLabel {{
     color: {DARK_TEXT};
 }}
+QCheckBox::indicator, QRadioButton::indicator {{
+    width: 13px;
+    height: 13px;
+    background-color: {DARK_PANEL};
+    border: 1px solid {DARK_TEXT};
+}}
+QRadioButton::indicator {{
+    border-radius: 7px;
+}}
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
+    background-color: {DARK_HIGHLIGHT};
+    border: 1px solid {DARK_HIGHLIGHT};
+}}
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{
+    border: 1px solid {DARK_BORDER};
+}}
 QScrollBar:vertical, QScrollBar:horizontal {{
     background-color: {DARK_PANEL};
 }}
