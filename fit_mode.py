@@ -371,7 +371,7 @@ class FitModeController(QObject):
         # current y-axis scale (linear or log) or zoom level.
         label_transform = axes.get_xaxis_transform()
         theme = getattr(self.main_window, "_theme", "light")
-        fit_color, bg_line_color = fit_drawing_colors(theme)
+        fit_color, bg_line_color = fit_drawing_colors(spectrum.color, theme)
         for result in spectrum.fits:
             if not result.visible:
                 continue

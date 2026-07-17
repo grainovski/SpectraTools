@@ -888,11 +888,14 @@ def test_draw_committed_fits_peak_label_shows_only_the_number(qapp):
     assert "pos=" not in peak_label.get_text()
 
 
-def test_draw_committed_fits_uses_tv_colors_for_dark_theme(qapp):
+def test_draw_committed_fits_fit_color_differs_from_the_spectrum_color(qapp):
+    """Regression guard for the reported "blue fit on a blue spectrum"
+    clash: the drawn fit color must never equal the spectrum's own trace
+    color, in either theme."""
     main_window = MainWindow()
     original_theme = main_window.settings.theme()
     try:
-        spectrum = _make_active_spectrum(main_window)
+        spectrum = _make_active_spectrum(main_window)  # trace color "#1f77b4"
         spectrum.fits.append(
             FitResult(
                 left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
@@ -908,11 +911,13 @@ def test_draw_committed_fits_uses_tv_colors_for_dark_theme(qapp):
             )
         )
 
-        main_window.dark_theme_action.setChecked(True)
-        main_window.fit_controller.draw_committed_fits(spectrum)
-
-        peak_label = main_window.axes.texts[-1]
-        assert peak_label.get_color() == "#FFD700"  # TV's gold, not red
+        for dark in (False, True):
+            main_window.dark_theme_action.setChecked(dark)
+            main_window.axes.clear()
+            main_window.fit_controller.draw_committed_fits(spectrum)
+            peak_label = main_window.axes.texts[-1]
+            assert peak_label.get_color() != spectrum.color
+            assert peak_label.get_color() != "#1f77b4"
     finally:
         main_window.settings.set_theme(original_theme)
 

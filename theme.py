@@ -2,6 +2,8 @@
 matplotlib axes colors for the plot canvas, switched together by one
 `theme` string ("light" or "dark")."""
 
+import colorsys
+
 DARK_BG = "#1e1e1e"
 DARK_PANEL = "#2b2b2b"
 DARK_TEXT = "#e0e0e0"
@@ -119,27 +121,50 @@ NEUTRAL_LINE_COLOR = "gray"
 
 # TV's own fit-drawing colors (tv-1.9.13/etc/Xtv): fit-function.foreground0
 # is gold, bg-function.foreground0 is green (X11's pure #00FF00, not CSS's
-# darker #008000 -- matplotlib's "green" name resolves to the CSS shade,
-# so this is spelled out as hex to get TV's actual color). Used for the
-# fit curve / background line under dark theme.
+# darker #008000). Documented here for reference, but no longer used
+# directly by fit_drawing_colors() below -- a fixed color (TV's or its
+# complement) can land arbitrarily close to whichever color a given
+# spectrum happens to be drawn in (e.g. dark theme's own first spectrum
+# color is yellow, right next to gold; light theme's default first
+# spectrum color is tab:blue, right next to blue, this scheme's original
+# light-theme fit color -- both clash). fit_drawing_colors() instead
+# derives the fit/background-line colors from the specific spectrum's own
+# color, guaranteeing separation regardless of which color that turns out
+# to be.
 TV_FIT_COLOR = "#FFD700"  # gold
 TV_BACKGROUND_COLOR = "#00FF00"  # green (X11)
 
-# Light theme's fit-drawing colors: the HSV (180 deg hue rotation)
-# complements of TV_FIT_COLOR/TV_BACKGROUND_COLOR above, rather than an
-# arbitrary/unrelated choice -- a vivid blue and magenta, both read
-# clearly against a white background.
-LIGHT_FIT_COLOR = "#0028FF"  # complement of gold
-LIGHT_BACKGROUND_COLOR = "#FF00FF"  # complement of green (X11)
+
+def _hex_to_rgb01(hex_color):
+    hex_color = hex_color.lstrip("#")
+    return tuple(int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4))
 
 
-def fit_drawing_colors(theme):
+def _rgb01_to_hex(rgb):
+    return "#{:02X}{:02X}{:02X}".format(
+        *(round(max(0.0, min(1.0, c)) * 255) for c in rgb)
+    )
+
+
+def fit_drawing_colors(spectrum_color, theme):
     """(fit_color, background_line_color) for drawing a committed fit or
-    integration result -- TV's own gold/green under dark theme, their
-    color-wheel complements (blue/magenta) under light theme."""
-    if theme == "dark":
-        return TV_FIT_COLOR, TV_BACKGROUND_COLOR
-    return LIGHT_FIT_COLOR, LIGHT_BACKGROUND_COLOR
+    integration result over a spectrum plotted in `spectrum_color`. Both
+    are hues complementary to that specific spectrum's own color (a 180
+    degree hue rotation, plus a further offset between the two so they
+    don't match each other either) -- not a fixed per-theme color -- so
+    they never blend into the trace they're drawn on top of, whichever
+    color that trace happens to be. Rendered at full saturation and a
+    lightness tuned per theme (bright for a dark background, a medium
+    shade for a light one) rather than reusing the spectrum color's own
+    saturation/lightness, since a desaturated or very light/dark spectrum
+    color would otherwise produce a washed-out, still-hard-to-see result."""
+    h, _l, _s = colorsys.rgb_to_hls(*_hex_to_rgb01(spectrum_color))
+    fit_hue = (h + 0.5) % 1.0
+    bg_hue = (fit_hue + 0.19) % 1.0
+    lightness = 0.60 if theme == "dark" else 0.42
+    fit_color = _rgb01_to_hex(colorsys.hls_to_rgb(fit_hue, lightness, 1.0))
+    bg_color = _rgb01_to_hex(colorsys.hls_to_rgb(bg_hue, lightness, 1.0))
+    return fit_color, bg_color
 
 
 def qt_stylesheet(theme):

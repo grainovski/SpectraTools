@@ -7,25 +7,39 @@ from spectrum import DARK_COLOR_CYCLE, LIGHT_COLOR_CYCLE, LoadedSpectrum, next_c
 from theme import DARK_BG, fit_drawing_colors, qt_stylesheet, style_axes
 
 
-def test_fit_drawing_colors_dark_theme_matches_tv():
-    # TV's own tv-1.9.13/etc/Xtv: fit-function.foreground0 = gold,
-    # bg-function.foreground0 = green (X11 pure green, not CSS's darker
-    # shade).
-    fit_color, bg_color = fit_drawing_colors("dark")
-    assert fit_color == "#FFD700"
-    assert bg_color == "#00FF00"
+def test_fit_drawing_colors_never_matches_the_spectrum_color():
+    """Regression guard for the reported "blue fit on a blue spectrum"
+    clash: whatever hue a spectrum happens to be drawn in, the computed
+    fit/background-line colors must land on a distinctly different hue,
+    for both themes."""
+    import colorsys
+    from theme import _hex_to_rgb01
+
+    for spectrum_color in ("#1f77b4", "#FFFF00", "#FF0000", "#00FF00", "#7f7f7f"):
+        spectrum_hue, _l, _s = colorsys.rgb_to_hls(*_hex_to_rgb01(spectrum_color))
+        for theme in ("light", "dark"):
+            fit_color, bg_color = fit_drawing_colors(spectrum_color, theme)
+            for drawn_color in (fit_color, bg_color):
+                drawn_hue, _l, _s = colorsys.rgb_to_hls(*_hex_to_rgb01(drawn_color))
+                hue_distance = min(
+                    abs(drawn_hue - spectrum_hue), 1 - abs(drawn_hue - spectrum_hue)
+                )
+                assert hue_distance > 0.15, (
+                    f"{drawn_color} too close in hue to spectrum color {spectrum_color}"
+                )
 
 
-def test_fit_drawing_colors_light_theme_is_the_dark_theme_complement():
-    # Light theme uses the HSV (180 deg hue rotation) complements of
-    # TV's gold/green, not an arbitrary color -- vivid blue and magenta.
-    fit_color, bg_color = fit_drawing_colors("light")
-    assert fit_color == "#0028FF"
-    assert bg_color == "#FF00FF"
+def test_fit_drawing_colors_differ_between_fit_and_background_line():
+    fit_color, bg_color = fit_drawing_colors("#1f77b4", "dark")
+    assert fit_color != bg_color
 
 
-def test_fit_drawing_colors_differ_between_themes():
-    assert fit_drawing_colors("light") != fit_drawing_colors("dark")
+def test_fit_drawing_colors_differ_between_themes_for_the_same_spectrum():
+    assert fit_drawing_colors("#1f77b4", "light") != fit_drawing_colors("#1f77b4", "dark")
+
+
+def test_fit_drawing_colors_differ_by_spectrum_color():
+    assert fit_drawing_colors("#1f77b4", "dark") != fit_drawing_colors("#FFFF00", "dark")
 
 
 def test_qt_stylesheet_is_empty_for_light_theme():
