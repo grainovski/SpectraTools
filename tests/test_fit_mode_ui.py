@@ -517,6 +517,55 @@ def test_parameters_panel_updates_values_in_place_when_row_set_is_unchanged(qapp
     assert displayed_amplitude != first_amplitude_text
 
 
+def test_marking_a_new_disjoint_region_resets_the_panel_and_the_next_fit_succeeds(qapp):
+    """Regression test for a real bug: after fitting one region, marking
+    a brand new region+peak elsewhere used to leave the Fit Parameters
+    panel populated with the *first* fit's values. Since an unchecked
+    row's value is read as an initial-guess override for the next fit
+    (initial_guess_overrides_from_panel), the leftover position value
+    (from the first peak) placed the optimizer's starting point outside
+    the newly-marked region, and the second fit failed outright."""
+    main_window = MainWindow()
+    y = np.full(200, 20, dtype=np.int64)
+    y[97:104] += (
+        500 * np.exp(-((np.arange(97, 104) - 100.0) ** 2) / (2 * 3.0 ** 2))
+    ).astype(np.int64)
+    y[147:154] += (
+        400 * np.exp(-((np.arange(147, 154) - 150.0) ** 2) / (2 * 3.0 ** 2))
+    ).astype(np.int64)
+    path = os.path.join(tempfile.mkdtemp(), "synthetic.txt")
+    spectrum = LoadedSpectrum(path, y, "#1f77b4")
+    spectrum.active = True
+    main_window.spectra.append(spectrum)
+    main_window._plot_data()
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+    assert len(spectrum.fits) == 1
+
+    table = main_window.fit_controller.parameters_table
+    assert table.rowCount() == 3  # still populated with fit 1's values
+
+    _held_key_click(main_window, "r", 135)
+    assert table.rowCount() == 3  # a lone pending click doesn't touch it
+    _held_key_click(main_window, "r", 165)
+    assert table.rowCount() == 0  # a *completed* new region resets it
+
+    _held_key_click(main_window, "p", 150)
+    main_window.fit_controller.run_fit()
+
+    assert len(spectrum.fits) == 2
+    assert all(f.visible for f in spectrum.fits)
+    assert spectrum.fits[1].fit_region == pytest.approx((135.0, 165.0))
+    assert spectrum.fits[1].peaks[0].position == pytest.approx(150.0, abs=1.0)
+
+
 def test_clear_empties_the_parameters_panel(qapp):
     main_window = MainWindow()
     _make_active_spectrum(main_window)

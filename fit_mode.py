@@ -60,13 +60,21 @@ class FitModeState:
     def add_fit_click(self, x):
         """Returns the completed (lo, hi) region if this click
         completed a pair, else None. A newly completed pair always
-        replaces any existing fit region."""
+        replaces any existing fit region and drops any already-marked
+        peak position that falls outside the new region -- marks persist
+        across a committed fit (so re-fitting or tweaking the same
+        region doesn't require re-marking peaks), but a peak position
+        left over from a now-abandoned region is stale, not intentional,
+        and silently breaks the next fit_peaks() call (an out-of-region
+        initial guess) if carried along uncleaned."""
         if self.pending_fit_click is None:
             self.pending_fit_click = x
             return None
         region = (min(self.pending_fit_click, x), max(self.pending_fit_click, x))
         self.pending_fit_click = None
         self.fit_region = region
+        lo, hi = region
+        self.peak_positions = [p for p in self.peak_positions if lo <= p <= hi]
         return region
 
     def toggle_peak(self, x, proximity):
@@ -339,6 +347,22 @@ class FitModeController(QObject):
         x1 = inverse.transform((event.x + PEAK_CLICK_PIXEL_PROXIMITY, event.y))[0]
         return abs(x1 - x0)
 
+    def _reset_parameters_panel(self):
+        """Discards the Fit Parameters panel's rows. Called whenever the
+        underlying region/peak marks change, since a row's Value cell is
+        read as either a fixed value or an initial-guess override for
+        the *next* fit_peaks() call (fixed_params_from_panel /
+        initial_guess_overrides_from_panel) -- left in place across a
+        change to the marks, it silently carries a stale value from a
+        now-abandoned fit configuration into the next one. This was the
+        concrete cause of a fit at a newly-marked region failing
+        outright: a leftover position override from the previous fit
+        placed the optimizer's starting point outside the new region.
+        A no-op if the panel is already empty (the common case, since
+        it's normally only populated after a fit succeeds)."""
+        self.parameters_table.setRowCount(0)
+        self._parameter_names_shown = []
+
     def on_click(self, event):
         if event.inaxes != self.main_window.axes or event.xdata is None:
             return
@@ -349,7 +373,9 @@ class FitModeController(QObject):
             self.state.add_bg_click(event.xdata)
             self._redraw_progress()
         elif key == "r":
-            self.state.add_fit_click(event.xdata)
+            completed = self.state.add_fit_click(event.xdata)
+            if completed is not None:
+                self._reset_parameters_panel()
             self._redraw_progress()
         elif key == "p":
             proximity = self._pixel_proximity_to_data(event)
@@ -359,6 +385,7 @@ class FitModeController(QObject):
                     "Mark the fit region (hold R and click twice) before marking peaks", 3000
                 )
                 return
+            self._reset_parameters_panel()
             self._redraw_progress()
         else:
             return

@@ -53,6 +53,40 @@ def test_fit_region_click_pairs_and_overwrites_on_new_pair():
     assert state.fit_region == (90, 110)
 
 
+def test_completing_a_new_fit_region_drops_out_of_bounds_peaks():
+    """Regression test: a peak marked for a since-abandoned fit region
+    must not silently survive into a newly-marked, disjoint region --
+    it isn't a valid initial guess there and previously caused the next
+    fit_peaks() call to fail outright (the optimizer's starting point
+    landed outside the new region)."""
+    state = FitModeState()
+    state.add_fit_click(85)
+    state.add_fit_click(115)
+    state.toggle_peak(100.0, proximity=1.0)
+    assert state.peak_positions == [100.0]
+
+    # A brand new, disjoint region -- the old peak (100.0) is now
+    # outside [135, 165] and must be dropped.
+    state.add_fit_click(135)
+    state.add_fit_click(165)
+    assert state.peak_positions == []
+
+
+def test_completing_a_new_fit_region_keeps_peaks_still_inside_it():
+    """A peak that happens to still fall inside a re-marked/adjusted
+    region (not a wholesale new one) is kept, not unconditionally
+    wiped."""
+    state = FitModeState()
+    state.add_fit_click(85)
+    state.add_fit_click(115)
+    state.toggle_peak(100.0, proximity=1.0)
+
+    # Slightly widened region -- 100.0 is still inside it.
+    state.add_fit_click(80)
+    state.add_fit_click(120)
+    assert state.peak_positions == [100.0]
+
+
 def test_peak_toggle_requires_a_fit_region():
     state = FitModeState()
     assert state.toggle_peak(100.0, proximity=1.0) is None

@@ -118,6 +118,23 @@ def _app_icon():
     return icon
 
 
+class _TrimmedNavigationToolbar(NavigationToolbar2QT):
+    """Matplotlib's default toolbar (Home/Back/Forward/Pan/Zoom/
+    Subplots/Customize/Save) with the items this app doesn't use
+    dropped: Back/Forward (this app's own zoom already keeps its own
+    history via push_current(), and duplicate view-history controls are
+    confusing), Zoom-to-rectangle/Subplots/Customize (box-zoom, subplot
+    layout, and curve/image styling aren't relevant to a fixed
+    single-axes spectrum view). Leaves Home, Pan, and Save -- this
+    app's own zoom-in/zoom-out/full-spectrum actions are then appended
+    right after Save (see MainWindow._build_zoom_buttons)."""
+
+    toolitems = [
+        item for item in NavigationToolbar2QT.toolitems
+        if item[0] not in ("Back", "Forward", "Zoom", "Subplots", "Customize")
+    ]
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -136,7 +153,7 @@ class MainWindow(QMainWindow):
         self.figure = Figure()
         self.axes = self.figure.add_subplot(111)
         self.canvas = FigureCanvasQTAgg(self.figure)
-        self.nav_toolbar = NavigationToolbar2QT(self.canvas, self)
+        self.nav_toolbar = _TrimmedNavigationToolbar(self.canvas, self)
 
         container = QWidget()
         layout = QVBoxLayout(container)
