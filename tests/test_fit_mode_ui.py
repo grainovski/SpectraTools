@@ -1786,6 +1786,35 @@ def test_results_table_shows_a_region_row_for_an_integration_result(qapp):
     assert "Net:" in tooltip
 
 
+def test_results_table_dims_hidden_integration_rows(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        IntegrationResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_density=20.0,
+            gross_area=1000.0, gross_area_err=30.0,
+            gross_centroid=100.0, gross_centroid_err=0.5,
+            gross_fwhm=8.0, gross_fwhm_err=0.3,
+            gross_skewness=0.0, gross_skewness_err=0.1,
+            background_area=600.0, background_area_err=20.0,
+            background_centroid=100.0, background_centroid_err=0.5,
+            background_fwhm=8.0, background_fwhm_err=0.3,
+            background_skewness=0.0, background_skewness_err=0.1,
+            net_area=400.0, net_area_err=36.0,
+            net_centroid=100.0, net_centroid_err=0.6,
+            net_fwhm=8.0, net_fwhm_err=0.4,
+            net_skewness=0.0, net_skewness_err=0.2,
+            visible=False,
+        )
+    )
+    main_window.fit_controller.update_results_list()
+
+    table = main_window.fit_controller.results_table
+    default_color = QTableWidgetItem().foreground()
+    assert table.item(0, 0).foreground() != default_color
+
+
 def test_run_integration_ignores_any_marked_peaks(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
