@@ -1972,6 +1972,7 @@ def test_double_click_reloads_an_integration_result_marks_only(qapp):
     assert regions[0] == pytest.approx((70.0, 85.0))
     assert regions[1] == pytest.approx((115.0, 130.0))
     assert main_window.fit_controller.state.fit_region == pytest.approx((85.0, 115.0))
+    assert main_window.fit_controller.state.peak_positions == []
 
 
 def test_run_integration_appends_to_the_auto_log(qapp, tmp_path):
@@ -1992,4 +1993,3 @@ def test_run_integration_appends_to_the_auto_log(qapp, tmp_path):
     lines = log_path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
     assert json.loads(lines[0])["type"] == "integration"
-    assert main_window.fit_controller.state.peak_positions == []
