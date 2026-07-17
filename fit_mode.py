@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
 
 import fit_export
 from peak_fit import (
-    FWHM_FACTOR, FitError, fit_peaks, fit_result_values_by_name, hypermet_left_tail,
-    parameter_names,
+    FWHM_FACTOR, FitError, IntegrationResult, fit_peaks, fit_result_values_by_name,
+    hypermet_left_tail, integrate_region, parameter_names,
 )
 
 BG_REGION_CAP = 2
@@ -90,6 +90,9 @@ class FitModeState:
             and self.fit_region is not None
             and len(self.peak_positions) > 0
         )
+
+    def ready_to_integrate(self):
+        return len(self.bg_regions) == BG_REGION_CAP and self.fit_region is not None
 
     def ordered_bg_regions(self):
         """Returns (left, right) background regions ordered by mean
@@ -350,6 +353,13 @@ class FitModeController(QObject):
             axes.axvspan(*result.right_bg_region, color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA)
             axes.axvspan(*result.fit_region, color=FIT_REGION_COLOR, alpha=FIT_REGION_ALPHA)
 
+            if isinstance(result, IntegrationResult):
+                # Full Integration-specific rendering (background line,
+                # centroid/FWHM/net annotation) is added by a later task
+                # -- this guard only prevents run_integration() -> replot
+                # from crashing on the FitResult-only fields below.
+                continue
+
             lo, hi = result.fit_region
             background_lo = result.background_slope * lo + result.background_intercept
             background_hi = result.background_slope * hi + result.background_intercept
@@ -564,6 +574,13 @@ class FitModeController(QObject):
         if active is None:
             return
         for fit_index, result in enumerate(active.fits):
+            if isinstance(result, IntegrationResult):
+                # A dedicated "region" row is added by a later task -- this
+                # guard only prevents update_results_list() from crashing
+                # on the FitResult-only fields below when an integration
+                # has been committed.
+                continue
+
             fit_label = f"{fit_index + 1} [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]"
             tooltip_lines = []
             if not result.link_widths:
@@ -739,4 +756,29 @@ class FitModeController(QObject):
             self._show_status_message(f"Could not write fit log: {exc}", 5000)
         names = parameter_names(len(result.peaks), result.link_widths, result.tail_fraction is not None)
         self.update_parameters_panel(names, fit_result_values_by_name(result))
+        self.main_window._plot_data(preserve_view=True)
+
+    def run_integration(self):
+        if not self.state.ready_to_integrate():
+            return
+        active = next((s for s in self.main_window.spectra if s.active), None)
+        if active is None:
+            return
+        left, right = self.state.ordered_bg_regions()
+        x = np.arange(len(active.data), dtype=float)
+        y = active.data
+        try:
+            result = integrate_region(x, y, left, right, self.state.fit_region)
+        except FitError as exc:
+            self._show_status_message(f"Integration failed: {exc}", 5000)
+            return
+        result.timestamp = datetime.now().isoformat(timespec="seconds")
+        for earlier in active.fits:
+            if (
+                earlier.left_bg_region == result.left_bg_region
+                and earlier.right_bg_region == result.right_bg_region
+                and earlier.fit_region == result.fit_region
+            ):
+                earlier.visible = False
+        active.fits.append(result)
         self.main_window._plot_data(preserve_view=True)

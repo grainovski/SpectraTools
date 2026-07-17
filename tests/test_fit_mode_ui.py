@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication, QCheckBox, QTableWidgetItem
 
 import fit_mode
 from main_window import MainWindow
-from peak_fit import FWHM_FACTOR, FitResult, PeakResult, hypermet_left_tail
+from peak_fit import FWHM_FACTOR, FitResult, IntegrationResult, PeakResult, hypermet_left_tail
 from spectrum import LoadedSpectrum
 
 _QT_KEY = {"b": Qt.Key.Key_B, "r": Qt.Key.Key_R, "p": Qt.Key.Key_P}
@@ -1709,3 +1709,90 @@ def test_export_shows_a_status_message_when_the_write_fails(qapp, monkeypatch, t
     controller._export_fits(main_window.spectra[0], [0])  # must not raise
 
     assert main_window.statusBar().currentMessage() != ""
+
+
+def test_ready_to_integrate_needs_bg_regions_and_fit_region_but_not_peaks(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    state = main_window.fit_controller.state
+
+    assert state.ready_to_integrate() is False
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    assert state.ready_to_integrate() is False
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    assert state.ready_to_integrate() is True  # no peak marks needed
+
+
+def test_integrate_button_has_ctrl_i_shortcut_and_is_gated(qapp):
+    main_window = MainWindow()
+    assert main_window.integrate_button.shortcut().toString() == "Ctrl+I"
+    assert main_window.integrate_button.isEnabled() is False
+
+    _make_active_spectrum(main_window)
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    assert main_window.integrate_button.isEnabled() is True
+
+
+def test_run_integration_appends_an_integration_result(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+
+    main_window.fit_controller.run_integration()
+
+    assert len(spectrum.fits) == 1
+    result = spectrum.fits[0]
+    assert isinstance(result, IntegrationResult)
+    assert result.timestamp is not None
+
+
+def test_run_integration_ignores_any_marked_peaks(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)  # a peak is marked too
+
+    main_window.fit_controller.run_integration()  # must not crash or use it
+
+    assert len(spectrum.fits) == 1
+    assert isinstance(spectrum.fits[0], IntegrationResult)
+
+
+def test_marks_persist_after_a_successful_integration(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+
+    main_window.fit_controller.run_integration()
+
+    regions = main_window.fit_controller.state.bg_regions
+    assert regions[0] == pytest.approx((70.0, 85.0))
+    assert regions[1] == pytest.approx((115.0, 130.0))
+    assert main_window.fit_controller.state.fit_region == pytest.approx((85.0, 115.0))

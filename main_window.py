@@ -447,6 +447,12 @@ class MainWindow(QMainWindow):
         self.clear_fit_button.triggered.connect(self.fit_controller.clear)
         self.addAction(self.clear_fit_button)
 
+        self.integrate_button = QAction("Integrate", self)
+        self.integrate_button.setShortcut("Ctrl+I")
+        self.integrate_button.setEnabled(False)
+        self.integrate_button.triggered.connect(self.fit_controller.run_integration)
+        self.addAction(self.integrate_button)
+
     def _on_canvas_click(self, event):
         self.fit_controller.on_click(event)
 
@@ -454,6 +460,7 @@ class MainWindow(QMainWindow):
         active = next((s for s in self.spectra if s.active), None)
         available = active is not None and active.visible
         self.fit_button.setEnabled(available and self.fit_controller.state.ready_to_fit())
+        self.integrate_button.setEnabled(available and self.fit_controller.state.ready_to_integrate())
 
     def _on_scroll(self, event):
         if event.inaxes != self.axes or event.xdata is None:
