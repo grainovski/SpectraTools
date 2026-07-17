@@ -25,6 +25,8 @@ def _make_result(timestamp="2026-07-16T12:00:00"):
         peaks=[peak],
         fixed_params={"sigma": 3.0},
         timestamp=timestamp,
+        gross_area=1200.0, gross_area_err=34.6,
+        net_area=1000.0, net_area_err=50.0,
     )
 
 
@@ -45,6 +47,10 @@ def test_fit_result_to_json_record_includes_every_field_and_uncertainty():
     assert record["background_intercept"] == 20.0
     assert record["link_widths"] is True
     assert record["fixed_params"] == {"sigma": 3.0}
+    assert record["gross_area"] == 1200.0
+    assert record["gross_area_err"] == 34.6
+    assert record["net_area"] == 1000.0
+    assert record["net_area_err"] == 50.0
     assert record["peaks"] == [
         {
             "position": 100.0, "position_err": 0.1,
@@ -98,6 +104,8 @@ def test_fit_result_to_text_report_includes_every_parameter_and_uncertainty():
     assert "Sigma:" in report
     assert "Area:" in report and "1000" in report
     assert "Fixed parameters: sigma=3" in report
+    assert "Full area (no background subtracted):" in report and "1200" in report
+    assert "Net area (background subtracted):" in report and "1000" in report
 
 
 def test_write_text_report_joins_multiple_fit_blocks_in_order(tmp_path):

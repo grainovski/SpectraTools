@@ -248,6 +248,34 @@ def test_fit_single_peak_no_noise():
     assert result.background_intercept == pytest.approx(20.0, abs=2.0)
 
 
+def test_fit_peaks_reports_full_and_net_region_areas():
+    """FitResult.gross_area is the raw (background-included) count total
+    over the fit region, independent of how well the fit converges; for a
+    single peak, net_area is just that peak's own (background-excluded)
+    area, since it's the only fitted component."""
+    x, y = _make_spectrum(
+        channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(70.0, 85.0),
+        right_bg_region=(115.0, 130.0),
+        fit_region=(85.0, 115.0),
+        peak_positions=[100.0],
+    )
+    mask = (x >= 85.0) & (x <= 115.0)
+    expected_gross = float(np.sum(y[mask]))
+    assert result.gross_area == pytest.approx(expected_gross)
+    assert result.gross_area_err == pytest.approx(np.sqrt(expected_gross))
+    assert len(result.peaks) == 1
+    assert result.net_area == pytest.approx(result.peaks[0].area)
+    assert result.net_area_err == pytest.approx(result.peaks[0].area_err)
+    # The background under the peak is real, non-zero signal in the raw
+    # counts, so the full (gross) total must exceed the net (peak-only)
+    # total by roughly that background contribution.
+    assert result.gross_area > result.net_area
+
+
 def test_fit_multiplet_two_peaks_no_noise():
     x, y = _make_spectrum(
         channels=200,
@@ -265,6 +293,11 @@ def test_fit_multiplet_two_peaks_no_noise():
     positions = sorted(p.position for p in result.peaks)
     assert positions[0] == pytest.approx(95.0, abs=1.0)
     assert positions[1] == pytest.approx(108.0, abs=1.0)
+    # net_area sums across both peaks, not just the first.
+    assert result.net_area == pytest.approx(sum(p.area for p in result.peaks))
+    assert result.net_area_err == pytest.approx(
+        np.sqrt(sum(p.area_err ** 2 for p in result.peaks))
+    )
 
 
 def test_fit_single_peak_with_poisson_noise():

@@ -1541,6 +1541,39 @@ def test_results_panel_shows_tail_and_width_link_info(qapp):
     assert "volume excludes tail" in tooltip
 
 
+def test_results_panel_shows_full_and_net_area_for_a_gaussian_fit(qapp):
+    main_window = MainWindow()
+    y = np.full(200, 20, dtype=np.int64)
+    spectrum = LoadedSpectrum("synthetic.txt", y, "#1f77b4")
+    spectrum.active = True
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(10.0, 20.0),
+            right_bg_region=(180.0, 190.0),
+            fit_region=(90.0, 110.0),
+            background_slope=0.0,
+            background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1,
+                    fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0,
+                    amplitude=200.0, sigma=2.0,
+                )
+            ],
+            gross_area=1420.0, gross_area_err=37.7,
+            net_area=1000.0, net_area_err=50.0,
+        )
+    )
+    main_window.spectra.append(spectrum)
+
+    main_window.fit_controller.update_results_list()
+
+    tooltip = main_window.fit_controller.results_table.item(0, 0).toolTip()
+    assert "full (no bg subtracted): 1420.0 ± 37.7" in tooltip
+    assert "net (bg subtracted): 1000.0 ± 50.0" in tooltip
+
+
 def test_run_fit_appends_to_the_auto_log_next_to_the_spectrum_file(qapp, tmp_path):
     main_window = MainWindow()
     spectrum_path = str(tmp_path / "eu.spe")

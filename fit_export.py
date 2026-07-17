@@ -56,6 +56,8 @@ def fit_result_to_json_record(result, spectrum_path):
         "tail_beta_err": result.tail_beta_err,
         "fixed_params": dict(result.fixed_params),
         "peaks": [_peak_record(peak) for peak in result.peaks],
+        "gross_area": result.gross_area, "gross_area_err": result.gross_area_err,
+        "net_area": result.net_area, "net_area_err": result.net_area_err,
     }
 
 
@@ -126,6 +128,8 @@ def fit_result_to_text_report(result, spectrum_path, fit_number=1):
         lines.append(f"Fixed parameters: {fixed_text}")
     else:
         lines.append("Fixed parameters: none")
+    lines.append(f"Full area (no background subtracted): {_format_err(result.gross_area, result.gross_area_err)}")
+    lines.append(f"Net area (background subtracted):     {_format_err(result.net_area, result.net_area_err)}")
     lines.append("")
     for i, peak in enumerate(result.peaks):
         lines.append(f"  Peak {i + 1}:")

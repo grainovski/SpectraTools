@@ -631,7 +631,10 @@ class FitModeController(QObject):
                 continue
 
             fit_label = f"{fit_index + 1} [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]"
-            tooltip_lines = []
+            tooltip_lines = [
+                f"full (no bg subtracted): {result.gross_area:.1f} ± {result.gross_area_err:.1f}",
+                f"net (bg subtracted): {result.net_area:.1f} ± {result.net_area_err:.1f}",
+            ]
             if not result.link_widths:
                 tooltip_lines.append("independent widths")
             if result.tail_fraction is not None:

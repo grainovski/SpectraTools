@@ -89,6 +89,10 @@ class FitResult:
     fixed_params: dict = field(default_factory=dict)
     visible: bool = True
     timestamp: str = None
+    gross_area: float = 0.0
+    gross_area_err: float = 0.0
+    net_area: float = 0.0
+    net_area_err: float = 0.0
 
 
 @dataclass
@@ -384,6 +388,20 @@ def fit_peaks(
             )
         )
 
+    # Region-level totals, analogous to Integration's gross/net split:
+    # gross is the raw (background-included) count total over the fit
+    # region -- same Poisson formula as integrate_region()'s gross_area.
+    # net is the total of the fitted peaks' own (background-excluded)
+    # areas, with their already-fit-propagated uncertainties combined in
+    # quadrature -- unlike Integration, there's no separate "background
+    # area uncertainty" to add in here, since the linear background used
+    # by this fit path is a deterministic two-point line, not a
+    # statistically-fit quantity with its own propagated uncertainty.
+    gross_area = float(np.sum(y_fit))
+    gross_area_err = float(np.sqrt(gross_area))
+    net_area = float(sum(peak.area for peak in peaks))
+    net_area_err = float(np.sqrt(sum(peak.area_err ** 2 for peak in peaks)))
+
     return FitResult(
         left_bg_region=tuple(left_bg_region), right_bg_region=tuple(right_bg_region),
         fit_region=tuple(fit_region), background_slope=float(slope),
@@ -394,6 +412,8 @@ def fit_peaks(
         tail_beta=float(tail_beta) if tail_beta is not None else None,
         tail_beta_err=float(tail_beta_err) if tail_beta_err is not None else None,
         fixed_params=dict(fixed_params),
+        gross_area=gross_area, gross_area_err=gross_area_err,
+        net_area=net_area, net_area_err=net_area_err,
     )
 
 
