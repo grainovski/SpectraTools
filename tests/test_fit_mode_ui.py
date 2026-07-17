@@ -1947,3 +1947,28 @@ def test_run_integration_failure_leaves_marks_intact_and_shows_message(qapp):
     assert len(spectrum.fits) == 0
     assert main_window.fit_controller.state.fit_region == pytest.approx((100.2, 100.8))
     assert main_window.statusBar().currentMessage() != ""
+
+
+def test_double_click_reloads_an_integration_result_marks_only(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    main_window.fit_controller.run_integration()
+
+    main_window.fit_controller.clear()
+    assert main_window.fit_controller.state.bg_regions == []
+
+    item = main_window.fit_controller.results_table.item(0, 0)
+    main_window.fit_controller._on_result_double_clicked(item)
+
+    regions = main_window.fit_controller.state.bg_regions
+    assert regions[0] == pytest.approx((70.0, 85.0))
+    assert regions[1] == pytest.approx((115.0, 130.0))
+    assert main_window.fit_controller.state.fit_region == pytest.approx((85.0, 115.0))
+    assert main_window.fit_controller.state.peak_positions == []

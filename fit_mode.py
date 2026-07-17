@@ -728,6 +728,13 @@ class FitModeController(QObject):
         # sequence.
         self.state.bg_regions = [result.left_bg_region, result.right_bg_region]
         self.state.fit_region = result.fit_region
+
+        if isinstance(result, IntegrationResult):
+            self.state.peak_positions = []
+            self._redraw_progress()
+            self.main_window._update_fit_mode_availability()
+            return
+
         self.state.peak_positions = [peak.position for peak in result.peaks]
 
         self.main_window.independent_widths_action.setChecked(not result.link_widths)
