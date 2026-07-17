@@ -144,4 +144,65 @@ def test_toggling_dark_theme_action_applies_and_persists(qapp):
         # (Windows registry) toggled to whatever this test happened to
         # set last.
         main_window.settings.set_theme(original_theme)
+
+
+def _opaque_icon_colors(icon, size=24):
+    """The set of distinct, non-transparent pixel colors an icon
+    actually renders -- sampling a single fixed coordinate is
+    unreliable since it can easily land on a transparent gap between
+    glyph strokes."""
+    image = icon.pixmap(size, size).toImage()
+    colors = set()
+    for x in range(size):
+        for y in range(size):
+            color = image.pixelColor(x, y)
+            if color.alpha() > 10:
+                colors.add(color.name())
+    return colors
+
+
+def test_zoom_icons_and_builtin_save_icon_match_color_in_both_themes(qapp):
+    """The custom Zoom In X/Zoom Out X/Show Full Spectrum icons should
+    render in exactly the same color as matplotlib's own built-in icons
+    (e.g. Save) in both themes -- black in light theme, white in dark
+    theme -- not a fixed color regardless of theme."""
+    main_window = MainWindow()
+    original_theme = main_window.settings.theme()
+    try:
+        save_action = next(
+            a for a in main_window.nav_toolbar.actions() if a.text() == "Save"
+        )
+        for theme, expected in (("light", "#000000"), ("dark", "#ffffff")):
+            main_window.dark_theme_action.setChecked(theme == "dark")
+            assert _opaque_icon_colors(save_action.icon()) == {expected}
+            assert _opaque_icon_colors(main_window.zoom_in_action.icon()) == {expected}
+            assert _opaque_icon_colors(main_window.zoom_out_action.icon()) == {expected}
+            assert _opaque_icon_colors(main_window.full_spectrum_action.icon()) == {expected}
+    finally:
+        main_window.settings.set_theme(original_theme)
+
+
+def test_nav_toolbar_palette_background_reflects_theme(qapp):
+    """Regression guard: matplotlib's own dark-mode icon detection
+    (NavigationToolbar2QT's _IconEngine) reads the toolbar's *QPalette*,
+    which Qt stylesheet background-color rules alone don't update --
+    without explicitly setting the palette too, Home/Pan/Save would
+    silently stay black (low-contrast) under dark theme regardless of
+    this app's own QSS."""
+    main_window = MainWindow()
+    original_theme = main_window.settings.theme()
+    try:
+        main_window.dark_theme_action.setChecked(False)
+        light_value = main_window.nav_toolbar.palette().color(
+            main_window.nav_toolbar.backgroundRole()
+        ).value()
+        assert light_value >= 128
+
+        main_window.dark_theme_action.setChecked(True)
+        dark_value = main_window.nav_toolbar.palette().color(
+            main_window.nav_toolbar.backgroundRole()
+        ).value()
+        assert dark_value < 128
+    finally:
+        main_window.settings.set_theme(original_theme)
         qapp.setStyleSheet(qt_stylesheet(original_theme))

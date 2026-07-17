@@ -8,8 +8,8 @@ matplotlib.use("QtAgg")
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtCore import Qt, QRectF
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -41,29 +41,49 @@ ZOOM_FACTOR = 1.5
 _ICON_SIZE = 24
 
 
-def _magnifier_icon(sign):
+def _magnifier_icon(sign, dark=False):
+    # A filled silhouette (ring + handle, both solid-filled, no stroked
+    # outlines) rather than pen-drawn lines -- matplotlib's own toolbar
+    # icons (Home/Pan/Save/...) are all flat filled shapes, so matching
+    # that construction is what actually makes these icons "look like"
+    # the built-in ones side by side, not just sharing a color.
     pixmap = QPixmap(_ICON_SIZE, _ICON_SIZE)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(Qt.GlobalColor.black)
-    pen.setWidth(2)
-    painter.setPen(pen)
-    painter.drawEllipse(3, 3, 12, 12)
-    painter.drawLine(13, 13, 20, 20)
-    painter.drawLine(6, 9, 12, 9)
+    color = QColor("white") if dark else QColor("black")
+
+    lens_rect = QRectF(2.5, 2.5, 12.0, 12.0)
+    ring = 2.2
+    cx, cy = lens_rect.center().x(), lens_rect.center().y()
+    bar_len, bar_w = 6.0, 1.8
+
+    path = QPainterPath()
+    path.setFillRule(Qt.FillRule.OddEvenFill)
+    path.addEllipse(lens_rect)
+    path.addEllipse(lens_rect.adjusted(ring, ring, -ring, -ring))
+    path.addRect(QRectF(cx - bar_len / 2, cy - bar_w / 2, bar_len, bar_w))
     if sign == "+":
-        painter.drawLine(9, 6, 9, 12)
+        path.addRect(QRectF(cx - bar_w / 2, cy - bar_len / 2, bar_w, bar_len))
+    painter.fillPath(path, color)
+
+    # Handle: a short filled bar rotated off the lens's lower-right edge.
+    painter.save()
+    painter.translate(lens_rect.right() - 1.0, lens_rect.bottom() - 1.0)
+    painter.rotate(45)
+    painter.fillRect(QRectF(0, -1.1, 8.0, 2.2), color)
+    painter.restore()
+
     painter.end()
     return QIcon(pixmap)
 
 
-def _full_spectrum_icon():
+def _full_spectrum_icon(dark=False):
     pixmap = QPixmap(_ICON_SIZE, _ICON_SIZE)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(Qt.GlobalColor.black)
+    painter.setBrush(QColor("white") if dark else QColor("black"))
     painter.setPen(Qt.PenStyle.NoPen)
     heights = (6, 14, 9, 18, 11)
     bar_width = 3
@@ -153,7 +173,14 @@ class MainWindow(QMainWindow):
         self.figure = Figure()
         self.axes = self.figure.add_subplot(111)
         self.canvas = FigureCanvasQTAgg(self.figure)
-        self.nav_toolbar = _TrimmedNavigationToolbar(self.canvas, self)
+        # coordinates=False: matplotlib's built-in toolbar otherwise adds
+        # an expanding mouse-position readout label after Save, which
+        # stretches to fill the toolbar and pushes anything appended
+        # afterward (this app's own Zoom In X/Zoom Out X/Show Full
+        # Spectrum actions) to hug the far-right edge instead of sitting
+        # next to Save. This app already shows the mouse position in its
+        # own status bar (_on_mouse_move), making that label redundant.
+        self.nav_toolbar = _TrimmedNavigationToolbar(self.canvas, self, coordinates=False)
 
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -231,6 +258,8 @@ class MainWindow(QMainWindow):
             app.setStyleSheet(qt_stylesheet(theme))
         style_axes(self.axes, theme)
         self._theme = theme
+        self._style_nav_toolbar_palette(theme)
+        self._refresh_zoom_icons()
         # Re-derive each already-loaded spectrum's trace color from the
         # new theme's palette, using the index remembered at load time --
         # spectra loaded via a direct LoadedSpectrum(...) construction
@@ -239,6 +268,27 @@ class MainWindow(QMainWindow):
             color_index = getattr(spectrum, "color_index", None)
             if color_index is not None:
                 spectrum.color = next_color(color_index, theme)
+
+    def _style_nav_toolbar_palette(self, theme):
+        """Sets the navigation toolbar's actual QPalette -- not just this
+        app's own QSS, which changes the toolbar's *paint* but leaves
+        `.palette()` queries returning Qt's original light-mode colors.
+        matplotlib's own icon loader (NavigationToolbar2QT._icon, via
+        _IconEngine._is_dark_mode) reads exactly that palette background
+        to decide whether to recolor Home/Pan/Save white for a dark
+        background, so this is what makes those built-in icons adapt
+        under this app's dark theme; without it they'd stay black
+        (barely visible) regardless of theme."""
+        palette = self.nav_toolbar.palette()
+        if theme == "dark":
+            from theme import DARK_PANEL, DARK_TEXT
+            for role in (QPalette.ColorRole.Window, QPalette.ColorRole.Button):
+                palette.setColor(role, QColor(DARK_PANEL))
+            for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.ButtonText):
+                palette.setColor(role, QColor(DARK_TEXT))
+        else:
+            palette = QPalette()
+        self.nav_toolbar.setPalette(palette)
 
     def _on_theme_toggled(self, checked):
         theme = "dark" if checked else "light"
@@ -482,18 +532,32 @@ class MainWindow(QMainWindow):
 
     def _build_zoom_buttons(self):
         self.nav_toolbar.addSeparator()
+        dark = self._theme == "dark"
 
-        zoom_in_action = QAction(_magnifier_icon("+"), "Zoom In X", self)
-        zoom_in_action.triggered.connect(lambda: self._zoom_x(1 / ZOOM_FACTOR))
-        self.nav_toolbar.addAction(zoom_in_action)
+        self.zoom_in_action = QAction(_magnifier_icon("+", dark), "Zoom In X", self)
+        self.zoom_in_action.triggered.connect(lambda: self._zoom_x(1 / ZOOM_FACTOR))
+        self.nav_toolbar.addAction(self.zoom_in_action)
 
-        zoom_out_action = QAction(_magnifier_icon("-"), "Zoom Out X", self)
-        zoom_out_action.triggered.connect(lambda: self._zoom_x(ZOOM_FACTOR))
-        self.nav_toolbar.addAction(zoom_out_action)
+        self.zoom_out_action = QAction(_magnifier_icon("-", dark), "Zoom Out X", self)
+        self.zoom_out_action.triggered.connect(lambda: self._zoom_x(ZOOM_FACTOR))
+        self.nav_toolbar.addAction(self.zoom_out_action)
 
-        full_spectrum_action = QAction(_full_spectrum_icon(), "Show Full Spectrum", self)
-        full_spectrum_action.triggered.connect(self._show_full_spectrum)
-        self.nav_toolbar.addAction(full_spectrum_action)
+        self.full_spectrum_action = QAction(_full_spectrum_icon(dark), "Show Full Spectrum", self)
+        self.full_spectrum_action.triggered.connect(self._show_full_spectrum)
+        self.nav_toolbar.addAction(self.full_spectrum_action)
+
+    def _refresh_zoom_icons(self):
+        """Re-renders this app's own zoom/full-spectrum toolbar icons for
+        the current theme -- called after _build_zoom_buttons has run;
+        a no-op before that (e.g. the initial _apply_theme call in
+        __init__, which runs before _build_zoom_buttons), since those
+        icons are already built with the correct initial color."""
+        if not hasattr(self, "zoom_in_action"):
+            return
+        dark = self._theme == "dark"
+        self.zoom_in_action.setIcon(_magnifier_icon("+", dark))
+        self.zoom_out_action.setIcon(_magnifier_icon("-", dark))
+        self.full_spectrum_action.setIcon(_full_spectrum_icon(dark))
 
     def _build_fit_mode_buttons(self):
         self.fit_button = QAction("Fit", self)
