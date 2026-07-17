@@ -16,7 +16,7 @@ from peak_fit import (
     FWHM_FACTOR, FitError, IntegrationResult, fit_peaks, fit_result_values_by_name,
     hypermet_left_tail, integrate_region, parameter_names,
 )
-from theme import NEUTRAL_LINE_COLOR
+from theme import fit_drawing_colors
 
 BG_REGION_CAP = 2
 
@@ -370,6 +370,8 @@ class FitModeController(QObject):
         # pinned near the top of the visible plot regardless of the
         # current y-axis scale (linear or log) or zoom level.
         label_transform = axes.get_xaxis_transform()
+        theme = getattr(self.main_window, "_theme", "light")
+        fit_color, bg_line_color = fit_drawing_colors(theme)
         for result in spectrum.fits:
             if not result.visible:
                 continue
@@ -381,7 +383,7 @@ class FitModeController(QObject):
                 lo, hi = result.fit_region
                 axes.plot(
                     [lo, hi], [result.background_density, result.background_density],
-                    color=NEUTRAL_LINE_COLOR, linestyle="--", linewidth=1,
+                    color=bg_line_color, linestyle="--", linewidth=1,
                 )
                 axes.annotate(
                     f"centroid={result.net_centroid:.1f}\n"
@@ -390,14 +392,14 @@ class FitModeController(QObject):
                     xy=(result.net_centroid, 0.95),
                     xycoords=label_transform,
                     ha="center", va="top",
-                    fontsize=7, color="red",
+                    fontsize=7, color=fit_color,
                 )
                 continue
 
             lo, hi = result.fit_region
             background_lo = result.background_slope * lo + result.background_intercept
             background_hi = result.background_slope * hi + result.background_intercept
-            axes.plot([lo, hi], [background_lo, background_hi], color=NEUTRAL_LINE_COLOR,
+            axes.plot([lo, hi], [background_lo, background_hi], color=bg_line_color,
                        linestyle="--", linewidth=1)
 
             x_dense = np.linspace(lo, hi, 200)
@@ -412,7 +414,7 @@ class FitModeController(QObject):
                     total = total + peak.amplitude * np.exp(
                         -((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2)
                     )
-            axes.plot(x_dense, total, color="red", linewidth=1.5)
+            axes.plot(x_dense, total, color=fit_color, linewidth=1.5)
 
             # Peak decomposition: each peak's own contribution (background
             # + that single peak), so a multi-peak fit visually shows how
@@ -430,17 +432,17 @@ class FitModeController(QObject):
                     )
                 axes.plot(
                     x_dense, background_dense + component,
-                    color="red", linewidth=0.75, linestyle="--", alpha=0.6,
+                    color=fit_color, linewidth=0.75, linestyle="--", alpha=0.6,
                 )
 
             for peak in result.peaks:
-                axes.axvline(peak.position, color="red", linestyle=":", linewidth=1)
+                axes.axvline(peak.position, color=fit_color, linestyle=":", linewidth=1)
                 axes.annotate(
-                    f"pos={peak.position:.1f}",
+                    f"{peak.position:.1f}",
                     xy=(peak.position, 0.95),
                     xycoords=label_transform,
                     ha="center", va="top",
-                    fontsize=7, color="red",
+                    fontsize=7, color=fit_color,
                 )
 
     def build_results_panel(self):

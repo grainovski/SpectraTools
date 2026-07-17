@@ -863,6 +863,60 @@ def test_draw_committed_fits_skips_hidden_results(qapp):
     assert len(main_window.axes.texts) == texts_before
 
 
+def test_draw_committed_fits_peak_label_shows_only_the_number(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1,
+                    fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0,
+                    amplitude=200.0, sigma=2.0,
+                )
+            ],
+        )
+    )
+
+    main_window.fit_controller.draw_committed_fits(spectrum)
+
+    peak_label = main_window.axes.texts[-1]
+    assert peak_label.get_text() == "100.0"
+    assert "pos=" not in peak_label.get_text()
+
+
+def test_draw_committed_fits_uses_tv_colors_for_dark_theme(qapp):
+    main_window = MainWindow()
+    original_theme = main_window.settings.theme()
+    try:
+        spectrum = _make_active_spectrum(main_window)
+        spectrum.fits.append(
+            FitResult(
+                left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+                fit_region=(85.0, 115.0), background_slope=0.0, background_intercept=20.0,
+                peaks=[
+                    PeakResult(
+                        position=100.0, position_err=0.1,
+                        fwhm=5.0, fwhm_err=0.2,
+                        area=1000.0, area_err=50.0,
+                        amplitude=200.0, sigma=2.0,
+                    )
+                ],
+            )
+        )
+
+        main_window.dark_theme_action.setChecked(True)
+        main_window.fit_controller.draw_committed_fits(spectrum)
+
+        peak_label = main_window.axes.texts[-1]
+        assert peak_label.get_color() == "#FFD700"  # TV's gold, not red
+    finally:
+        main_window.settings.set_theme(original_theme)
+
+
 def test_draw_committed_fits_draws_one_component_line_per_peak(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)

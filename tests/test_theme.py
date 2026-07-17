@@ -4,7 +4,28 @@ from matplotlib.figure import Figure
 
 from main_window import MainWindow
 from spectrum import DARK_COLOR_CYCLE, LIGHT_COLOR_CYCLE, LoadedSpectrum, next_color
-from theme import DARK_BG, qt_stylesheet, style_axes
+from theme import DARK_BG, fit_drawing_colors, qt_stylesheet, style_axes
+
+
+def test_fit_drawing_colors_dark_theme_matches_tv():
+    # TV's own tv-1.9.13/etc/Xtv: fit-function.foreground0 = gold,
+    # bg-function.foreground0 = green (X11 pure green, not CSS's darker
+    # shade).
+    fit_color, bg_color = fit_drawing_colors("dark")
+    assert fit_color == "#FFD700"
+    assert bg_color == "#00FF00"
+
+
+def test_fit_drawing_colors_light_theme_is_the_dark_theme_complement():
+    # Light theme uses the HSV (180 deg hue rotation) complements of
+    # TV's gold/green, not an arbitrary color -- vivid blue and magenta.
+    fit_color, bg_color = fit_drawing_colors("light")
+    assert fit_color == "#0028FF"
+    assert bg_color == "#FF00FF"
+
+
+def test_fit_drawing_colors_differ_between_themes():
+    assert fit_drawing_colors("light") != fit_drawing_colors("dark")
 
 
 def test_qt_stylesheet_is_empty_for_light_theme():

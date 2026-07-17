@@ -111,10 +111,35 @@ _AXES_COLORS = {
     "dark": {"bg": DARK_BG, "fg": DARK_TEXT, "grid": "#444444"},
 }
 
-# A single neutral color for plot elements (e.g. the background-level
-# line) that need to stay visible against either theme's axes background,
-# rather than threading theme state through every plotting call site.
+# A single neutral color for plot elements that need to stay visible
+# against either theme's axes background. No longer used by
+# fit_drawing_colors() itself (light theme now gets its own pair below),
+# kept for any other call site that still wants a theme-agnostic line.
 NEUTRAL_LINE_COLOR = "gray"
+
+# TV's own fit-drawing colors (tv-1.9.13/etc/Xtv): fit-function.foreground0
+# is gold, bg-function.foreground0 is green (X11's pure #00FF00, not CSS's
+# darker #008000 -- matplotlib's "green" name resolves to the CSS shade,
+# so this is spelled out as hex to get TV's actual color). Used for the
+# fit curve / background line under dark theme.
+TV_FIT_COLOR = "#FFD700"  # gold
+TV_BACKGROUND_COLOR = "#00FF00"  # green (X11)
+
+# Light theme's fit-drawing colors: the HSV (180 deg hue rotation)
+# complements of TV_FIT_COLOR/TV_BACKGROUND_COLOR above, rather than an
+# arbitrary/unrelated choice -- a vivid blue and magenta, both read
+# clearly against a white background.
+LIGHT_FIT_COLOR = "#0028FF"  # complement of gold
+LIGHT_BACKGROUND_COLOR = "#FF00FF"  # complement of green (X11)
+
+
+def fit_drawing_colors(theme):
+    """(fit_color, background_line_color) for drawing a committed fit or
+    integration result -- TV's own gold/green under dark theme, their
+    color-wheel complements (blue/magenta) under light theme."""
+    if theme == "dark":
+        return TV_FIT_COLOR, TV_BACKGROUND_COLOR
+    return LIGHT_FIT_COLOR, LIGHT_BACKGROUND_COLOR
 
 
 def qt_stylesheet(theme):
