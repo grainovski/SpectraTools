@@ -377,10 +377,19 @@ class FitModeController(QObject):
             axes.axvspan(*result.fit_region, color=FIT_REGION_COLOR, alpha=FIT_REGION_ALPHA)
 
             if isinstance(result, IntegrationResult):
-                # Full Integration-specific rendering (background line,
-                # centroid/FWHM/net annotation) is added by a later task
-                # -- this guard only prevents run_integration() -> replot
-                # from crashing on the FitResult-only fields below.
+                lo, hi = result.fit_region
+                axes.plot(
+                    [lo, hi], [result.background_density, result.background_density],
+                    color="black", linestyle="--", linewidth=1,
+                )
+                axes.annotate(
+                    f"centroid={result.net_centroid:.1f}\n"
+                    f"FWHM={result.net_fwhm:.1f}\nnet={result.net_area:.0f}",
+                    xy=(result.net_centroid, 0.95),
+                    xycoords=label_transform,
+                    ha="center", va="top",
+                    fontsize=7, color="red",
+                )
                 continue
 
             lo, hi = result.fit_region

@@ -888,6 +888,73 @@ def test_draw_committed_fits_draws_one_component_line_per_peak(qapp):
     assert len(main_window.axes.lines) == lines_before + 6
 
 
+def test_draw_committed_fits_draws_region_shading_and_annotation_for_integration(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        IntegrationResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_density=20.0,
+            gross_area=1000.0, gross_area_err=30.0,
+            gross_centroid=100.0, gross_centroid_err=0.5,
+            gross_fwhm=8.0, gross_fwhm_err=0.4,
+            gross_skewness=0.0, gross_skewness_err=0.1,
+            background_area=200.0, background_area_err=10.0,
+            background_centroid=100.0, background_centroid_err=1.0,
+            background_fwhm=9.0, background_fwhm_err=0.5,
+            background_skewness=0.0, background_skewness_err=0.1,
+            net_area=800.0, net_area_err=32.0,
+            net_centroid=100.0, net_centroid_err=0.6,
+            net_fwhm=7.5, net_fwhm_err=0.4,
+            net_skewness=0.0, net_skewness_err=0.1,
+        )
+    )
+
+    lines_before = len(main_window.axes.lines)
+    patches_before = len(main_window.axes.patches)
+    texts_before = len(main_window.axes.texts)
+    main_window.fit_controller.draw_committed_fits(spectrum)
+
+    # 3 region spans (2 bg + 1 fit) as patches, 1 flat background line,
+    # 1 annotation -- no peak curve/decomposition/position-marker lines.
+    assert len(main_window.axes.patches) == patches_before + 3
+    assert len(main_window.axes.lines) == lines_before + 1
+    assert len(main_window.axes.texts) == texts_before + 1
+
+
+def test_draw_committed_fits_skips_a_hidden_integration_result(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        IntegrationResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_density=20.0,
+            gross_area=1000.0, gross_area_err=30.0,
+            gross_centroid=100.0, gross_centroid_err=0.5,
+            gross_fwhm=8.0, gross_fwhm_err=0.4,
+            gross_skewness=0.0, gross_skewness_err=0.1,
+            background_area=200.0, background_area_err=10.0,
+            background_centroid=100.0, background_centroid_err=1.0,
+            background_fwhm=9.0, background_fwhm_err=0.5,
+            background_skewness=0.0, background_skewness_err=0.1,
+            net_area=800.0, net_area_err=32.0,
+            net_centroid=100.0, net_centroid_err=0.6,
+            net_fwhm=7.5, net_fwhm_err=0.4,
+            net_skewness=0.0, net_skewness_err=0.1,
+            visible=False,
+        )
+    )
+
+    lines_before = len(main_window.axes.lines)
+    patches_before = len(main_window.axes.patches)
+    texts_before = len(main_window.axes.texts)
+    main_window.fit_controller.draw_committed_fits(spectrum)
+
+    assert len(main_window.axes.lines) == lines_before
+    assert len(main_window.axes.patches) == patches_before
+    assert len(main_window.axes.texts) == texts_before
+
+
 @pytest.mark.xfail(
     strict=True,
     reason="NOT fixed by Task 3's _measure_width (verified): "
