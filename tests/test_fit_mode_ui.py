@@ -1796,3 +1796,33 @@ def test_marks_persist_after_a_successful_integration(qapp):
     assert regions[0] == pytest.approx((70.0, 85.0))
     assert regions[1] == pytest.approx((115.0, 130.0))
     assert main_window.fit_controller.state.fit_region == pytest.approx((85.0, 115.0))
+
+
+def test_run_integration_failure_leaves_marks_intact_and_shows_message(qapp):
+    # Fit region deliberately placed strictly between two integer
+    # channels (no data point falls inside) -- integrate_region() raises
+    # FitError for "contains no data", which run_integration() must
+    # catch, show as a status-bar message, and NOT commit a result or
+    # reset the in-progress marks.
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    # Zoom in before the r-clicks so the two boundaries (0.2/0.8 data
+    # units off a whole channel) don't get lost in the pixel-coordinate
+    # round-trip noise of the wider default view -- same technique as
+    # test_fit_failure_leaves_marks_intact_and_shows_message. Done after
+    # the b-clicks (outside this narrower view) so those still land
+    # inside the axes' pixel bounding box under the wider default view.
+    main_window.axes.set_xlim(95, 105)
+    _held_key_click(main_window, "r", 100.2)
+    _held_key_click(main_window, "r", 100.8)
+
+    main_window.fit_controller.run_integration()
+
+    assert len(spectrum.fits) == 0
+    assert main_window.fit_controller.state.fit_region == pytest.approx((100.2, 100.8))
+    assert main_window.statusBar().currentMessage() != ""
