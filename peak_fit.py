@@ -536,7 +536,7 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
             bg_M2 = bgmom2_raw / abs(bg_sum)  # abs (unlike gross's plain-sum M2)
         if net_sum != 0.0:
             n_DM1 = math.sqrt(dMom1) / abs(net_sum)
-            n_M2 = mom2_raw / net_sum  # plain sum, matches gross's convention
+            n_M2 = mom2_raw / abs(net_sum)  # abs, like every other bg/net moment (vsFitInt.c:264)
 
         dlt2 = dlt ** 2
         dltb2 = dltb ** 2

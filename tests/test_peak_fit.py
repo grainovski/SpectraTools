@@ -955,3 +955,34 @@ def test_integrate_region_background_moment_uncertainty_reuses_net_second_moment
         fit_region=(20.0, 36.0),
     )
     assert result.background_fwhm_err == pytest.approx(0.3305131157646951)
+
+
+def test_integrate_region_net_second_moment_uses_abs_net_area():
+    """Regression test for a real port bug (found and fixed 2026-07-17):
+    TV's own source (vsFitInt.c:264) normalizes the net layer's second
+    moment by ABS(sum), not plain sum, like every other bg/net moment in
+    that block -- only the gross layer's M1/M2 use a plain (non-abs) sum
+    (vsFitInt.c:54,62). A prior version of this port copied the gross
+    layer's plain-sum convention into the net layer's M2 by mistake. That
+    only diverges from TV when net_area goes negative (background
+    estimate exceeding gross counts -- a normal outcome for a weak or
+    absent peak), where it silently flips the *sign* of the reported
+    net_fwhm. This fixture forces net_area negative and pins the
+    TV-correct (negative) net_fwhm/net_fwhm_err, so a regression back to
+    the plain-sum formula fails loudly instead of silently reporting the
+    wrong sign."""
+    x = np.arange(30, dtype=float)
+    y = np.full(30, 5.0)
+    y[2] = 100.0
+    y[27] = 100.0
+    result = integrate_region(
+        x, y, left_bg_region=(2.0, 2.0), right_bg_region=(27.0, 27.0),
+        fit_region=(13.0, 16.0),
+    )
+    # bg_density=100 pooled from the two single-channel bg regions, far
+    # above the flat 5.0/channel in the fit region -> net_area =
+    # gross_area(20) - background_area(100*4=400) = -380 (negative,
+    # the case that exercises the abs-vs-plain divergence).
+    assert result.net_area == pytest.approx(-380.0)
+    assert result.net_fwhm == pytest.approx(-68.34051289398487)
+    assert result.net_fwhm_err == pytest.approx(5.338971539536898)

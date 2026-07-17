@@ -384,7 +384,8 @@ class FitModeController(QObject):
                 )
                 axes.annotate(
                     f"centroid={result.net_centroid:.1f}\n"
-                    f"FWHM={result.net_fwhm:.1f}\nnet={result.net_area:.0f}",
+                    f"FWHM={result.net_fwhm:.1f}\n"
+                    f"full={result.gross_area:.0f}\nnet={result.net_area:.0f}",
                     xy=(result.net_centroid, 0.95),
                     xycoords=label_transform,
                     ha="center", va="top",
