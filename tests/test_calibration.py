@@ -43,3 +43,40 @@ def test_derivative_quadratic_matches_hand_computation():
     cal = Calibration(kind="quadratic", a=10.0, b=0.5, c=0.001)
     # dE/dchannel = b + 2*c*channel
     assert cal.derivative(100) == pytest.approx(0.5 + 2 * 0.001 * 100)
+
+
+def test_invert_linear_round_trips_apply():
+    cal = Calibration(kind="linear", a=10.0, b=0.5)
+    for channel in (0.0, 1.0, 100.0, 500.0, 4095.0):
+        energy = cal.apply(channel)
+        assert cal.invert(energy) == pytest.approx(channel, abs=1e-6)
+
+
+def test_invert_quadratic_round_trips_apply():
+    cal = Calibration(kind="quadratic", a=10.0, b=0.5, c=0.0002)
+    for channel in (0.0, 1.0, 100.0, 500.0, 4095.0):
+        energy = cal.apply(channel)
+        assert cal.invert(energy) == pytest.approx(channel, abs=1e-6)
+
+
+def test_invert_matches_hand_worked_newton_example():
+    # Hand-worked: E = 10 + 0.5*ch + 0.0002*ch**2, solve for E=120.
+    # Linear initial guess: x0 = (120-10)/0.5 = 220.
+    # apply(220) = 10 + 110 + 0.0002*48400 = 10 + 110 + 9.68 = 129.68
+    # de = 129.68 - 120 = 9.68; gradient = 0.5 + 2*0.0002*220 = 0.588
+    # x1 = 220 - 9.68/0.588 = 220 - 16.462... = 203.537...
+    # Iterate to convergence (|de| < 0.01) and confirm apply(x) == 120.
+    cal = Calibration(kind="quadratic", a=10.0, b=0.5, c=0.0002)
+    channel = cal.invert(120.0)
+    assert cal.apply(channel) == pytest.approx(120.0, abs=0.01)
+    # Confirms the iteration actually moved from the linear-only guess
+    # of 220 rather than returning it unrefined.
+    assert channel != pytest.approx(220.0, abs=1.0)
+
+
+def test_invert_negative_b_still_round_trips():
+    # b < 0 is a valid (if unusual) calibration -- energy decreasing
+    # with channel. Newton's method must still converge.
+    cal = Calibration(kind="linear", a=1000.0, b=-0.5)
+    energy = cal.apply(300.0)
+    assert cal.invert(energy) == pytest.approx(300.0, abs=1e-6)

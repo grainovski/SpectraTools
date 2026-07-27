@@ -4,6 +4,13 @@ dependency -- calibration_dialog.py is the thin Qt layer on top of this."""
 
 from dataclasses import dataclass
 
+# Newton's-method convergence control. TV's vsCal.c used 0.01 keV; the
+# Python UI's interactive use (live mouse-move coordinate inversion) needs
+# tighter round-trip accuracy (~1e-6 channel), requiring ~1e-8 keV precision.
+# Quadratic convergence means only a few extra iterations vs TV's original.
+_NEWTON_PRECISION = 1e-8
+_NEWTON_MAXITER = 10000
+
 
 class CalibrationError(Exception):
     """Raised when a Calibration's coefficients are invalid."""
@@ -41,3 +48,22 @@ class Calibration:
         there for Newton's-method inversion and here for both that and
         keV-uncertainty propagation in the results display."""
         return self.b + 2.0 * self.c * channel
+
+    def invert(self, energy):
+        """energy (keV) -> channel, via Newton-Raphson. Ported from TV's
+        CalC (vsCal.c:1047-1082, the non-start-channel branch, since this
+        app has no "start channel" concept). Initial guess is the linear
+        approximation x0 = (energy - a) / b regardless of `kind`,
+        matching TV exactly; refines against the polynomial's own
+        derivative until the residual is within _NEWTON_PRECISION or
+        _NEWTON_MAXITER iterations are exhausted. Scalar input only (this
+        app only ever calls it with a single click/mouse-move
+        coordinate)."""
+        x = (energy - self.a) / self.b
+        de = self.apply(x) - energy
+        iterations = 0
+        while abs(de) > _NEWTON_PRECISION and iterations < _NEWTON_MAXITER:
+            x -= de / self.derivative(x)
+            de = self.apply(x) - energy
+            iterations += 1
+        return x
