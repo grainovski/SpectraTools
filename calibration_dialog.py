@@ -72,9 +72,9 @@ class CalibrationDialog(QDialog):
         if initial is not None:
             self._quadratic_radio.setChecked(initial.kind == "quadratic")
             self._linear_radio.setChecked(initial.kind == "linear")
-            self._a_field.setText(repr(initial.a))
-            self._b_field.setText(repr(initial.b))
-            self._c_field.setText(repr(initial.c))
+            self._a_field.setText(str(initial.a))
+            self._b_field.setText(str(initial.b))
+            self._c_field.setText(str(initial.c))
         self._active_checkbox.setChecked(initially_active)
         self._update_c_field_visibility()
 
@@ -94,10 +94,10 @@ class CalibrationDialog(QDialog):
         except CalibrationFileError as exc:
             QMessageBox.warning(self, "Calibration", str(exc))
             return
-        self._a_field.setText(repr(values[0]))
-        self._b_field.setText(repr(values[1]))
+        self._a_field.setText(str(values[0]))
+        self._b_field.setText(str(values[1]))
         if len(values) > 2:
-            self._c_field.setText(repr(values[2]))
+            self._c_field.setText(str(values[2]))
 
     def _on_accept(self):
         try:
