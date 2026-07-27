@@ -112,6 +112,31 @@ def test_scan_code_fallback_does_not_apply_outside_windows(qapp, monkeypatch):
     assert main_window.fit_controller._held_key is None
 
 
+def test_channel_to_display_is_identity_with_no_calibration(qapp):
+    main_window = MainWindow()
+    assert main_window.channel_to_display(100) == 100
+    assert main_window.display_to_channel(100) == 100
+
+
+def test_channel_to_display_applies_calibration_when_active(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    assert main_window.channel_to_display(100) == pytest.approx(60.0)
+    assert main_window.display_to_channel(60.0) == pytest.approx(100.0, abs=1e-6)
+
+
+def test_channel_to_display_is_identity_when_calibration_set_but_inactive(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = False
+    assert main_window.channel_to_display(100) == 100
+
+
 def test_full_fit_flow_commits_a_fit_result(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)

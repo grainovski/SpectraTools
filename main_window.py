@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from calibration import Calibration
 from fit_mode import FitModeController
 from histogram_io import ParseError, load_histogram
 from settings import Settings
@@ -192,6 +193,9 @@ class MainWindow(QMainWindow):
         self._theme = self.settings.theme()
         self._apply_theme(self._theme)
 
+        self._calibration = None  # Calibration | None -- last-set coefficients, persist across on/off toggles
+        self._calibration_active = False
+
         self._build_spectrum_panel()
         self._build_menu()
         self._update_recent_menu()
@@ -268,6 +272,24 @@ class MainWindow(QMainWindow):
             color_index = getattr(spectrum, "color_index", None)
             if color_index is not None:
                 spectrum.color = next_color(color_index, theme)
+
+    def channel_to_display(self, channel):
+        """Converts a channel number (or numpy array of channel numbers)
+        to whatever's on the x-axis right now: the same value if no
+        calibration is active, or its calibrated keV equivalent if one
+        is. Every place that draws an x-coordinate routes through this."""
+        if not self._calibration_active or self._calibration is None:
+            return channel
+        return self._calibration.apply(channel)
+
+    def display_to_channel(self, display_x):
+        """Inverse of channel_to_display -- converts an x-axis
+        coordinate (channel or keV, whichever is currently displayed)
+        back to a channel number. Every place that reads a click/hover
+        x-coordinate routes through this."""
+        if not self._calibration_active or self._calibration is None:
+            return display_x
+        return self._calibration.invert(display_x)
 
     def _style_nav_toolbar_palette(self, theme):
         """Sets the navigation toolbar's actual QPalette -- not just this
