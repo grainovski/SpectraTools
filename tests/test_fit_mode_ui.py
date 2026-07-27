@@ -2224,3 +2224,46 @@ def test_cancelling_calibration_dialog_leaves_state_untouched(qapp, monkeypatch)
     assert main_window._calibration is None
     assert main_window._calibration_active is False
     assert main_window.axes.get_xlabel() == "Channel"
+
+
+def test_plot_data_draws_calibrated_x_when_active(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+
+    main_window._plot_data()
+
+    line = main_window.axes.lines[0]
+    xdata = line.get_xdata()
+    assert xdata[0] == pytest.approx(10.0)  # channel 0 -> a
+    assert xdata[-1] == pytest.approx(10.0 + 0.5 * (len(spectrum.data) - 1))
+    assert main_window.axes.get_xlabel() == "Energy (keV)"
+
+
+def test_plot_data_draws_raw_channels_when_inactive(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window._plot_data()
+    line = main_window.axes.lines[0]
+    xdata = line.get_xdata()
+    assert xdata[0] == 0
+    assert main_window.axes.get_xlabel() == "Channel"
+
+
+def test_plot_data_xlim_spans_calibrated_range_when_active(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+
+    main_window._plot_data()
+
+    xlim = main_window.axes.get_xlim()
+    max_channel = len(spectrum.data) - 1
+    assert xlim[0] == pytest.approx(10.0, abs=1.0)
+    assert xlim[1] == pytest.approx(10.0 + 0.5 * max_channel, abs=1.0)

@@ -414,9 +414,10 @@ class MainWindow(QMainWindow):
         visible = [s for s in self.spectra if s.visible]
         for spectrum in visible:
             channels = np.arange(len(spectrum.data))
-            self.axes.plot(channels, spectrum.data, drawstyle="steps-mid", color=spectrum.color)
+            x = self.channel_to_display(channels)
+            self.axes.plot(x, spectrum.data, drawstyle="steps-mid", color=spectrum.color)
             self.fit_controller.draw_committed_fits(spectrum)
-        self.axes.set_xlabel("Channel")
+        self.axes.set_xlabel("Energy (keV)" if self._calibration_active else "Channel")
         self.axes.set_ylabel("Counts")
         self.axes.grid(True)
         self.axes.set_yscale("log" if self.log_scale_action.isChecked() else "linear")
@@ -426,7 +427,10 @@ class MainWindow(QMainWindow):
             # as such. Span the widest currently-visible spectrum, since
             # loaded files can have different channel counts.
             max_channel = max(len(s.data) for s in visible) - 1
-            xlim = saved_xlim if saved_xlim is not None else (0, max_channel)
+            if saved_xlim is not None:
+                xlim = saved_xlim
+            else:
+                xlim = (self.channel_to_display(0), self.channel_to_display(max_channel))
             self.axes.set_xlim(xlim)
             self._autoscale_y(xlim)
         self.canvas.draw()
