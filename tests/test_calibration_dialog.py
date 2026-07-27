@@ -4,18 +4,21 @@ from calibration_dialog import CalibrationDialog
 
 def test_dialog_defaults_to_linear_with_c_hidden(qapp):
     dialog = CalibrationDialog(None)
+    dialog.show()
     assert dialog._linear_radio.isChecked() is True
     assert dialog._c_field.isVisible() is False
 
 
 def test_quadratic_radio_shows_c_field(qapp):
     dialog = CalibrationDialog(None)
+    dialog.show()
     dialog._quadratic_radio.setChecked(True)
     assert dialog._c_field.isVisible() is True
 
 
 def test_linear_radio_hides_c_field_again(qapp):
     dialog = CalibrationDialog(None)
+    dialog.show()
     dialog._quadratic_radio.setChecked(True)
     dialog._linear_radio.setChecked(True)
     assert dialog._c_field.isVisible() is False
@@ -51,18 +54,31 @@ def test_accept_with_valid_quadratic_coefficients_sets_result(qapp):
     assert dialog.result_calibration == Calibration(kind="quadratic", a=10.0, b=0.5, c=0.0002)
 
 
-def test_accept_with_b_zero_shows_error_and_does_not_close(qapp):
+def test_accept_with_b_zero_shows_error_and_does_not_close(qapp, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    warned = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", staticmethod(lambda *a, **kw: warned.append(a))
+    )
     dialog = CalibrationDialog(None)
     dialog._a_field.setText("10.0")
     dialog._b_field.setText("0.0")
     dialog._on_accept()
     assert dialog.result_calibration is None
-    assert dialog.isVisible() or not dialog.result_calibration  # dialog not accepted
+    assert len(warned) == 1
 
 
-def test_accept_with_non_numeric_field_shows_error(qapp):
+def test_accept_with_non_numeric_field_shows_error(qapp, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    warned = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", staticmethod(lambda *a, **kw: warned.append(a))
+    )
     dialog = CalibrationDialog(None)
     dialog._a_field.setText("not-a-number")
     dialog._b_field.setText("0.5")
     dialog._on_accept()
     assert dialog.result_calibration is None
+    assert len(warned) == 1
