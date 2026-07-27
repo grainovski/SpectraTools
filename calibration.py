@@ -4,11 +4,10 @@ dependency -- calibration_dialog.py is the thin Qt layer on top of this."""
 
 from dataclasses import dataclass
 
-# Newton's-method convergence control. TV's vsCal.c used 0.01 keV; the
-# Python UI's interactive use (live mouse-move coordinate inversion) needs
-# tighter round-trip accuracy (~1e-6 channel), requiring ~1e-8 keV precision.
-# Quadratic convergence means only a few extra iterations vs TV's original.
-_NEWTON_PRECISION = 1e-8
+# TV's own Newton's-method precision/iteration-cap constants
+# (vsCal.c:15-16), reused verbatim rather than re-derived, for exact
+# parity with an already source-verified reference.
+_NEWTON_PRECISION = 0.01
 _NEWTON_MAXITER = 10000
 
 

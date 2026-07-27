@@ -54,9 +54,13 @@ def test_invert_linear_round_trips_apply():
 
 def test_invert_quadratic_round_trips_apply():
     cal = Calibration(kind="quadratic", a=10.0, b=0.5, c=0.0002)
+    # TV's 0.01 keV convergence criterion bounds the ENERGY residual, not
+    # the channel residual directly -- channel error is ~0.01/derivative,
+    # coarser here than the linear case above (where the initial guess is
+    # already the exact algebraic solution, needing no iteration at all).
     for channel in (0.0, 1.0, 100.0, 500.0, 4095.0):
         energy = cal.apply(channel)
-        assert cal.invert(energy) == pytest.approx(channel, abs=1e-6)
+        assert cal.invert(energy) == pytest.approx(channel, abs=0.01)
 
 
 def test_invert_matches_hand_worked_newton_example():
