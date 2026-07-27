@@ -649,7 +649,7 @@ class MainWindow(QMainWindow):
         xlim = self.axes.get_xlim()
         if center is None:
             center = (xlim[0] + xlim[1]) / 2
-        half_width = (xlim[1] - xlim[0]) / 2 * factor
+        half_width = abs(xlim[1] - xlim[0]) / 2 * factor
         max_channel = max(len(s.data) for s in visible) - 1
         display_lo = self.channel_to_display(0)
         display_hi = self.channel_to_display(max_channel)
@@ -661,7 +661,13 @@ class MainWindow(QMainWindow):
         new_hi = min(display_hi, center + half_width)
         if new_hi <= new_lo:
             new_hi = min(display_hi, new_lo + 1)
-        new_xlim = (new_lo, new_hi)
+        # A negative-b calibration makes channel_to_display decreasing,
+        # so the axis may currently be "inverted" (xlim[0] > xlim[1], a
+        # legitimate matplotlib feature -- see _plot_data/_show_full_spectrum).
+        # Preserve that orientation on write-back rather than always
+        # writing ascending order, which would flip the axis direction
+        # on every zoom.
+        new_xlim = (new_lo, new_hi) if xlim[0] <= xlim[1] else (new_hi, new_lo)
         self.axes.set_xlim(new_xlim)
         self._autoscale_y(new_xlim)
         self.canvas.draw()

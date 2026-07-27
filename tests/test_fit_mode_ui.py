@@ -2331,6 +2331,38 @@ def test_zoom_x_stays_within_calibrated_bounds(qapp):
     assert xlim[1] == pytest.approx(10.0 + 0.5 * max_channel, abs=1.0)
 
 
+def test_zoom_x_handles_negative_b_calibration(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=1000.0, b=-0.5)
+    main_window._calibration_active = True
+    main_window._plot_data()
+
+    max_channel = len(spectrum.data) - 1
+    full_lo = main_window.channel_to_display(0)
+    full_hi = main_window.channel_to_display(max_channel)
+
+    # Zoom out repeatedly from the full view -- must clamp to the full
+    # calibrated range (regardless of axis orientation), not collapse
+    # to a near-zero-width view (the b<0 zoom-arithmetic bug this
+    # guards against).
+    for _ in range(10):
+        main_window._zoom_x(2.0)
+    xlim = main_window.axes.get_xlim()
+    assert min(xlim) == pytest.approx(min(full_lo, full_hi), abs=1.0)
+    assert max(xlim) == pytest.approx(max(full_lo, full_hi), abs=1.0)
+
+    # Zoom in from there -- width should shrink smoothly to roughly
+    # half, not collapse to width ~1 (the pre-fix symptom).
+    main_window._zoom_x(0.5)
+    zoomed_xlim = main_window.axes.get_xlim()
+    zoomed_width = abs(zoomed_xlim[1] - zoomed_xlim[0])
+    full_width = abs(full_hi - full_lo)
+    assert zoomed_width == pytest.approx(full_width * 0.5, rel=0.1)
+
+
 def test_on_mouse_move_reports_correct_channel_when_calibrated(qapp):
     from calibration import Calibration
     from matplotlib.backend_bases import MouseEvent
