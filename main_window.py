@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QCheckBox,
+    QDialog,
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
@@ -30,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from calibration import Calibration
+from calibration_dialog import CalibrationDialog
 from fit_mode import FitModeController
 from histogram_io import ParseError, load_histogram
 from settings import Settings
@@ -256,6 +258,11 @@ class MainWindow(QMainWindow):
         self.dark_theme_action.toggled.connect(self._on_theme_toggled)
         view_menu.addAction(self.dark_theme_action)
 
+        view_menu.addSeparator()
+        self.calibration_action = QAction("Calibration...", self)
+        self.calibration_action.triggered.connect(self._open_calibration_dialog)
+        view_menu.addAction(self.calibration_action)
+
     def _apply_theme(self, theme):
         app = QApplication.instance()
         if app is not None:
@@ -290,6 +297,20 @@ class MainWindow(QMainWindow):
         if not self._calibration_active or self._calibration is None:
             return display_x
         return self._calibration.invert(display_x)
+
+    def _open_calibration_dialog(self):
+        dialog = CalibrationDialog(
+            self, initial=self._calibration, initially_active=self._calibration_active
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._calibration = dialog.result_calibration
+            self._calibration_active = dialog.result_active
+            if self.spectra:
+                # preserve_view intentionally omitted (defaults to
+                # False): the previous xlim was in the other unit
+                # (channels vs keV) and carrying it over would show a
+                # nonsensical view.
+                self._plot_data()
 
     def _style_nav_toolbar_palette(self, theme):
         """Sets the navigation toolbar's actual QPalette -- not just this

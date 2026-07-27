@@ -7,7 +7,7 @@ import pytest
 from matplotlib.backend_bases import MouseEvent
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QApplication, QCheckBox, QTableWidgetItem
+from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QTableWidgetItem
 
 import fit_mode
 from main_window import MainWindow
@@ -2171,3 +2171,48 @@ def test_run_integration_appends_to_the_auto_log(qapp, tmp_path):
     lines = log_path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
     assert json.loads(lines[0])["type"] == "integration"
+
+
+def test_calibration_menu_action_exists(qapp):
+    main_window = MainWindow()
+    assert hasattr(main_window, "calibration_action")
+    assert main_window.calibration_action.text() == "Calibration..."
+
+
+def test_applying_calibration_from_dialog_updates_state_and_replots(qapp, monkeypatch):
+    from calibration import Calibration
+    from calibration_dialog import CalibrationDialog
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    applied = Calibration(kind="linear", a=10.0, b=0.5)
+
+    def fake_exec(self):
+        self.result_calibration = applied
+        self.result_active = True
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(CalibrationDialog, "exec", fake_exec)
+    main_window._open_calibration_dialog()
+
+    assert main_window._calibration == applied
+    assert main_window._calibration_active is True
+    assert main_window.axes.get_xlabel() == "Energy (keV)"
+
+
+def test_cancelling_calibration_dialog_leaves_state_untouched(qapp, monkeypatch):
+    from calibration_dialog import CalibrationDialog
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    def fake_exec(self):
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(CalibrationDialog, "exec", fake_exec)
+    main_window._open_calibration_dialog()
+
+    assert main_window._calibration is None
+    assert main_window._calibration_active is False
+    assert main_window.axes.get_xlabel() == "Channel"
