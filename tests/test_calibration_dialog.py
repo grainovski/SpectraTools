@@ -82,3 +82,70 @@ def test_accept_with_non_numeric_field_shows_error(qapp, monkeypatch):
     dialog._on_accept()
     assert dialog.result_calibration is None
     assert len(warned) == 1
+
+
+def test_load_from_file_populates_linear_fields(qapp, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+
+    path = tmp_path / "cal.txt"
+    path.write_text("10.5\n0.487\n")
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName", staticmethod(lambda *a, **kw: (str(path), ""))
+    )
+
+    dialog = CalibrationDialog(None)
+    dialog._on_load_file()
+
+    assert float(dialog._a_field.text()) == 10.5
+    assert float(dialog._b_field.text()) == 0.487
+
+
+def test_load_from_file_populates_quadratic_fields(qapp, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+
+    path = tmp_path / "cal.txt"
+    path.write_text("10.5\n0.487\n0.0002\n")
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName", staticmethod(lambda *a, **kw: (str(path), ""))
+    )
+
+    dialog = CalibrationDialog(None)
+    dialog._quadratic_radio.setChecked(True)
+    dialog._on_load_file()
+
+    assert float(dialog._a_field.text()) == 10.5
+    assert float(dialog._b_field.text()) == 0.487
+    assert float(dialog._c_field.text()) == 0.0002
+
+
+def test_load_from_malformed_file_shows_warning_and_leaves_fields(qapp, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    path = tmp_path / "cal.txt"
+    path.write_text("only-one-bad-line\n")
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName", staticmethod(lambda *a, **kw: (str(path), ""))
+    )
+    warned = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", staticmethod(lambda *a, **kw: warned.append(a))
+    )
+
+    dialog = CalibrationDialog(None)
+    dialog._a_field.setText("unchanged")
+    dialog._on_load_file()
+
+    assert len(warned) == 1
+    assert dialog._a_field.text() == "unchanged"
+
+
+def test_cancelled_file_dialog_leaves_fields_unchanged(qapp, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName", staticmethod(lambda *a, **kw: ("", ""))
+    )
+    dialog = CalibrationDialog(None)
+    dialog._a_field.setText("unchanged")
+    dialog._on_load_file()
+    assert dialog._a_field.text() == "unchanged"
