@@ -137,6 +137,20 @@ def test_channel_to_display_is_identity_when_calibration_set_but_inactive(qapp):
     assert main_window.channel_to_display(100) == 100
 
 
+def test_marking_click_resolves_to_correct_channel_when_calibrated(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    main_window._plot_data()
+
+    # Click at keV 60 (= channel 100 under a=10, b=0.5) while holding 'r'.
+    _held_key_click(main_window, "r", 60.0)
+    assert main_window.fit_controller.state.pending_fit_click == pytest.approx(100.0, abs=1e-6)
+
+
 def test_full_fit_flow_commits_a_fit_result(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)

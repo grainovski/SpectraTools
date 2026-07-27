@@ -369,17 +369,26 @@ class FitModeController(QObject):
         if event.button != 1:
             return
         key = self._held_key
+        channel_x = self.main_window.display_to_channel(event.xdata)
         if key == "b":
-            self.state.add_bg_click(event.xdata)
+            self.state.add_bg_click(channel_x)
             self._redraw_progress()
         elif key == "r":
-            completed = self.state.add_fit_click(event.xdata)
+            completed = self.state.add_fit_click(channel_x)
             if completed is not None:
                 self._reset_parameters_panel()
             self._redraw_progress()
         elif key == "p":
             proximity = self._pixel_proximity_to_data(event)
-            result = self.state.toggle_peak(event.xdata, proximity)
+            # Convert the proximity *distance* to channel units by
+            # inverting both endpoints and taking their difference,
+            # rather than scaling by the calibration's derivative --
+            # reuses the exact same, already-tested invert() with no
+            # extra approximation math.
+            proximity_channels = abs(
+                self.main_window.display_to_channel(event.xdata + proximity) - channel_x
+            )
+            result = self.state.toggle_peak(channel_x, proximity_channels)
             if result is None:
                 self._show_status_message(
                     "Mark the fit region (hold R and click twice) before marking peaks", 3000
