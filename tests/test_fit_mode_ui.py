@@ -2267,3 +2267,85 @@ def test_plot_data_xlim_spans_calibrated_range_when_active(qapp):
     max_channel = len(spectrum.data) - 1
     assert xlim[0] == pytest.approx(10.0, abs=1.0)
     assert xlim[1] == pytest.approx(10.0 + 0.5 * max_channel, abs=1.0)
+
+
+def test_autoscale_y_uses_correct_channel_range_when_calibrated(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)  # 200 channels -> calibrated range [10, 109.5] keV
+    spectrum.data[50] = 99999  # channel 50 -> keV 35, OUTSIDE the range queried below
+    # channel 150 -> keV 85, INSIDE the range queried below. Set well above
+    # 520 (the synthetic spectrum's own built-in bump peak at channel 100,
+    # see _make_active_spectrum) so this value can't accidentally satisfy
+    # the assertion below via the *unfixed* code's channel-vs-keV mixup,
+    # which misinterprets the query as raw channels [70, 101) -- a range
+    # that happens to include that channel-100 bump but not channel 150.
+    spectrum.data[150] = 5000
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    main_window._plot_data()
+
+    # Query the y-autoscale over keV [70, 100] -> channel [120, 180]:
+    # excludes channel 50's spike, includes channel 150's value.
+    main_window._autoscale_y((70.0, 100.0))
+    ylim = main_window.axes.get_ylim()
+    assert ylim[1] < 99999  # the out-of-range spike must not be included
+    assert ylim[1] >= 5000  # the in-range value must be
+
+
+def test_show_full_spectrum_spans_calibrated_range(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    main_window._plot_data()
+
+    main_window._show_full_spectrum()
+    xlim = main_window.axes.get_xlim()
+    max_channel = len(spectrum.data) - 1
+    assert xlim[0] == pytest.approx(10.0, abs=1.0)
+    assert xlim[1] == pytest.approx(10.0 + 0.5 * max_channel, abs=1.0)
+
+
+def test_zoom_x_stays_within_calibrated_bounds(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    main_window._plot_data()
+
+    # Zoom out repeatedly -- the view must clamp to the calibrated full
+    # range, not the raw channel range (10..109.5 for this spectrum),
+    # which for a 200-channel spectrum would be far narrower than
+    # letting it clamp to [0, 199].
+    for _ in range(10):
+        main_window._zoom_x(2.0)
+    xlim = main_window.axes.get_xlim()
+    max_channel = len(spectrum.data) - 1
+    assert xlim[0] == pytest.approx(10.0, abs=1.0)
+    assert xlim[1] == pytest.approx(10.0 + 0.5 * max_channel, abs=1.0)
+
+
+def test_on_mouse_move_reports_correct_channel_when_calibrated(qapp):
+    from calibration import Calibration
+    from matplotlib.backend_bases import MouseEvent
+
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.data[100] = 12345
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    main_window._plot_data()
+
+    # Channel 100 -> keV 10 + 0.5*100 = 60.
+    px, py = main_window.axes.transData.transform((60.0, 10.0))
+    event = MouseEvent("motion_notify_event", main_window.canvas, px, py)
+    main_window._on_mouse_move(event)
+
+    message = main_window.statusBar().currentMessage()
+    assert "12345" in message

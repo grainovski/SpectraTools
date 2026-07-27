@@ -450,8 +450,11 @@ class MainWindow(QMainWindow):
         if not visible or event.inaxes != self.axes or event.xdata is None:
             self.statusBar().clearMessage()
             return
-        channel = int(round(event.xdata))
-        parts = [f"Channel: {channel}"]
+        channel = int(round(self.display_to_channel(event.xdata)))
+        if self._calibration_active:
+            parts = [f"Channel: {channel}  Energy: {event.xdata:.2f} keV"]
+        else:
+            parts = [f"Channel: {channel}"]
         for spectrum in visible:
             if 0 <= channel < len(spectrum.data):
                 parts.append(f"{os.path.basename(spectrum.path)}: {spectrum.data[channel]}")
@@ -648,12 +651,16 @@ class MainWindow(QMainWindow):
             center = (xlim[0] + xlim[1]) / 2
         half_width = (xlim[1] - xlim[0]) / 2 * factor
         max_channel = max(len(s.data) for s in visible) - 1
-        # Clamp to valid channel numbers -- zooming/scrolling must never
-        # show negative channels or channels past the end of the data.
-        new_lo = max(0.0, center - half_width)
-        new_hi = min(float(max_channel), center + half_width)
+        display_lo = self.channel_to_display(0)
+        display_hi = self.channel_to_display(max_channel)
+        display_lo, display_hi = min(display_lo, display_hi), max(display_lo, display_hi)
+        # Clamp to the valid displayed range -- zooming/scrolling must
+        # never show channels outside the data, whether the axis is
+        # currently in raw channels or calibrated keV.
+        new_lo = max(display_lo, center - half_width)
+        new_hi = min(display_hi, center + half_width)
         if new_hi <= new_lo:
-            new_hi = min(float(max_channel), new_lo + 1)
+            new_hi = min(display_hi, new_lo + 1)
         new_xlim = (new_lo, new_hi)
         self.axes.set_xlim(new_xlim)
         self._autoscale_y(new_xlim)
@@ -664,7 +671,8 @@ class MainWindow(QMainWindow):
         visible = [s for s in self.spectra if s.visible]
         if not visible:
             return
-        full_xlim = (0, max(len(s.data) for s in visible) - 1)
+        max_channel = max(len(s.data) for s in visible) - 1
+        full_xlim = (self.channel_to_display(0), self.channel_to_display(max_channel))
         self.axes.set_xlim(full_xlim)
         self._autoscale_y(full_xlim)
         self.canvas.draw()
@@ -674,8 +682,11 @@ class MainWindow(QMainWindow):
         visible = [s for s in self.spectra if s.visible]
         if not visible:
             return
-        lo_bound = max(0, int(np.floor(xlim[0])))
-        hi_bound = int(np.ceil(xlim[1])) + 1
+        channel_lo = self.display_to_channel(xlim[0])
+        channel_hi = self.display_to_channel(xlim[1])
+        channel_lo, channel_hi = min(channel_lo, channel_hi), max(channel_lo, channel_hi)
+        lo_bound = max(0, int(np.floor(channel_lo)))
+        hi_bound = int(np.ceil(channel_hi)) + 1
         slices = []
         for spectrum in visible:
             lo = min(lo_bound, len(spectrum.data))
