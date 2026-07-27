@@ -77,3 +77,25 @@ class Calibration:
             de = self.apply(x) - energy
             iterations += 1
         return x
+
+
+def read_coefficients_file(path, quadratic):
+    """Reads a and b (and c if `quadratic`) from `path`, one coefficient
+    per line, blank lines ignored. Raises CalibrationFileError on a
+    wrong line count, non-numeric content, or an unreadable file."""
+    expected = 3 if quadratic else 2
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f if line.strip()]
+    except OSError as exc:
+        raise CalibrationFileError(f"Could not read {path}: {exc}") from exc
+    if len(lines) != expected:
+        kind_name = "quadratic" if quadratic else "linear"
+        raise CalibrationFileError(
+            f"Expected {expected} coefficient(s) (one per line) for "
+            f"{kind_name} calibration, found {len(lines)} in {path}"
+        )
+    try:
+        return [float(line) for line in lines]
+    except ValueError as exc:
+        raise CalibrationFileError(f"Non-numeric value in {path}: {exc}") from exc

@@ -1,6 +1,6 @@
 import pytest
 
-from calibration import Calibration, CalibrationError
+from calibration import Calibration, CalibrationError, CalibrationFileError
 
 
 def test_linear_apply_matches_hand_computation():
@@ -97,3 +97,46 @@ def test_invert_raises_on_zero_derivative_at_vertex():
     cal = Calibration(kind="quadratic", a=10.0, b=0.5, c=0.0002)
     with pytest.raises(CalibrationError):
         cal.invert(-615.0)
+
+
+def test_read_coefficients_file_linear(tmp_path):
+    path = tmp_path / "cal.txt"
+    path.write_text("10.5\n0.487\n")
+    from calibration import read_coefficients_file
+    assert read_coefficients_file(str(path), quadratic=False) == [10.5, 0.487]
+
+
+def test_read_coefficients_file_quadratic(tmp_path):
+    path = tmp_path / "cal.txt"
+    path.write_text("10.5\n0.487\n0.0002\n")
+    from calibration import read_coefficients_file
+    assert read_coefficients_file(str(path), quadratic=True) == [10.5, 0.487, 0.0002]
+
+
+def test_read_coefficients_file_ignores_blank_lines(tmp_path):
+    path = tmp_path / "cal.txt"
+    path.write_text("10.5\n\n0.487\n\n")
+    from calibration import read_coefficients_file
+    assert read_coefficients_file(str(path), quadratic=False) == [10.5, 0.487]
+
+
+def test_read_coefficients_file_wrong_count_raises(tmp_path):
+    path = tmp_path / "cal.txt"
+    path.write_text("10.5\n")  # only 1 line, linear needs 2
+    with pytest.raises(CalibrationFileError):
+        from calibration import read_coefficients_file
+        read_coefficients_file(str(path), quadratic=False)
+
+
+def test_read_coefficients_file_non_numeric_raises(tmp_path):
+    path = tmp_path / "cal.txt"
+    path.write_text("10.5\nnot-a-number\n")
+    with pytest.raises(CalibrationFileError):
+        from calibration import read_coefficients_file
+        read_coefficients_file(str(path), quadratic=False)
+
+
+def test_read_coefficients_file_missing_file_raises(tmp_path):
+    with pytest.raises(CalibrationFileError):
+        from calibration import read_coefficients_file
+        read_coefficients_file(str(tmp_path / "does_not_exist.txt"), quadratic=False)
