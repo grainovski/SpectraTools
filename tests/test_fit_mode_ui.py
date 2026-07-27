@@ -2202,12 +2202,20 @@ def test_applying_calibration_from_dialog_updates_state_and_replots(qapp, monkey
 
 
 def test_cancelling_calibration_dialog_leaves_state_untouched(qapp, monkeypatch):
+    from calibration import Calibration
     from calibration_dialog import CalibrationDialog
 
     main_window = MainWindow()
     _make_active_spectrum(main_window)
 
     def fake_exec(self):
+        # Simulate a dialog where the user entered valid values (so
+        # result_calibration/result_active would be non-default if
+        # applied) but then hit Cancel -- this must distinguish "reject
+        # correctly ignored" from "the Accepted-guard was never checked
+        # at all", which a dialog left at its untouched defaults cannot.
+        self.result_calibration = Calibration(kind="linear", a=99.0, b=1.0)
+        self.result_active = True
         return QDialog.DialogCode.Rejected
 
     monkeypatch.setattr(CalibrationDialog, "exec", fake_exec)
