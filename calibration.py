@@ -85,10 +85,13 @@ def read_coefficients_file(path, quadratic):
     wrong line count, non-numeric content, or an unreadable file."""
     expected = 3 if quadratic else 2
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8-sig") as f:
             lines = [line.strip() for line in f if line.strip()]
     except OSError as exc:
-        raise CalibrationFileError(f"Could not read {path}: {exc}") from exc
+        reason = exc.strerror or str(exc)
+        raise CalibrationFileError(f"Could not read {path}: {reason}") from exc
+    except UnicodeDecodeError as exc:
+        raise CalibrationFileError(f"Could not read {path}: not a text file ({exc})") from exc
     if len(lines) != expected:
         kind_name = "quadratic" if quadratic else "linear"
         raise CalibrationFileError(

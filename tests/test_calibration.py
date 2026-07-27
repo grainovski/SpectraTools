@@ -140,3 +140,19 @@ def test_read_coefficients_file_missing_file_raises(tmp_path):
     with pytest.raises(CalibrationFileError):
         from calibration import read_coefficients_file
         read_coefficients_file(str(tmp_path / "does_not_exist.txt"), quadratic=False)
+
+
+def test_read_coefficients_file_strips_utf8_bom(tmp_path):
+    from calibration import read_coefficients_file
+    path = tmp_path / "cal.txt"
+    path.write_bytes("10.5\n0.487\n".encode("utf-8-sig"))
+    assert read_coefficients_file(str(path), quadratic=False) == [10.5, 0.487]
+
+
+def test_read_coefficients_file_non_utf8_raises(tmp_path):
+    from calibration import CalibrationFileError, read_coefficients_file
+    path = tmp_path / "cal.txt"
+    # A byte sequence that's invalid UTF-8 (0xFF is never valid in UTF-8).
+    path.write_bytes(b"10.5\n\xff\xfe0.487\n")
+    with pytest.raises(CalibrationFileError):
+        read_coefficients_file(str(path), quadratic=False)
