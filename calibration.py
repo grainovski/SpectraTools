@@ -57,12 +57,23 @@ class Calibration:
         derivative until the residual is within _NEWTON_PRECISION or
         _NEWTON_MAXITER iterations are exhausted. Scalar input only (this
         app only ever calls it with a single click/mouse-move
-        coordinate)."""
+        coordinate). Raises CalibrationError if an iterate lands exactly
+        on the calibration curve's vertex (zero derivative), where
+        Newton's method cannot proceed -- same reasoning as the b=0
+        guard in __post_init__: fail clearly rather than propagate a
+        divide-by-zero crash or silent NaN."""
         x = (energy - self.a) / self.b
         de = self.apply(x) - energy
         iterations = 0
         while abs(de) > _NEWTON_PRECISION and iterations < _NEWTON_MAXITER:
-            x -= de / self.derivative(x)
+            gradient = self.derivative(x)
+            if gradient == 0.0:
+                raise CalibrationError(
+                    f"Cannot invert energy={energy!r}: Newton's-method "
+                    "iteration reached the calibration curve's vertex "
+                    "(zero derivative), where inversion is undefined"
+                )
+            x -= de / gradient
             de = self.apply(x) - energy
             iterations += 1
         return x

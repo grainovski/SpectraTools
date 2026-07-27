@@ -58,6 +58,8 @@ def test_invert_quadratic_round_trips_apply():
     # the channel residual directly -- channel error is ~0.01/derivative,
     # coarser here than the linear case above (where the initial guess is
     # already the exact algebraic solution, needing no iteration at all).
+    # Tolerance verified against these specific sampled channels only, not
+    # a domain-wide worst-case search.
     for channel in (0.0, 1.0, 100.0, 500.0, 4095.0):
         energy = cal.apply(channel)
         assert cal.invert(energy) == pytest.approx(channel, abs=0.01)
@@ -84,3 +86,14 @@ def test_invert_negative_b_still_round_trips():
     cal = Calibration(kind="linear", a=1000.0, b=-0.5)
     energy = cal.apply(300.0)
     assert cal.invert(energy) == pytest.approx(300.0, abs=1e-6)
+
+
+def test_invert_raises_on_zero_derivative_at_vertex():
+    # x0 = (energy - a) / b = (-615 - 10) / 0.5 = -1250, which is exactly
+    # this calibration's vertex (x = -b/(2c) = -0.5/0.0004 = -1250), where
+    # derivative(x) = b + 2*c*x = 0.5 + 2*0.0002*(-1250) = 0 -- Newton's
+    # method cannot divide by this and must fail clearly, not crash with
+    # an unguarded ZeroDivisionError.
+    cal = Calibration(kind="quadratic", a=10.0, b=0.5, c=0.0002)
+    with pytest.raises(CalibrationError):
+        cal.invert(-615.0)
