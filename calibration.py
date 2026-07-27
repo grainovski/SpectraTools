@@ -34,3 +34,10 @@ class Calibration:
         Horner's method. Matches TV's CalP (vsCal.c:981-988). Works on
         a scalar or a numpy array via broadcasting."""
         return self.a + channel * (self.b + channel * self.c)
+
+    def derivative(self, channel):
+        """dE/dchannel at `channel` -- b + 2*c*channel. Matches the
+        gradient computation inside TV's CalC (vsCal.c:1066-1068), used
+        there for Newton's-method inversion and here for both that and
+        keV-uncertainty propagation in the results display."""
+        return self.b + 2.0 * self.c * channel
