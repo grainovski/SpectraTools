@@ -151,6 +151,28 @@ def test_marking_click_resolves_to_correct_channel_when_calibrated(qapp):
     assert main_window.fit_controller.state.pending_fit_click == pytest.approx(100.0, abs=1e-6)
 
 
+def test_peak_toggle_click_resolves_to_correct_channel_when_calibrated(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    main_window._plot_data()
+    main_window.fit_controller.state.fit_region = (85.0, 115.0)  # channel space
+
+    # Click at keV 60 (= channel 100 under a=10, b=0.5) while holding 'p'.
+    _held_key_click(main_window, "p", 60.0)
+    assert main_window.fit_controller.state.peak_positions == [pytest.approx(100.0, abs=1e-6)]
+
+    # Clicking again at the same display position must resolve to the
+    # same channel and fall within the (also correctly channel-converted)
+    # proximity threshold of the existing peak, toggling it off -- this
+    # exercises the proximity_channels conversion line, not just channel_x.
+    _held_key_click(main_window, "p", 60.0)
+    assert main_window.fit_controller.state.peak_positions == []
+
+
 def test_full_fit_flow_commits_a_fit_result(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)

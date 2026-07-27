@@ -384,7 +384,11 @@ class FitModeController(QObject):
             # inverting both endpoints and taking their difference,
             # rather than scaling by the calibration's derivative --
             # reuses the exact same, already-tested invert() with no
-            # extra approximation math.
+            # extra approximation math. Exact for a linear calibration;
+            # for quadratic, this is a one-sided estimate (only the
+            # rightward endpoint is inverted), so the resulting
+            # hit-test tolerance is very slightly asymmetric -- fine
+            # for a fuzzy "close enough" click radius.
             proximity_channels = abs(
                 self.main_window.display_to_channel(event.xdata + proximity) - channel_x
             )
