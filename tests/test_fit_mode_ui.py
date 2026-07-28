@@ -298,6 +298,63 @@ def test_results_table_dims_hidden_fit_rows(qapp):
     assert table.item(0, 0).foreground() != default_color
 
 
+def test_results_table_shows_channels_only_when_inactive(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0, amplitude=200.0, sigma=2.0,
+                )
+            ],
+        )
+    )
+    main_window.fit_controller.update_results_list()
+    table = main_window.fit_controller.results_table
+    position_text = table.item(0, 1).text()
+    assert "keV" not in position_text
+    assert position_text == "100.00 ± 0.10"
+
+
+def test_results_table_shows_dual_units_when_active(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0, amplitude=200.0, sigma=2.0,
+                )
+            ],
+        )
+    )
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+
+    main_window.fit_controller.update_results_list()
+
+    table = main_window.fit_controller.results_table
+    position_text = table.item(0, 1).text()
+    # position 100.0 +/- 0.1 -> keV 60.0 +/- 0.05 (err scaled by |b|=0.5)
+    assert position_text == "100.00 ± 0.10 ch (60.00 ± 0.05 keV)"
+
+    fwhm_text = table.item(0, 2).text()
+    # fwhm 5.0 +/- 0.2 -> keV 2.50 +/- 0.10
+    assert fwhm_text == "5.00 ± 0.20 ch (2.50 ± 0.10 keV)"
+
+    volume_text = table.item(0, 3).text()
+    assert volume_text == "1000.0 ± 50.0"  # unchanged -- area has no keV equivalent
+
+
 def test_remove_fit_from_context_menu_removes_the_correct_fit_by_row(qapp, monkeypatch):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
@@ -2186,6 +2243,37 @@ def test_results_table_shows_a_region_row_for_an_integration_result(qapp):
     assert "Net:" in tooltip
 
 
+def test_tooltip_shows_dual_units_for_centroid_and_fwhm_when_active(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        IntegrationResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_density=20.0,
+            gross_area=1000.0, gross_area_err=30.0,
+            gross_centroid=100.0, gross_centroid_err=0.5,
+            gross_fwhm=8.0, gross_fwhm_err=0.4,
+            gross_skewness=0.0, gross_skewness_err=0.1,
+            background_area=200.0, background_area_err=10.0,
+            background_centroid=100.0, background_centroid_err=1.0,
+            background_fwhm=9.0, background_fwhm_err=0.5,
+            background_skewness=0.0, background_skewness_err=0.1,
+            net_area=800.0, net_area_err=32.0,
+            net_centroid=100.0, net_centroid_err=0.6,
+            net_fwhm=7.5, net_fwhm_err=0.4,
+            net_skewness=0.0, net_skewness_err=0.1,
+        )
+    )
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    main_window.fit_controller.update_results_list()
+
+    tooltip = main_window.fit_controller.results_table.item(0, 0).toolTip()
+    assert "keV" in tooltip
+
+
 def test_results_table_dims_hidden_integration_rows(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
@@ -2213,6 +2301,39 @@ def test_results_table_dims_hidden_integration_rows(qapp):
     table = main_window.fit_controller.results_table
     default_color = QTableWidgetItem().foreground()
     assert table.item(0, 0).foreground() != default_color
+
+
+def test_results_table_integration_row_shows_dual_units_when_active(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        IntegrationResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_density=20.0,
+            gross_area=1000.0, gross_area_err=30.0,
+            gross_centroid=100.0, gross_centroid_err=0.5,
+            gross_fwhm=8.0, gross_fwhm_err=0.4,
+            gross_skewness=0.0, gross_skewness_err=0.1,
+            background_area=200.0, background_area_err=10.0,
+            background_centroid=100.0, background_centroid_err=1.0,
+            background_fwhm=9.0, background_fwhm_err=0.5,
+            background_skewness=0.0, background_skewness_err=0.1,
+            net_area=800.0, net_area_err=32.0,
+            net_centroid=100.0, net_centroid_err=0.6,
+            net_fwhm=7.5, net_fwhm_err=0.4,
+            net_skewness=0.0, net_skewness_err=0.1,
+        )
+    )
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+
+    main_window.fit_controller.update_results_list()
+
+    table = main_window.fit_controller.results_table
+    centroid_text = table.item(0, 1).text()
+    assert "keV" in centroid_text
 
 
 def test_run_integration_ignores_any_marked_peaks(qapp):

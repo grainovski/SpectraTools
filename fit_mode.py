@@ -175,10 +175,37 @@ def _parameter_label(name):
     return f"Peak {peak_num} {kind}"
 
 
-def _integration_tooltip(result):
+def _dual_unit_value(main_window, channel_value, channel_err, is_width):
+    """Formats a channel-space value+error as "X.XX ± Y.YY ch (E.EE ±
+    F.FF keV)" when calibration is active, or plain "X.XX ± Y.YY"
+    otherwise. `is_width=False` (a position, e.g. peak centroid)
+    converts through the full calibration (cal.apply, including the
+    offset `a`); `is_width=True` (e.g. FWHM) scales by the local
+    derivative only -- a width has no absolute position of its own, and
+    running it through apply() would incorrectly add `a`. keV
+    uncertainty is first-order error propagation through the
+    calibration's local derivative in both cases -- exact for linear
+    calibration, a good approximation for quadratic given realistic
+    peak-width uncertainties are small relative to the calibration's
+    curvature scale."""
+    if not main_window._calibration_active or main_window._calibration is None:
+        return f"{channel_value:.2f} ± {channel_err:.2f}"
+    cal = main_window._calibration
+    slope = abs(cal.derivative(channel_value))
+    if is_width:
+        energy = slope * channel_value
+    else:
+        energy = cal.apply(channel_value)
+    energy_err = slope * channel_err
+    return f"{channel_value:.2f} ± {channel_err:.2f} ch ({energy:.2f} ± {energy_err:.2f} keV)"
+
+
+def _integration_tooltip(main_window, result):
     """Full gross/background/net breakdown for an IntegrationResult's Fit
     Results row tooltip -- mirrors the level of detail the existing
-    left-tail-info tooltip gives for a Gaussian fit."""
+    left-tail-info tooltip gives for a Gaussian fit. Centroid/FWHM show
+    dual units when calibration is active; area has no energy-axis
+    equivalent and stays channel-only, matching the results table."""
     lines = []
     for label, prefix in (("Gross", "gross"), ("Background", "background"), ("Net", "net")):
         area = getattr(result, f"{prefix}_area")
@@ -191,8 +218,8 @@ def _integration_tooltip(result):
         skewness_err = getattr(result, f"{prefix}_skewness_err")
         lines.append(
             f"{label}: area={area:.1f}±{area_err:.1f}, "
-            f"centroid={centroid:.2f}±{centroid_err:.2f}, "
-            f"FWHM={fwhm:.2f}±{fwhm_err:.2f}, "
+            f"centroid={_dual_unit_value(main_window, centroid, centroid_err, is_width=False)}, "
+            f"FWHM={_dual_unit_value(main_window, fwhm, fwhm_err, is_width=True)}, "
             f"skewness={skewness:.3g}±{skewness_err:.3g}"
         )
     return "\n".join(lines)
@@ -683,14 +710,18 @@ class FitModeController(QObject):
         for fit_index, result in enumerate(active.fits):
             if isinstance(result, IntegrationResult):
                 fit_label = f"{fit_index + 1} [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]"
-                tooltip = _integration_tooltip(result)
+                tooltip = _integration_tooltip(self.main_window, result)
                 row = self.results_table.rowCount()
                 self.results_table.insertRow(row)
                 self._results_row_fit_index.append(fit_index)
                 values = [
                     fit_label,
-                    f"{result.net_centroid:.2f} ± {result.net_centroid_err:.2f}",
-                    f"{result.net_fwhm:.2f} ± {result.net_fwhm_err:.2f}",
+                    _dual_unit_value(
+                        self.main_window, result.net_centroid, result.net_centroid_err, is_width=False
+                    ),
+                    _dual_unit_value(
+                        self.main_window, result.net_fwhm, result.net_fwhm_err, is_width=True
+                    ),
                     f"{result.net_area:.1f} ± {result.net_area_err:.1f}",
                     "—",  # no chi^2 concept for a direct-sum Integration result
                 ]
@@ -735,8 +766,12 @@ class FitModeController(QObject):
 
                 values = [
                     fit_label,
-                    f"{peak.position:.2f} ± {peak.position_err:.2f}",
-                    f"{peak.fwhm:.2f} ± {peak.fwhm_err:.2f}",
+                    _dual_unit_value(
+                        self.main_window, peak.position, peak.position_err, is_width=False
+                    ),
+                    _dual_unit_value(
+                        self.main_window, peak.fwhm, peak.fwhm_err, is_width=True
+                    ),
                     f"{peak.area:.1f} ± {peak.area_err:.1f}",
                     f"{result.reduced_chi2:.3g}" if result.reduced_chi2 is not None else "—",
                 ]
