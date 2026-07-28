@@ -1,6 +1,6 @@
 import numpy as np
 
-from spectrum_operations import multiply, rebin
+from spectrum_operations import multiply, normalize_factors, rebin, reference_value
 
 
 def test_multiply_scales_and_rounds():
@@ -62,3 +62,39 @@ def test_rebin_preserves_int64_dtype():
     data = np.array([1, 2, 3, 4, 5], dtype=np.int64)
     result = rebin(data, 2)
     assert result.dtype == np.int64
+
+
+def test_reference_value_single_channel():
+    data = np.array([10, 20, 30, 40])
+    assert reference_value(data, channel=2) == 30
+
+
+def test_reference_value_channel_out_of_range_is_zero():
+    data = np.array([10, 20, 30])
+    assert reference_value(data, channel=10) == 0
+    assert reference_value(data, channel=-1) == 0
+
+
+def test_reference_value_region_sums_inclusive():
+    data = np.array([10, 20, 30, 40, 50])
+    assert reference_value(data, region=(1, 3)) == 90
+
+
+def test_reference_value_region_clamped_to_bounds():
+    data = np.array([10, 20, 30])
+    assert reference_value(data, region=(-5, 100)) == 60
+
+
+def test_normalize_factors_scales_up_to_the_maximum():
+    factors = normalize_factors([50, 100, 25])
+    assert factors == [2.0, 1.0, 4.0]
+
+
+def test_normalize_factors_skips_zero_values():
+    factors = normalize_factors([0, 100, 50])
+    assert factors == [None, 1.0, 2.0]
+
+
+def test_normalize_factors_all_zero_is_a_no_op():
+    factors = normalize_factors([0, 0, 0])
+    assert factors == [1.0, 1.0, 1.0]
