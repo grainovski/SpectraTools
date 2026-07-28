@@ -1206,6 +1206,50 @@ def test_draw_committed_fits_model_curve_unaffected_by_calibration(qapp):
     np.testing.assert_allclose(uncalibrated_curve, calibrated_curve)
 
 
+def test_draw_committed_fits_integration_result_draws_at_calibrated_x(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        IntegrationResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_density=20.0,
+            gross_area=1000.0, gross_area_err=30.0,
+            gross_centroid=100.0, gross_centroid_err=0.5,
+            gross_fwhm=8.0, gross_fwhm_err=0.4,
+            gross_skewness=0.0, gross_skewness_err=0.1,
+            background_area=200.0, background_area_err=10.0,
+            background_centroid=100.0, background_centroid_err=1.0,
+            background_fwhm=9.0, background_fwhm_err=0.5,
+            background_skewness=0.0, background_skewness_err=0.1,
+            net_area=800.0, net_area_err=32.0,
+            net_centroid=100.0, net_centroid_err=0.6,
+            net_fwhm=7.5, net_fwhm_err=0.4,
+            net_skewness=0.0, net_skewness_err=0.1,
+        )
+    )
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+
+    main_window.fit_controller.draw_committed_fits(spectrum)
+
+    # IntegrationResult draws exactly one Line2D (the background-density
+    # dashed line, since axvspan patches aren't Line2D objects and this
+    # branch never reaches the Gaussian/hypermet fit-curve code); its x
+    # endpoints should be the calibrated fit-region bounds, not raw
+    # channels.
+    bg_line = main_window.axes.lines[-1]
+    xdata = bg_line.get_xdata()
+    assert xdata[0] == pytest.approx(52.5)  # channel 85 -> keV 10+0.5*85
+    assert xdata[1] == pytest.approx(67.5)  # channel 115 -> keV 10+0.5*115
+
+    # The centroid/FWHM/area annotation is anchored at the calibrated
+    # net_centroid position.
+    annotation = main_window.axes.texts[-1]
+    assert annotation.get_position()[0] == pytest.approx(60.0)  # net_centroid 100 -> keV 60
+
+
 @pytest.mark.xfail(
     strict=True,
     reason="NOT fixed by Task 3's _measure_width (verified): "
