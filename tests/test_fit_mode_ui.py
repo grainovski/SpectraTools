@@ -3149,3 +3149,39 @@ def test_parameters_panel_fixed_row_energy_survives_calibration_toggle(qapp):
     main_window.calibration_toggle_action.setChecked(True)
 
     assert table.item(2, 3).text() == fixed_energy
+
+
+def test_parameters_panel_fixed_row_energy_survives_a_refit_with_different_values(qapp):
+    """A Fixed row's channel Value is deliberately frozen at whatever
+    the user last saw/edited, even across a re-fit that computes a
+    different value for that same parameter (same parameter names, so
+    update_parameters_panel takes its in-place-update branch, not a
+    full rebuild) -- its Energy column must stay frozen at that SAME
+    already-displayed value too, not silently drift to reflect the
+    new, un-displayed fit result."""
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    main_window.calibration_toggle_action.setEnabled(True)
+    main_window.calibration_toggle_action.setChecked(True)
+
+    fc = main_window.fit_controller
+    names = ["amp_0", "pos_0", "sigma"]
+    fc.update_parameters_panel(names, {"amp_0": 200.0, "pos_0": 100.0, "sigma": 2.0})
+
+    table = fc.parameters_table
+    table.cellWidget(1, 2).setChecked(True)  # fix "Peak 1 position"
+    frozen_channel = table.item(1, 1).text()
+    frozen_energy = table.item(1, 3).text()
+    assert frozen_energy == "60"  # 10 + 0.5*100
+
+    # Same parameter names, but a different fit result for the fixed
+    # position -- as if the user re-fit after editing an unrelated mark.
+    fc.update_parameters_panel(names, {"amp_0": 210.0, "pos_0": 130.0, "sigma": 2.1})
+
+    assert table.item(1, 1).text() == frozen_channel
+    assert table.item(1, 3).text() == frozen_energy
+    assert table.item(1, 3).text() != "75"  # NOT 10+0.5*130 -- would mean it drifted

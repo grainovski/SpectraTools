@@ -248,7 +248,7 @@ def _panel_value_to_internal(name, value):
 
 def _panel_energy_text(main_window, name, values_by_name):
     """Text for a Fit Parameters panel row's Energy (keV) column --
-    "-" when calibration is inactive or this parameter has no
+    "—" when calibration is inactive or this parameter has no
     energy-axis equivalent (amplitude, tail fraction/beta -- like
     Volume/chi^2 in the Fit Results table). Position rows convert
     through the full calibration; sigma/FWHM rows scale by the local
