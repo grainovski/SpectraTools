@@ -1577,6 +1577,40 @@ def test_clear_deletes_every_fit_for_the_active_spectrum(qapp):
     assert spectrum.fits == []
 
 
+def test_reset_marks_clears_progress_without_touching_fits_or_replotting(qapp, monkeypatch):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+    assert len(spectrum.fits) == 1
+
+    # _plot_data() unconditionally calls nav_toolbar.push_current() near
+    # its end (see main_window.py), and nothing else on this path does --
+    # spying on it is a cheap, precise proxy for "a replot was triggered",
+    # in the same monkeypatch-spy style already used elsewhere in this file
+    # (e.g. test_run_fit_passes_an_edited_unchecked_row_as_an_initial_guess_
+    # override).
+    replot_calls = []
+    monkeypatch.setattr(
+        main_window.nav_toolbar, "push_current", lambda: replot_calls.append(True)
+    )
+
+    main_window.fit_controller.reset_marks()
+
+    assert len(spectrum.fits) == 1  # untouched, unlike clear()
+    assert main_window.fit_controller.state.bg_regions == []
+    assert main_window.fit_controller.state.fit_region is None
+    assert main_window.fit_controller.state.peak_positions == []
+    assert replot_calls == []  # no replot triggered, unlike clear()
+
+
 def test_clear_forces_a_replot_so_the_canvas_actually_goes_blank(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
