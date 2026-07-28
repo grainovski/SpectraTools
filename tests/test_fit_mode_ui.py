@@ -2760,3 +2760,59 @@ def test_marks_survive_toggling_calibration_mid_session(qapp):
         if line.get_linestyle() == ":" and line.get_color() == "red"
     ][0]
     assert peak_line.get_xdata()[0] == pytest.approx(100.0)
+
+
+def test_run_fit_auto_log_includes_kev_when_calibrated(qapp, tmp_path):
+    import json
+
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    path = str(tmp_path / "eu.spe")
+    _make_active_spectrum(main_window, path=path)
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+
+    # Clicks resolve through display_to_channel when calibration is
+    # active (see test_marking_click_resolves_to_correct_channel_when_calibrated
+    # above) -- convert the intended channel positions to display (keV)
+    # coordinates first so the marks land on the same channels 70/85/
+    # 115/130/100 as the uncalibrated sibling test below, rather than
+    # on their raw keV-mislabeled values (which would push the right
+    # background region past the end of the 200-channel spectrum).
+    to_display = main_window.channel_to_display
+    _held_key_click(main_window, "b", to_display(70))
+    _held_key_click(main_window, "b", to_display(85))
+    _held_key_click(main_window, "b", to_display(115))
+    _held_key_click(main_window, "b", to_display(130))
+    _held_key_click(main_window, "r", to_display(85))
+    _held_key_click(main_window, "r", to_display(115))
+    _held_key_click(main_window, "p", to_display(100))
+    main_window.fit_controller.run_fit()
+
+    from fit_export import auto_log_path
+    with open(auto_log_path(path), encoding="utf-8") as f:
+        record = json.loads(f.readline())
+    assert record["peaks"][0]["position_keV"] is not None
+
+
+def test_run_fit_auto_log_omits_kev_when_not_calibrated(qapp, tmp_path):
+    import json
+
+    main_window = MainWindow()
+    path = str(tmp_path / "eu.spe")
+    _make_active_spectrum(main_window, path=path)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+
+    from fit_export import auto_log_path
+    with open(auto_log_path(path), encoding="utf-8") as f:
+        record = json.loads(f.readline())
+    assert record["peaks"][0].get("position_keV") is None

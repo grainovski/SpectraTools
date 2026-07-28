@@ -834,8 +834,9 @@ class FitModeController(QObject):
         if not path:
             return
         results = [(i + 1, active.fits[i]) for i in fit_indices]
+        calibration = self.main_window._calibration if self.main_window._calibration_active else None
         try:
-            fit_export.write_text_report(path, results, active.path)
+            fit_export.write_text_report(path, results, active.path, calibration)
         except OSError as exc:
             self._show_status_message(f"Could not write export: {exc}", 5000)
 
@@ -931,8 +932,9 @@ class FitModeController(QObject):
             ):
                 earlier.visible = False
         active.fits.append(result)
+        calibration = self.main_window._calibration if self.main_window._calibration_active else None
         try:
-            fit_export.append_auto_log(active.path, result)
+            fit_export.append_auto_log(active.path, result, calibration)
         except OSError as exc:
             self._show_status_message(f"Could not write fit log: {exc}", 5000)
         names = parameter_names(len(result.peaks), result.link_widths, result.tail_fraction is not None)
@@ -962,8 +964,9 @@ class FitModeController(QObject):
             ):
                 earlier.visible = False
         active.fits.append(result)
+        calibration = self.main_window._calibration if self.main_window._calibration_active else None
         try:
-            fit_export.append_auto_log(active.path, result)
+            fit_export.append_auto_log(active.path, result, calibration)
         except OSError as exc:
             self._show_status_message(f"Could not write fit log: {exc}", 5000)
         self.main_window._plot_data(preserve_view=True)
