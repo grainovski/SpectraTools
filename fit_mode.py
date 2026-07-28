@@ -423,24 +423,35 @@ class FitModeController(QObject):
         label_transform = axes.get_xaxis_transform()
         theme = getattr(self.main_window, "_theme", "light")
         fit_color, bg_line_color = fit_drawing_colors(spectrum.color, theme)
+        to_display = self.main_window.channel_to_display
         for result in spectrum.fits:
             if not result.visible:
                 continue
-            axes.axvspan(*result.left_bg_region, color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA)
-            axes.axvspan(*result.right_bg_region, color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA)
-            axes.axvspan(*result.fit_region, color=FIT_REGION_COLOR, alpha=FIT_REGION_ALPHA)
+            left_lo, left_hi = result.left_bg_region
+            axes.axvspan(
+                to_display(left_lo), to_display(left_hi), color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA
+            )
+            right_lo, right_hi = result.right_bg_region
+            axes.axvspan(
+                to_display(right_lo), to_display(right_hi), color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA
+            )
+            fit_lo, fit_hi = result.fit_region
+            axes.axvspan(
+                to_display(fit_lo), to_display(fit_hi), color=FIT_REGION_COLOR, alpha=FIT_REGION_ALPHA
+            )
 
             if isinstance(result, IntegrationResult):
                 lo, hi = result.fit_region
                 axes.plot(
-                    [lo, hi], [result.background_density, result.background_density],
+                    [to_display(lo), to_display(hi)],
+                    [result.background_density, result.background_density],
                     color=bg_line_color, linestyle="--", linewidth=1,
                 )
                 axes.annotate(
                     f"centroid={result.net_centroid:.1f}\n"
                     f"FWHM={result.net_fwhm:.1f}\n"
                     f"full={result.gross_area:.0f}\nnet={result.net_area:.0f}",
-                    xy=(result.net_centroid, 0.95),
+                    xy=(to_display(result.net_centroid), 0.95),
                     xycoords=label_transform,
                     ha="center", va="top",
                     fontsize=7, color=fit_color,
@@ -450,9 +461,17 @@ class FitModeController(QObject):
             lo, hi = result.fit_region
             background_lo = result.background_slope * lo + result.background_intercept
             background_hi = result.background_slope * hi + result.background_intercept
-            axes.plot([lo, hi], [background_lo, background_hi], color=bg_line_color,
-                       linestyle="--", linewidth=1)
+            axes.plot(
+                [to_display(lo), to_display(hi)], [background_lo, background_hi],
+                color=bg_line_color, linestyle="--", linewidth=1,
+            )
 
+            # x_dense stays in channel space -- the model below (linear
+            # background + Gaussian/hypermet peaks) is defined in terms
+            # of the fitted channel-space parameters (peak.position,
+            # peak.sigma, background_slope). Only the final plotted
+            # x-coordinates are converted, via to_display(x_dense),
+            # never the values used in the model math itself.
             x_dense = np.linspace(lo, hi, 200)
             total = result.background_slope * x_dense + result.background_intercept
             for peak in result.peaks:
@@ -465,7 +484,7 @@ class FitModeController(QObject):
                     total = total + peak.amplitude * np.exp(
                         -((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2)
                     )
-            axes.plot(x_dense, total, color=fit_color, linewidth=1.5)
+            axes.plot(to_display(x_dense), total, color=fit_color, linewidth=1.5)
 
             # Peak decomposition: each peak's own contribution (background
             # + that single peak), so a multi-peak fit visually shows how
@@ -482,15 +501,16 @@ class FitModeController(QObject):
                         -((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2)
                     )
                 axes.plot(
-                    x_dense, background_dense + component,
+                    to_display(x_dense), background_dense + component,
                     color=fit_color, linewidth=0.75, linestyle="--", alpha=0.6,
                 )
 
             for peak in result.peaks:
-                axes.axvline(peak.position, color=fit_color, linestyle=":", linewidth=1)
+                label_x = to_display(peak.position)
+                axes.axvline(label_x, color=fit_color, linestyle=":", linewidth=1)
                 axes.annotate(
-                    f"{peak.position:.1f}",
-                    xy=(peak.position, 0.95),
+                    f"{label_x:.1f}",
+                    xy=(label_x, 0.95),
                     xycoords=label_transform,
                     ha="center", va="top",
                     fontsize=7, color=fit_color,

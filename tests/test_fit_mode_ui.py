@@ -1132,6 +1132,80 @@ def test_draw_committed_fits_skips_a_hidden_integration_result(qapp):
     assert len(main_window.axes.texts) == texts_before
 
 
+def test_draw_committed_fits_draws_peak_position_at_calibrated_x(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0, amplitude=200.0, sigma=2.0,
+                )
+            ],
+        )
+    )
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+
+    main_window.fit_controller.draw_committed_fits(spectrum)
+
+    peak_label = main_window.axes.texts[-1]
+    # Position 100.0 -> keV 60.0
+    assert peak_label.get_position()[0] == pytest.approx(60.0)
+    assert peak_label.get_text() == "60.0"
+
+
+def test_draw_committed_fits_model_curve_unaffected_by_calibration(qapp):
+    """The fitted curve's Y-values (counts) must be identical whether or
+    not calibration is active -- only where it's drawn on X changes, the
+    model itself is always evaluated in channel space."""
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0, amplitude=200.0, sigma=2.0,
+                )
+            ],
+        )
+    )
+
+    # Clear first: _make_active_spectrum's own spectrum trace (drawn via
+    # steps-mid with no explicit linewidth) picks up matplotlib's default
+    # lines.linewidth of 1.5 -- the same value used for the fit's total
+    # curve below. Without clearing, the lw==1.5 filter would ambiguously
+    # match both lines and could grab the unrelated spectrum trace instead
+    # of the fit curve. Clearing before both captures keeps the filter
+    # unambiguous (only the fit-drawn total curve has lw==1.5) in both
+    # the uncalibrated and calibrated scenarios.
+    main_window.axes.clear()
+    main_window.fit_controller.draw_committed_fits(spectrum)
+    uncalibrated_curve = [
+        line.get_ydata().copy() for line in main_window.axes.lines if line.get_linewidth() == 1.5
+    ][0]
+
+    main_window.axes.clear()
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    main_window.fit_controller.draw_committed_fits(spectrum)
+    calibrated_curve = [
+        line.get_ydata().copy() for line in main_window.axes.lines if line.get_linewidth() == 1.5
+    ][0]
+
+    np.testing.assert_allclose(uncalibrated_curve, calibrated_curve)
+
+
 @pytest.mark.xfail(
     strict=True,
     reason="NOT fixed by Task 3's _measure_width (verified): "
