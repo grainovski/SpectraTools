@@ -25,12 +25,16 @@ These were established through discussion, not assumed:
 
 ## Fits/Marks Clearing Semantics (a precise reference for all three new operations)
 
-The existing app already has two different "clear" behaviors that must not be conflated:
+The existing app currently has two different "clear" behaviors, and this feature **removes the distinction, in favor of deletion everywhere**:
 
-- `FitModeController.clear()` (bound to the existing `Ctrl+C`, `fit_mode.py`): clears in-progress marking artists and sets `result.visible = False` on every committed fit for the active spectrum — a *hide*, not a delete. Hidden fits remain in `active.fits`, still listed (grayed out) in the Fit Results table.
-- The Fit Results panel's "Clear All Fits" context-menu action (`fit_mode.py`, `_on_results_context_menu`): calls `active.fits.clear()` — an actual deletion.
+- `FitModeController.clear()` (bound to the existing `Ctrl+C`, `fit_mode.py`) currently sets `result.visible = False` on every committed fit for the active spectrum instead of deleting it — a *hide*, not a delete. Hidden fits remain in `active.fits`, still listed (grayed out) in the Fit Results table, still double-clickable and exportable.
+- The Fit Results panel's "Clear All Fits" context-menu action (`fit_mode.py`, `_on_results_context_menu`) already calls `active.fits.clear()` — an actual deletion.
 
-Multiply, Rebin, and Normalize must use the **deletion** semantics, not the hide semantics: after any of these operations changes a spectrum's data, that spectrum's old fit results are not just stale-looking, their channel-space parameters (position, region bounds) no longer correspond to anything meaningful in the new data — especially after Rebin, which changes the channel count itself. A hidden-but-still-listed, double-clickable, exportable fit record pointing at invalid channel numbers is a worse outcome than a clean removal. In addition to deleting `active.fits`, any **in-progress** marks in the single, global `FitModeState` (there is one `FitModeState` instance total, not one per spectrum, so in-progress marks are only ever meaningful for whatever was active when they were placed) must also be reset, the same way a completed Fit already resets them.
+**This spec changes `Ctrl+C`'s existing behavior**: it will call `active.fits.clear()` instead of setting `result.visible = False`, so it deletes rather than hides — the "hide but keep listed" behavior is removed from the app entirely, not just avoided in the three new operations. `Ctrl+C` and "Clear All Fits" still remain two distinct actions afterward, since `Ctrl+C` also clears in-progress marking artists (`_clear_progress()`), which "Clear All Fits" does not touch — only the fit-handling half of `Ctrl+C` changes. This is an intentional, in-scope change to existing behavior, not new-feature-only scoping: the existing test `test_clear_hides_every_fit_for_the_active_spectrum_without_deleting_it` (`tests/test_fit_mode_ui.py`) currently locks in the old hide behavior and will need rewriting to assert deletion instead.
+
+Multiply, Rebin, and Normalize use this same **deletion** semantics for the fits they clear: after any of these operations changes a spectrum's data, that spectrum's old fit results are not just stale-looking, their channel-space parameters (position, region bounds) no longer correspond to anything meaningful in the new data — especially after Rebin, which changes the channel count itself. In addition to deleting `active.fits`, any **in-progress** marks in the single, global `FitModeState` (there is one `FitModeState` instance total, not one per spectrum, so in-progress marks are only ever meaningful for whatever was active when they were placed) must also be reset, the same way a completed Fit already resets them.
+
+Out of scope, and deliberately untouched: the *different* `result.visible = False` usage in `run_fit()`/`run_integration()` that grays out a superseded fit when a new one is committed over the same region (preserving fit history rather than clearing on request) — that mechanism serves a different purpose and this spec does not change it.
 
 ## Shortcut Table
 
@@ -123,6 +127,7 @@ Saving does not touch the spectrum's fits — this is about the raw channel data
 ## Testing
 
 - **Shortcut/menu wiring**: every new `QAction` has the correct `setShortcut()` and lands in the correct menu; the Operations menu exists and contains exactly the listed items; Calibration... no longer appears under View.
+- **`Ctrl+C` behavior change**: `test_clear_hides_every_fit_for_the_active_spectrum_without_deleting_it` is rewritten to assert deletion (`active.fits == []`) rather than every fit's `.visible` becoming `False`; a new or adjusted test confirms in-progress marks are still cleared too (the other half of `Ctrl+C`'s behavior, unchanged); confirm the unrelated "superseded fit" graying in `run_fit()`/`run_integration()` still works and still uses `.visible = False` (not touched by this change).
 - **Multiply**: correct rounding for both integer and fractional factors; rejects factor ≤ 0 with the dialog staying open; deletes fits/resets marks on the active spectrum; leaves other loaded spectra untouched.
 - **Rebin**: correct channel-count reduction and count-summing for evenly-divisible and non-evenly-divisible channel counts (zero-pad case); correct calibration coefficient transformation for both linear and quadratic calibrations, verified against hand-computed values; rejects non-integer or <2 factors; deletes fits/resets marks.
 - **Normalize**: single-marker (bin) and two-marker (area) cases, both hand-verified against manually computed scale factors; correct skip-with-message behavior for a zero-reference spectrum; correct no-op on the already-maximum spectrum (factor stays 1, its fits untouched); disabled with <2 visible spectra.
@@ -135,4 +140,4 @@ Saving does not touch the spectrum's fits — this is about the raw channel data
 - Embedding calibration coefficients in any saved file (no format has a slot for this).
 - Undo for Multiply/Rebin/Normalize (none of the app's other data-affecting operations have undo either; the safety net is that the source file on disk is untouched unless the user separately saves).
 - A keyboard shortcut for "Remove Fit," "Export This Fit...," the spectrum panel's "Remove," or the "Independent widths"/"Left tail" checkboxes (see Shortcut Table).
-- Any change to how Fit/Integrate/Clear/Open already work.
+- Any change to how Fit/Integrate/Open already work, or to `Ctrl+C`'s in-progress-mark-clearing half — only its fit-handling half changes, per "Fits/Marks Clearing Semantics" above.
