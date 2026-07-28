@@ -3217,3 +3217,108 @@ def test_parameters_panel_fixed_row_value_survives_a_refit_with_different_values
 
     assert table.item(1, 1).text() == frozen_value
     assert table.item(1, 1).text() != "75"  # NOT 10+0.5*130 -- would mean it drifted
+
+
+def test_fixed_kev_position_is_honored_by_a_real_refit(qapp):
+    """End-to-end regression guard for the highest-risk path in this
+    feature: a keV value typed into the editable Parameters panel,
+    fixed, and read back must convert to the exact channel value that
+    fit_peaks() actually honors in a real re-fit -- not just display
+    correctly, and not just parse correctly in isolation. A bug here
+    would silently corrupt fit results, not just misrender text."""
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    main_window.calibration_toggle_action.setEnabled(True)
+    main_window.calibration_toggle_action.setChecked(True)
+    main_window._plot_data()
+
+    to_display = main_window.channel_to_display
+    _held_key_click(main_window, "b", to_display(70))
+    _held_key_click(main_window, "b", to_display(85))
+    _held_key_click(main_window, "b", to_display(115))
+    _held_key_click(main_window, "b", to_display(130))
+    _held_key_click(main_window, "r", to_display(85))
+    _held_key_click(main_window, "r", to_display(115))
+    _held_key_click(main_window, "p", to_display(100))
+    main_window.fit_controller.run_fit()
+
+    table = main_window.fit_controller.parameters_table
+    assert table.item(1, 0).text() == "Peak 1 position (keV)"
+
+    # 70.0 keV = channel 120 under a=10, b=0.5 -- distinct from both the
+    # fit's own position (~60 keV / channel 100) and from 70 misread as
+    # a channel number, so either kind of conversion bug is detectable.
+    table.item(1, 1).setText("70.0")
+    table.cellWidget(1, 2).setChecked(True)  # fix "Peak 1 position (keV)"
+
+    main_window.fit_controller.run_fit()
+
+    refit = main_window.spectra[0].fits[-1]
+    assert refit.peaks[0].position == pytest.approx(120.0, abs=0.5)
+    assert refit.peaks[0].position_err == 0.0  # fixed parameters carry zero uncertainty
+
+
+def test_fixed_kev_fwhm_with_independent_widths_is_honored_by_a_real_refit(qapp):
+    """Same end-to-end guard as test_fixed_kev_position_is_honored_by_a_real_refit,
+    for the FWHM/independent-widths path -- the one with a derivative
+    reference-position lookup (peak's own position, not a shared or
+    wrong one), the specific mistake this feature's history has caught
+    multiple times in the display-only direction. This test exercises
+    the READ-BACK direction feeding a real fit_peaks() call, which
+    prior review found had no coverage at all."""
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    y = np.full(200, 20, dtype=np.int64)
+    y[97:104] += (500 * np.exp(-((np.arange(97, 104) - 100.0) ** 2) / (2 * 3.0 ** 2))).astype(np.int64)
+    y[145:152] += (300 * np.exp(-((np.arange(145, 152) - 148.0) ** 2) / (2 * 2.5 ** 2))).astype(np.int64)
+    spectrum = LoadedSpectrum(os.path.join(tempfile.mkdtemp(), "two_peaks.txt"), y, "#1f77b4")
+    spectrum.active = True
+    main_window.spectra.append(spectrum)
+    main_window._plot_data()
+
+    main_window._calibration = Calibration(kind="quadratic", a=10.0, b=0.5, c=0.001)
+    main_window._calibration_active = True
+    main_window.calibration_toggle_action.setEnabled(True)
+    main_window.calibration_toggle_action.setChecked(True)
+    main_window._plot_data()
+    main_window.independent_widths_action.setChecked(True)
+
+    to_display = main_window.channel_to_display
+    _held_key_click(main_window, "b", to_display(70))
+    _held_key_click(main_window, "b", to_display(85))
+    _held_key_click(main_window, "b", to_display(160))
+    _held_key_click(main_window, "b", to_display(175))
+    _held_key_click(main_window, "r", to_display(85))
+    _held_key_click(main_window, "r", to_display(160))
+    _held_key_click(main_window, "p", to_display(100))
+    _held_key_click(main_window, "p", to_display(148))
+    main_window.fit_controller.run_fit()
+
+    table = main_window.fit_controller.parameters_table
+    fit = spectrum.fits[-1]
+    cal = main_window._calibration
+
+    # Fix peak 2's FWHM to its own currently-displayed (correctly
+    # converted) keV value, unedited -- if the read-back path used peak
+    # 1's position (or no position at all) as the derivative reference
+    # instead of peak 2's own, this round-trip would land on a visibly
+    # different channel FWHM than the fit originally produced.
+    peak2_fwhm_kev = table.item(5, 1).text()
+    table.cellWidget(5, 2).setChecked(True)  # fix "Peak 2 FWHM (keV)"
+
+    main_window.fit_controller.run_fit()
+
+    refit = spectrum.fits[-1]
+    assert refit.peaks[1].fwhm == pytest.approx(fit.peaks[1].fwhm, abs=0.01)
+    assert refit.peaks[1].fwhm_err == 0.0  # fixed parameters carry zero uncertainty
+    # Sanity: the two peaks' derivatives really do differ enough that a
+    # wrong reference position would have produced a detectably wrong
+    # channel FWHM, not one that happens to coincide.
+    peak1_slope = abs(cal.derivative(fit.peaks[0].position))
+    peak2_slope = abs(cal.derivative(fit.peaks[1].position))
+    assert peak1_slope != pytest.approx(peak2_slope, rel=0.05)

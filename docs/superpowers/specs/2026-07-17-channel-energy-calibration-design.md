@@ -2,6 +2,8 @@
 
 Date: 2026-07-17
 
+> **Note (2026-07-28):** the "Results Display and Export" section below describes the *original* design for the Fit Results table and Fit Parameters panel — a combined "X ch (Y keV)" string. After user testing, the on-screen panels (not the JSON/text export, which still uses the combined format as designed) were changed to switch units entirely — channels-only or keV-only, indicated via column header / row label — because the combined string didn't fit the real table columns. See `fit_mode.py`'s `_unit_switched_value`/`_panel_value_to_internal` and commit `dcc9d9a` for the current behavior.
+
 ## Purpose
 
 User request: linear or quadratic channel-to-energy calibration, set via a
