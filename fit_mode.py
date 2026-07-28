@@ -155,16 +155,19 @@ def _mark_type_for_key_event(event):
     return None
 
 
-def _parameter_label(name):
+def _parameter_label(name, calibrated=False):
     """Human-readable row label for a canonical parameter name from
     peak_fit.parameter_names() -- e.g. "amp_0" -> "Peak 1 amplitude".
     Sigma-family names are labeled as FWHM: the panel displays and
     accepts FWHM, converting to/from the fitting engine's internal
     sigma at the UI boundary (see _display_value/_panel_value_to_internal
     below) -- peak_fit.py's own parameter naming and optimizer are
-    untouched."""
+    untouched. `calibrated=True` appends " (keV)" to position/FWHM
+    labels -- the only rows whose displayed/accepted unit changes when
+    calibration is active; amplitude and the tail parameters have no
+    energy-axis equivalent and are never converted."""
     if name == "sigma":
-        return "Shared FWHM"
+        return "Shared FWHM (keV)" if calibrated else "Shared FWHM"
     if name == "tail_fraction":
         return "Tail fraction (r)"
     if name == "tail_beta":
@@ -172,7 +175,8 @@ def _parameter_label(name):
     prefix, index = name.rsplit("_", 1)
     peak_num = int(index) + 1
     kind = {"amp": "amplitude", "pos": "position", "sigma": "FWHM"}[prefix]
-    return f"Peak {peak_num} {kind}"
+    suffix = " (keV)" if calibrated and prefix in ("pos", "sigma") else ""
+    return f"Peak {peak_num} {kind}{suffix}"
 
 
 def _dual_unit_value(main_window, channel_value, channel_err, is_width, reference_position=None):
@@ -201,6 +205,31 @@ def _dual_unit_value(main_window, channel_value, channel_err, is_width, referenc
         energy = cal.apply(channel_value)
     energy_err = slope * channel_err
     return f"{channel_value:.2f} ± {channel_err:.2f} ch ({energy:.2f} ± {energy_err:.2f} keV)"
+
+
+def _unit_switched_value(main_window, channel_value, channel_err, is_width, reference_position=None):
+    """Formats a channel-space value+error as plain "X.XX ± Y.YY", in
+    keV when calibration is active or channels otherwise. Unlike
+    _dual_unit_value (used for the Integration tooltip's supplementary
+    detail, where there's room for both units), the Fit Results
+    table's columns are too narrow for a combined "ch (keV)" string --
+    the caller is responsible for indicating the active unit via the
+    column header instead of repeating it in every cell.
+    `is_width`/`reference_position` mean the same as in
+    _dual_unit_value -- a width converts via the calibration's local
+    derivative evaluated at reference_position, never at the width's
+    own value."""
+    if not main_window._calibration_active or main_window._calibration is None:
+        return f"{channel_value:.2f} ± {channel_err:.2f}"
+    cal = main_window._calibration
+    if is_width:
+        slope = abs(cal.derivative(reference_position))
+        value = slope * channel_value
+    else:
+        slope = abs(cal.derivative(channel_value))
+        value = cal.apply(channel_value)
+    err = slope * channel_err
+    return f"{value:.2f} ± {err:.2f}"
 
 
 def _integration_tooltip(main_window, result):
@@ -232,46 +261,64 @@ def _is_sigma_name(name):
     return name == "sigma" or name.startswith("sigma_")
 
 
-def _display_value(name, value):
-    """Converts a canonical parameter's internal value to what the Fit
-    Parameters panel displays -- sigma-family values are shown as FWHM,
-    everything else unchanged."""
-    return value * FWHM_FACTOR if _is_sigma_name(name) else value
+def _panel_reference_position(name, values_by_name):
+    """The peak position (channel-space) a sigma/FWHM row's keV
+    conversion should be evaluated at -- that same peak's own "pos_i"
+    entry, or "pos_0" for the single shared "sigma" row used when
+    widths are linked (a shared width has no one position of its own
+    to anchor to). None if the needed position isn't in values_by_name."""
+    reference_name = "pos_0" if name == "sigma" else f"pos_{name.split('_', 1)[1]}"
+    return values_by_name.get(reference_name)
 
 
-def _panel_value_to_internal(name, value):
-    """Inverse of _display_value -- converts a value read back from the
-    panel (FWHM for sigma-family rows) to the sigma-space value
-    fit_peaks() expects."""
-    return value / FWHM_FACTOR if _is_sigma_name(name) else value
-
-
-def _panel_energy_text(main_window, name, values_by_name):
-    """Text for a Fit Parameters panel row's Energy (keV) column --
-    "—" when calibration is inactive or this parameter has no
-    energy-axis equivalent (amplitude, tail fraction/beta -- like
-    Volume/chi^2 in the Fit Results table). Position rows convert
-    through the full calibration; sigma/FWHM rows scale by the local
-    derivative evaluated at the corresponding peak's position (never
-    at the width's own value -- see _dual_unit_value for why a width
-    has no location of its own on the calibration curve), falling back
-    to peak 0's position for the single shared "sigma" row used when
-    widths are linked, since a shared width has no one position of its
-    own to anchor to."""
+def _display_value(main_window, name, value, values_by_name):
+    """Converts a canonical parameter's internal (always channel-space)
+    value to what the Fit Parameters panel displays. Sigma-family
+    values are shown as FWHM (fwhm = sigma * FWHM_FACTOR) regardless of
+    calibration. When calibration is active, position and FWHM values
+    are further converted to keV -- a FWHM row's derivative reference
+    point is the corresponding peak's own position (never the FWHM's
+    own value, and never a different peak's position -- see
+    _panel_reference_position). Amplitude and the tail parameters have
+    no energy-axis equivalent and are returned unconverted regardless
+    of calibration state."""
+    fwhm_value = value * FWHM_FACTOR if _is_sigma_name(name) else value
     if not main_window._calibration_active or main_window._calibration is None:
-        return "—"
+        return fwhm_value
     cal = main_window._calibration
-    value = values_by_name[name]
     if name.startswith("pos_"):
-        return f"{cal.apply(value):.6g}"
+        return cal.apply(fwhm_value)
     if _is_sigma_name(name):
-        reference_name = "pos_0" if name == "sigma" else f"pos_{name.split('_', 1)[1]}"
-        reference_position = values_by_name.get(reference_name)
+        reference_position = _panel_reference_position(name, values_by_name)
         if reference_position is None:
-            return "—"
-        fwhm = _display_value(name, value)
-        return f"{abs(cal.derivative(reference_position)) * fwhm:.6g}"
-    return "—"
+            return fwhm_value
+        return abs(cal.derivative(reference_position)) * fwhm_value
+    return fwhm_value
+
+
+def _panel_value_to_internal(main_window, name, value, values_by_name):
+    """Inverse of _display_value -- converts a value read back from the
+    panel (in whichever unit is currently displayed: keV if calibration
+    is active, channels/FWHM otherwise) to the sigma-space channel
+    value fit_peaks() expects. Uses the same reference-position lookup
+    as _display_value for FWHM rows, from values_by_name (the panel's
+    last-known channel-space values from the last fit or refresh, not
+    a freshly re-parsed position cell -- editing a peak's position and
+    its own FWHM in keV in the same batch before re-fitting uses the
+    pre-edit position as the reference; a narrow, accepted
+    simplification, not a general live-recompute)."""
+    fwhm_value = value
+    if main_window._calibration_active and main_window._calibration is not None:
+        cal = main_window._calibration
+        if name.startswith("pos_"):
+            fwhm_value = cal.invert(value)
+        elif _is_sigma_name(name):
+            reference_position = _panel_reference_position(name, values_by_name)
+            if reference_position is not None:
+                slope = abs(cal.derivative(reference_position))
+                if slope != 0:
+                    fwhm_value = value / slope
+    return fwhm_value / FWHM_FACTOR if _is_sigma_name(name) else fwhm_value
 
 
 class FitModeController(QObject):
@@ -293,6 +340,7 @@ class FitModeController(QObject):
         self._status_message_until = 0.0
         self._parameter_names_shown = []
         self._parameters_panel_values_shown = {}
+        self._parameters_panel_calibrated = False
         self._results_row_fit_index = []
 
         canvas = main_window.canvas
@@ -616,8 +664,8 @@ class FitModeController(QObject):
             "Allow a small low-channel tail contribution to each peak's shape"
         )
 
-        self.parameters_table = QTableWidget(0, 4)
-        self.parameters_table.setHorizontalHeaderLabels(["Parameter", "Value", "Fix", "Energy (keV)"])
+        self.parameters_table = QTableWidget(0, 3)
+        self.parameters_table.setHorizontalHeaderLabels(["Parameter", "Value", "Fix"])
 
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -653,31 +701,43 @@ class FitModeController(QObject):
 
     def update_parameters_panel(self, names, values_by_name):
         """Rebuilds the Fit Parameters table (resetting every Fix
-        checkbox) when the set of parameter names has changed since
-        the last fit for these marks; otherwise updates displayed
-        values in place, preserving Fix checkbox state and any
-        user-edited value. Every row's Value cell is always editable:
-        a checked row's edited value is read as a fixed value for the
-        next fit (fixed_params_from_panel); an unchecked row's edited
-        value is read as that parameter's starting guess for the next
-        fit (initial_guess_overrides_from_panel) -- the parameter stays
-        free, the optimizer can still move it. The Energy (keV) column
-        is read-only derived info (never fed back into a fit) and is
-        refreshed alongside Value, under the same Fix-checkbox gating,
-        so a fixed row's displayed energy always matches its displayed
-        channel value rather than silently drifting out of sync."""
-        if names != self._parameter_names_shown:
+        checkbox) when the set of parameter names OR the calibration
+        active/inactive state has changed since the last call;
+        otherwise updates displayed values in place, preserving Fix
+        checkbox state and any user-edited value. Every row's Value
+        cell is always editable: a checked row's edited value is read
+        as a fixed value for the next fit (fixed_params_from_panel);
+        an unchecked row's edited value is read as that parameter's
+        starting guess for the next fit
+        (initial_guess_overrides_from_panel) -- the parameter stays
+        free, the optimizer can still move it. Position/FWHM rows
+        display and accept keV when calibration is active (their row
+        label gains a "(keV)" suffix to say so), channels otherwise --
+        a value read back through this boundary is always converted to
+        channels before reaching fit_peaks(), which never sees
+        calibration. Toggling calibration is treated like a names
+        change (a full rebuild, clearing Fix checkboxes) rather than
+        trying to re-interpret already-displayed text in the new unit
+        -- simpler and safer than risking a silently wrong
+        reinterpretation of a hand-edited value, at the minor cost of
+        needing to re-fix a row if calibration happens to be toggled
+        between fixing it and the next fit."""
+        calibrated = self.main_window._calibration_active and self.main_window._calibration is not None
+        if names != self._parameter_names_shown or calibrated != self._parameters_panel_calibrated:
             self.parameters_table.setRowCount(0)
             self._parameter_names_shown = list(names)
+            self._parameters_panel_calibrated = calibrated
             for name in names:
                 row = self.parameters_table.rowCount()
                 self.parameters_table.insertRow(row)
 
-                label_item = QTableWidgetItem(_parameter_label(name))
+                label_item = QTableWidgetItem(_parameter_label(name, calibrated))
                 label_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 self.parameters_table.setItem(row, 0, label_item)
 
-                value_item = QTableWidgetItem(f"{_display_value(name, values_by_name[name]):.6g}")
+                value_item = QTableWidgetItem(
+                    f"{_display_value(self.main_window, name, values_by_name[name], values_by_name):.6g}"
+                )
                 value_item.setFlags(
                     Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable
                 )
@@ -685,32 +745,26 @@ class FitModeController(QObject):
 
                 fix_checkbox = QCheckBox()
                 self.parameters_table.setCellWidget(row, 2, fix_checkbox)
-
-                energy_item = QTableWidgetItem(_panel_energy_text(self.main_window, name, values_by_name))
-                energy_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                self.parameters_table.setItem(row, 3, energy_item)
         else:
             for row, name in enumerate(names):
                 fix_checkbox = self.parameters_table.cellWidget(row, 2)
                 if not fix_checkbox.isChecked():
                     self.parameters_table.item(row, 1).setText(
-                        f"{_display_value(name, values_by_name[name]):.6g}"
-                    )
-                    self.parameters_table.item(row, 3).setText(
-                        _panel_energy_text(self.main_window, name, values_by_name)
+                        f"{_display_value(self.main_window, name, values_by_name[name], values_by_name):.6g}"
                     )
         self._parameters_panel_values_shown = dict(values_by_name)
 
     def refresh_parameters_panel_calibration(self):
-        """Re-renders the Fit Parameters panel's Energy (keV) column
-        for the current calibration state, reusing whatever values
-        were last shown -- called when calibration is toggled so an
-        already-populated panel doesn't lag behind the plot and Fit
-        Results table, which both already refresh immediately via
+        """Re-renders the Fit Parameters panel for the current
+        calibration state, reusing whatever values were last shown --
+        called when calibration is toggled so an already-populated
+        panel doesn't lag behind the plot and Fit Results table, which
+        both already refresh immediately via
         MainWindow._apply_calibration_change's own _plot_data() call.
-        A no-op if nothing has been shown yet (names is empty, so
-        update_parameters_panel would otherwise wipe an empty table
-        against itself harmlessly, but there's nothing to refresh)."""
+        Since update_parameters_panel treats a calibration-state
+        change as a full rebuild, this also resets any Fix checkboxes
+        -- see its docstring for why. A no-op if nothing has been
+        shown yet."""
         if self._parameter_names_shown:
             self.update_parameters_panel(self._parameter_names_shown, self._parameters_panel_values_shown)
 
@@ -720,9 +774,12 @@ class FitModeController(QObject):
         fit_peaks() call. Empty when nothing is fixed (including the
         first fit for a fresh set of marks, before the panel has ever
         been populated). A sigma-family row's Value cell holds FWHM;
-        this converts it back to sigma before returning. Raises
-        FitError if a checked row's Value cell isn't a valid number."""
+        a position/FWHM row's Value cell holds keV when calibration is
+        active -- _panel_value_to_internal converts either back to the
+        sigma-space channel value fit_peaks() expects. Raises FitError
+        if a checked row's Value cell isn't a valid number."""
         fixed = {}
+        calibrated = self.main_window._calibration_active and self.main_window._calibration is not None
         for row, name in enumerate(self._parameter_names_shown):
             fix_checkbox = self.parameters_table.cellWidget(row, 2)
             if fix_checkbox is not None and fix_checkbox.isChecked():
@@ -731,20 +788,23 @@ class FitModeController(QObject):
                     value = float(text)
                 except ValueError:
                     raise FitError(
-                        f"Fixed value for '{_parameter_label(name)}' is not a valid number: {text!r}"
+                        f"Fixed value for '{_parameter_label(name, calibrated)}' is not a valid number: {text!r}"
                     )
-                fixed[name] = _panel_value_to_internal(name, value)
+                fixed[name] = _panel_value_to_internal(
+                    self.main_window, name, value, self._parameters_panel_values_shown
+                )
         return fixed
 
     def initial_guess_overrides_from_panel(self):
         """Mirrors fixed_params_from_panel for unchecked rows: reads
         each unfixed row's current Value cell as the starting guess for
         that parameter in the next fit (the parameter stays free -- the
-        optimizer can still move it). Converts a sigma-family row's
-        displayed FWHM back to sigma, same as fixed_params_from_panel.
-        Raises FitError if an unchecked row's Value cell isn't a valid
+        optimizer can still move it). Converts back to a channel-space
+        sigma value the same way fixed_params_from_panel does. Raises
+        FitError if an unchecked row's Value cell isn't a valid
         number."""
         overrides = {}
+        calibrated = self.main_window._calibration_active and self.main_window._calibration is not None
         for row, name in enumerate(self._parameter_names_shown):
             fix_checkbox = self.parameters_table.cellWidget(row, 2)
             if fix_checkbox is not None and not fix_checkbox.isChecked():
@@ -753,12 +813,22 @@ class FitModeController(QObject):
                     value = float(text)
                 except ValueError:
                     raise FitError(
-                        f"Value for '{_parameter_label(name)}' is not a valid number: {text!r}"
+                        f"Value for '{_parameter_label(name, calibrated)}' is not a valid number: {text!r}"
                     )
-                overrides[name] = _panel_value_to_internal(name, value)
+                overrides[name] = _panel_value_to_internal(
+                    self.main_window, name, value, self._parameters_panel_values_shown
+                )
         return overrides
 
     def update_results_list(self):
+        calibrated = self.main_window._calibration_active and self.main_window._calibration is not None
+        self.results_table.setHorizontalHeaderLabels([
+            "Fit",
+            "Position (keV)" if calibrated else "Position",
+            "FWHM (keV)" if calibrated else "FWHM",
+            "Volume",
+            "chi^2",
+        ])
         self.results_table.setRowCount(0)
         self._results_row_fit_index = []
         active = next((s for s in self.main_window.spectra if s.active), None)
@@ -773,10 +843,10 @@ class FitModeController(QObject):
                 self._results_row_fit_index.append(fit_index)
                 values = [
                     fit_label,
-                    _dual_unit_value(
+                    _unit_switched_value(
                         self.main_window, result.net_centroid, result.net_centroid_err, is_width=False
                     ),
-                    _dual_unit_value(
+                    _unit_switched_value(
                         self.main_window, result.net_fwhm, result.net_fwhm_err,
                         is_width=True, reference_position=result.net_centroid,
                     ),
@@ -824,10 +894,10 @@ class FitModeController(QObject):
 
                 values = [
                     fit_label,
-                    _dual_unit_value(
+                    _unit_switched_value(
                         self.main_window, peak.position, peak.position_err, is_width=False
                     ),
-                    _dual_unit_value(
+                    _unit_switched_value(
                         self.main_window, peak.fwhm, peak.fwhm_err,
                         is_width=True, reference_position=peak.position,
                     ),

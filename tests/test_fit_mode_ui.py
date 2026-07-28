@@ -320,7 +320,11 @@ def test_results_table_shows_channels_only_when_inactive(qapp):
     assert position_text == "100.00 ± 0.10"
 
 
-def test_results_table_shows_dual_units_when_active(qapp):
+def test_results_table_shows_only_kev_when_active(qapp):
+    """Columns switch units entirely rather than showing a combined
+    "ch (keV)" string -- the narrow table columns in the real app
+    truncated the combined format unreadably, so the unit is indicated
+    once via the column header and the cell shows a single number."""
     from calibration import Calibration
 
     main_window = MainWindow()
@@ -343,16 +347,35 @@ def test_results_table_shows_dual_units_when_active(qapp):
     main_window.fit_controller.update_results_list()
 
     table = main_window.fit_controller.results_table
+    assert table.horizontalHeaderItem(1).text() == "Position (keV)"
+    assert table.horizontalHeaderItem(2).text() == "FWHM (keV)"
+
     position_text = table.item(0, 1).text()
     # position 100.0 +/- 0.1 -> keV 60.0 +/- 0.05 (err scaled by |b|=0.5)
-    assert position_text == "100.00 ± 0.10 ch (60.00 ± 0.05 keV)"
+    assert position_text == "60.00 ± 0.05"
 
     fwhm_text = table.item(0, 2).text()
     # fwhm 5.0 +/- 0.2 -> keV 2.50 +/- 0.10
-    assert fwhm_text == "5.00 ± 0.20 ch (2.50 ± 0.10 keV)"
+    assert fwhm_text == "2.50 ± 0.10"
 
     volume_text = table.item(0, 3).text()
     assert volume_text == "1000.0 ± 50.0"  # unchanged -- area has no keV equivalent
+
+
+def test_results_table_headers_revert_to_channels_when_deactivated(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    from calibration import Calibration
+
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    main_window.fit_controller.update_results_list()
+    main_window._calibration_active = False
+    main_window.fit_controller.update_results_list()
+
+    table = main_window.fit_controller.results_table
+    assert table.horizontalHeaderItem(1).text() == "Position"
+    assert table.horizontalHeaderItem(2).text() == "FWHM"
 
 
 def test_results_table_fwhm_kev_uses_derivative_at_peak_position_not_fwhm_value(qapp):
@@ -393,7 +416,7 @@ def test_results_table_fwhm_kev_uses_derivative_at_peak_position_not_fwhm_value(
     expected_slope = abs(cal.derivative(100.0))
     expected_energy = expected_slope * 5.0
     expected_err = expected_slope * 0.2
-    assert fwhm_text == f"5.00 ± 0.20 ch ({expected_energy:.2f} ± {expected_err:.2f} keV)"
+    assert fwhm_text == f"{expected_energy:.2f} ± {expected_err:.2f}"
 
 
 def test_remove_fit_from_context_menu_removes_the_correct_fit_by_row(qapp, monkeypatch):
@@ -2344,7 +2367,7 @@ def test_results_table_dims_hidden_integration_rows(qapp):
     assert table.item(0, 0).foreground() != default_color
 
 
-def test_results_table_integration_row_shows_dual_units_when_active(qapp):
+def test_results_table_integration_row_shows_only_kev_when_active(qapp):
     from calibration import Calibration
 
     main_window = MainWindow()
@@ -2373,8 +2396,8 @@ def test_results_table_integration_row_shows_dual_units_when_active(qapp):
     main_window.fit_controller.update_results_list()
 
     table = main_window.fit_controller.results_table
-    centroid_text = table.item(0, 1).text()
-    assert "keV" in centroid_text
+    # net_centroid 100.0 +/- 0.6 -> keV 60.00 +/- 0.30
+    assert table.item(0, 1).text() == "60.00 ± 0.30"
 
 
 def test_run_integration_ignores_any_marked_peaks(qapp):
@@ -2984,7 +3007,7 @@ def test_calibration_toggle_action_icon_updates_with_checked_state(qapp):
     assert off_icon_bytes != on_icon_bytes
 
 
-def test_parameters_panel_has_no_energy_column_content_when_inactive(qapp):
+def test_parameters_panel_shows_channels_only_when_inactive(qapp):
     main_window = MainWindow()
     _make_active_spectrum(main_window)
 
@@ -2998,12 +3021,19 @@ def test_parameters_panel_has_no_energy_column_content_when_inactive(qapp):
     main_window.fit_controller.run_fit()
 
     table = main_window.fit_controller.parameters_table
-    assert table.horizontalHeaderItem(3).text() == "Energy (keV)"
-    for row in range(table.rowCount()):
-        assert table.item(row, 3).text() == "—"
+    assert table.columnCount() == 3
+    labels = [table.item(row, 0).text() for row in range(table.rowCount())]
+    assert labels == ["Peak 1 amplitude", "Peak 1 position", "Shared FWHM"]
+    assert "keV" not in table.item(1, 1).text()
 
 
-def test_parameters_panel_shows_energy_column_when_active(qapp):
+def test_parameters_panel_shows_kev_only_when_active(qapp):
+    """Position/FWHM rows switch units entirely (label gains a "(keV)"
+    suffix, Value shows the keV number directly) rather than showing a
+    combined "ch (keV)" string -- unlike the read-only Fit Results
+    table, this Value column is editable and feeds directly into the
+    next fit_peaks() call, so it can only ever hold one plain,
+    parseable number at a time."""
     from calibration import Calibration
 
     main_window = MainWindow()
@@ -3027,24 +3057,24 @@ def test_parameters_panel_shows_energy_column_when_active(qapp):
     table = main_window.fit_controller.parameters_table
     fit = main_window.spectra[0].fits[0]
     labels = [table.item(row, 0).text() for row in range(table.rowCount())]
-    assert labels == ["Peak 1 amplitude", "Peak 1 position", "Shared FWHM"]
+    assert labels == ["Peak 1 amplitude", "Peak 1 position (keV)", "Shared FWHM (keV)"]
     # amplitude has no energy-axis equivalent, matching Volume/chi^2 in
-    # the Fit Results table.
-    assert table.item(0, 3).text() == "—"
+    # the Fit Results table -- shown unconverted.
+    assert table.item(0, 1).text() == f"{fit.peaks[0].amplitude:.6g}"
     # position converts through the full calibration.
-    assert table.item(1, 3).text() == f"{main_window._calibration.apply(fit.peaks[0].position):.6g}"
+    assert table.item(1, 1).text() == f"{main_window._calibration.apply(fit.peaks[0].position):.6g}"
     # FWHM scales by the derivative at the peak's own position.
     slope = abs(main_window._calibration.derivative(fit.peaks[0].position))
-    assert table.item(2, 3).text() == f"{slope * fit.peaks[0].fwhm:.6g}"
+    assert table.item(2, 1).text() == f"{slope * fit.peaks[0].fwhm:.6g}"
 
 
 def test_parameters_panel_independent_widths_use_each_peaks_own_position(qapp):
     """Regression guard: the same derivative-evaluation-point mistake
-    already found and fixed twice elsewhere in this feature (evaluating
-    a width's keV slope at the width's own value, or at the wrong
-    peak's position, instead of at THAT peak's own position) must not
-    recur here. Uses a quadratic calibration and two peaks at very
-    different positions, so a wrong reference position produces a
+    already found and fixed multiple times elsewhere in this feature
+    (evaluating a width's keV slope at the width's own value, or at
+    the wrong peak's position, instead of at THAT peak's own position)
+    must not recur here. Uses a quadratic calibration and two peaks at
+    very different positions, so a wrong reference position produces a
     substantially different (and easily detectable) wrong answer."""
     from calibration import Calibration
 
@@ -3079,19 +3109,19 @@ def test_parameters_panel_independent_widths_use_each_peaks_own_position(qapp):
     fit = spectrum.fits[0]
     labels = [table.item(row, 0).text() for row in range(table.rowCount())]
     assert labels == [
-        "Peak 1 amplitude", "Peak 1 position", "Peak 1 FWHM",
-        "Peak 2 amplitude", "Peak 2 position", "Peak 2 FWHM",
+        "Peak 1 amplitude", "Peak 1 position (keV)", "Peak 1 FWHM (keV)",
+        "Peak 2 amplitude", "Peak 2 position (keV)", "Peak 2 FWHM (keV)",
     ]
     cal = main_window._calibration
     peak1_slope = abs(cal.derivative(fit.peaks[0].position))
     peak2_slope = abs(cal.derivative(fit.peaks[1].position))
     assert peak1_slope != pytest.approx(peak2_slope, rel=0.05)  # positions differ enough to matter
-    assert table.item(2, 3).text() == f"{peak1_slope * fit.peaks[0].fwhm:.6g}"
-    assert table.item(5, 3).text() == f"{peak2_slope * fit.peaks[1].fwhm:.6g}"
+    assert table.item(2, 1).text() == f"{peak1_slope * fit.peaks[0].fwhm:.6g}"
+    assert table.item(5, 1).text() == f"{peak2_slope * fit.peaks[1].fwhm:.6g}"
 
 
-def test_parameters_panel_energy_column_refreshes_on_calibration_toggle(qapp):
-    """The Energy column must not lag behind an already-populated panel
+def test_parameters_panel_value_column_switches_units_on_calibration_toggle(qapp):
+    """The Value column must not lag behind an already-populated panel
     when calibration is toggled without re-fitting -- mirrors the same
     guarantee the plot and Fit Results table already have."""
     from calibration import Calibration
@@ -3109,21 +3139,25 @@ def test_parameters_panel_energy_column_refreshes_on_calibration_toggle(qapp):
     main_window.fit_controller.run_fit()
 
     table = main_window.fit_controller.parameters_table
-    assert table.item(1, 3).text() == "—"
+    assert table.item(1, 0).text() == "Peak 1 position"
+    assert table.item(1, 1).text() == "100"
 
     main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
     main_window.calibration_toggle_action.setEnabled(True)
     main_window.calibration_toggle_action.setChecked(True)  # no re-fit in between
 
-    assert table.item(1, 3).text() == f"{main_window._calibration.apply(100.0):.6g}"
-    assert table.item(1, 3).text() == "60"
+    assert table.item(1, 0).text() == "Peak 1 position (keV)"
+    assert table.item(1, 1).text() == "60"
 
 
-def test_parameters_panel_fixed_row_energy_survives_calibration_toggle(qapp):
-    """A Fixed row's channel Value is deliberately preserved across
-    refreshes (the user's own entry, not overwritten by the latest fit)
-    -- its Energy column must stay consistent with that preserved
-    value, not silently drift when calibration toggles."""
+def test_parameters_panel_calibration_toggle_resets_fix_checkboxes(qapp):
+    """Toggling calibration is treated like a parameter-set change --
+    a full rebuild -- rather than trying to re-interpret an
+    already-displayed, possibly hand-edited value in the new unit,
+    which risks silently feeding a badly wrong number into the next
+    fit. Deliberate trade-off: fixing a row, then toggling calibration
+    before the next fit, clears that fix rather than risking a silent
+    misconversion of whatever the user typed."""
     from calibration import Calibration
 
     main_window = MainWindow()
@@ -3141,24 +3175,23 @@ def test_parameters_panel_fixed_row_energy_survives_calibration_toggle(qapp):
     main_window.fit_controller.run_fit()
 
     table = main_window.fit_controller.parameters_table
-    main_window.calibration_toggle_action.setChecked(True)
     table.cellWidget(2, 2).setChecked(True)  # fix "Shared FWHM"
-    fixed_energy = table.item(2, 3).text()
+    assert table.cellWidget(2, 2).isChecked() is True
 
-    main_window.calibration_toggle_action.setChecked(False)
     main_window.calibration_toggle_action.setChecked(True)
 
-    assert table.item(2, 3).text() == fixed_energy
+    assert table.cellWidget(2, 2).isChecked() is False  # cleared, not silently reinterpreted
+    assert table.item(2, 0).text() == "Shared FWHM (keV)"
 
 
-def test_parameters_panel_fixed_row_energy_survives_a_refit_with_different_values(qapp):
-    """A Fixed row's channel Value is deliberately frozen at whatever
-    the user last saw/edited, even across a re-fit that computes a
-    different value for that same parameter (same parameter names, so
-    update_parameters_panel takes its in-place-update branch, not a
-    full rebuild) -- its Energy column must stay frozen at that SAME
-    already-displayed value too, not silently drift to reflect the
-    new, un-displayed fit result."""
+def test_parameters_panel_fixed_row_value_survives_a_refit_with_different_values(qapp):
+    """A Fixed row's Value is deliberately frozen at whatever the user
+    last saw/edited, even across a re-fit that computes a different
+    value for that same parameter (same parameter names AND unchanged
+    calibration state, so update_parameters_panel takes its
+    in-place-update branch, not a full rebuild) -- it must stay frozen
+    rather than silently being overwritten by the new, un-displayed
+    fit result."""
     from calibration import Calibration
 
     main_window = MainWindow()
@@ -3173,15 +3206,14 @@ def test_parameters_panel_fixed_row_energy_survives_a_refit_with_different_value
     fc.update_parameters_panel(names, {"amp_0": 200.0, "pos_0": 100.0, "sigma": 2.0})
 
     table = fc.parameters_table
-    table.cellWidget(1, 2).setChecked(True)  # fix "Peak 1 position"
-    frozen_channel = table.item(1, 1).text()
-    frozen_energy = table.item(1, 3).text()
-    assert frozen_energy == "60"  # 10 + 0.5*100
+    table.cellWidget(1, 2).setChecked(True)  # fix "Peak 1 position (keV)"
+    frozen_value = table.item(1, 1).text()
+    assert frozen_value == "60"  # 10 + 0.5*100
 
-    # Same parameter names, but a different fit result for the fixed
-    # position -- as if the user re-fit after editing an unrelated mark.
+    # Same parameter names, same calibration state, but a different fit
+    # result for the fixed position -- as if the user re-fit after
+    # editing an unrelated mark.
     fc.update_parameters_panel(names, {"amp_0": 210.0, "pos_0": 130.0, "sigma": 2.1})
 
-    assert table.item(1, 1).text() == frozen_channel
-    assert table.item(1, 3).text() == frozen_energy
-    assert table.item(1, 3).text() != "75"  # NOT 10+0.5*130 -- would mean it drifted
+    assert table.item(1, 1).text() == frozen_value
+    assert table.item(1, 1).text() != "75"  # NOT 10+0.5*130 -- would mean it drifted
