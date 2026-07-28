@@ -30,7 +30,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from calibration import Calibration
 from calibration_dialog import CalibrationDialog
 from fit_mode import FitModeController
 from histogram_io import ParseError, load_histogram
