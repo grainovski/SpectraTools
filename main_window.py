@@ -289,40 +289,54 @@ class MainWindow(QMainWindow):
         self.canvas.setFocus()
 
     def _build_menu(self):
-        file_menu = self.menuBar().addMenu("&File")
+        self.file_menu = self.menuBar().addMenu("&File")
 
         open_action = QAction("&Open...", self)
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self._open_file_dialog)
-        file_menu.addAction(open_action)
+        self.file_menu.addAction(open_action)
 
-        self.recent_menu = file_menu.addMenu("Recent Files")
+        self.recent_menu = self.file_menu.addMenu("Recent Files")
 
-        file_menu.addSeparator()
+        self.file_menu.addSeparator()
 
-        exit_action = QAction("E&xit", self)
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
+        self.exit_action = QAction("E&xit", self)
+        self.exit_action.setShortcut("Ctrl+Q")
+        self.exit_action.triggered.connect(self.close)
+        self.file_menu.addAction(self.exit_action)
 
         view_menu = self.menuBar().addMenu("&View")
         self.log_scale_action = QAction("Log scale Y", self)
+        self.log_scale_action.setShortcut("Ctrl+G")
         self.log_scale_action.setCheckable(True)
         self.log_scale_action.toggled.connect(self._on_log_scale_toggled)
         view_menu.addAction(self.log_scale_action)
 
+        self.toggle_spectrum_panel_action.setShortcut("Ctrl+1")
         view_menu.addAction(self.toggle_spectrum_panel_action)
 
         view_menu.addSeparator()
         self.dark_theme_action = QAction("Dark theme", self)
+        self.dark_theme_action.setShortcut("Ctrl+D")
         self.dark_theme_action.setCheckable(True)
         self.dark_theme_action.setChecked(self._theme == "dark")
         self.dark_theme_action.toggled.connect(self._on_theme_toggled)
         view_menu.addAction(self.dark_theme_action)
 
-        view_menu.addSeparator()
+        self.operations_menu = self.menuBar().addMenu("&Operations")
         self.calibration_action = QAction("Calibration...", self)
+        self.calibration_action.setShortcut("Ctrl+L")
         self.calibration_action.triggered.connect(self._open_calibration_dialog)
-        view_menu.addAction(self.calibration_action)
+        self.operations_menu.addAction(self.calibration_action)
+
+        self.calibration_active_menu_action = QAction("Toggle Calibration Active", self)
+        self.calibration_active_menu_action.setShortcut("Ctrl+T")
+        self.calibration_active_menu_action.setCheckable(True)
+        self.calibration_active_menu_action.setEnabled(self._calibration is not None)
+        self.calibration_active_menu_action.toggled.connect(self._on_calibration_toggle_action)
+        self.operations_menu.addAction(self.calibration_active_menu_action)
+
+        self.operations_menu.addSeparator()
 
     def _apply_theme(self, theme):
         app = QApplication.instance()
@@ -389,6 +403,8 @@ class MainWindow(QMainWindow):
         self._calibration_active = new_active
         self.calibration_toggle_action.setEnabled(new_calibration is not None)
         self.calibration_toggle_action.setChecked(new_active)
+        self.calibration_active_menu_action.setEnabled(new_calibration is not None)
+        self.calibration_active_menu_action.setChecked(new_active)
         if self.spectra:
             new_xlim = (
                 self.channel_to_display(channel_bounds[0]),
@@ -672,14 +688,17 @@ class MainWindow(QMainWindow):
         dark = self._theme == "dark"
 
         self.zoom_in_action = QAction(_magnifier_icon("+", dark), "Zoom In X", self)
+        self.zoom_in_action.setShortcut("Ctrl+=")
         self.zoom_in_action.triggered.connect(lambda: self._zoom_x(1 / ZOOM_FACTOR))
         self.nav_toolbar.addAction(self.zoom_in_action)
 
         self.zoom_out_action = QAction(_magnifier_icon("-", dark), "Zoom Out X", self)
+        self.zoom_out_action.setShortcut("Ctrl+-")
         self.zoom_out_action.triggered.connect(lambda: self._zoom_x(ZOOM_FACTOR))
         self.nav_toolbar.addAction(self.zoom_out_action)
 
         self.full_spectrum_action = QAction(_full_spectrum_icon(dark), "Show Full Spectrum", self)
+        self.full_spectrum_action.setShortcut("Ctrl+0")
         self.full_spectrum_action.triggered.connect(self._show_full_spectrum)
         self.nav_toolbar.addAction(self.full_spectrum_action)
 

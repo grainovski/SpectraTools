@@ -656,6 +656,7 @@ class FitModeController(QObject):
         mw.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.results_dock)
 
         self.toggle_results_panel_action = QAction("Fit Results", mw)
+        self.toggle_results_panel_action.setShortcut("Ctrl+2")
         self.toggle_results_panel_action.setCheckable(True)
         self.toggle_results_panel_action.setToolTip("Show/hide fit results")
         self.toggle_results_panel_action.toggled.connect(self.results_dock.setVisible)
@@ -696,6 +697,7 @@ class FitModeController(QObject):
         mw.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.parameters_dock)
 
         self.toggle_parameters_panel_action = QAction("Fit Parameters", mw)
+        self.toggle_parameters_panel_action.setShortcut("Ctrl+3")
         self.toggle_parameters_panel_action.setCheckable(True)
         self.toggle_parameters_panel_action.setToolTip("Show/hide fixable fit parameters")
         self.toggle_parameters_panel_action.toggled.connect(self.parameters_dock.setVisible)
