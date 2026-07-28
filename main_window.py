@@ -395,6 +395,7 @@ class MainWindow(QMainWindow):
                 self.channel_to_display(channel_bounds[1]),
             )
             self._plot_data(xlim_override=new_xlim)
+        self.fit_controller.refresh_parameters_panel_calibration()
 
     def _style_nav_toolbar_palette(self, theme):
         """Sets the navigation toolbar's actual QPalette -- not just this

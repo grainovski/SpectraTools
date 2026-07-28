@@ -246,6 +246,34 @@ def _panel_value_to_internal(name, value):
     return value / FWHM_FACTOR if _is_sigma_name(name) else value
 
 
+def _panel_energy_text(main_window, name, values_by_name):
+    """Text for a Fit Parameters panel row's Energy (keV) column --
+    "-" when calibration is inactive or this parameter has no
+    energy-axis equivalent (amplitude, tail fraction/beta -- like
+    Volume/chi^2 in the Fit Results table). Position rows convert
+    through the full calibration; sigma/FWHM rows scale by the local
+    derivative evaluated at the corresponding peak's position (never
+    at the width's own value -- see _dual_unit_value for why a width
+    has no location of its own on the calibration curve), falling back
+    to peak 0's position for the single shared "sigma" row used when
+    widths are linked, since a shared width has no one position of its
+    own to anchor to."""
+    if not main_window._calibration_active or main_window._calibration is None:
+        return "—"
+    cal = main_window._calibration
+    value = values_by_name[name]
+    if name.startswith("pos_"):
+        return f"{cal.apply(value):.6g}"
+    if _is_sigma_name(name):
+        reference_name = "pos_0" if name == "sigma" else f"pos_{name.split('_', 1)[1]}"
+        reference_position = values_by_name.get(reference_name)
+        if reference_position is None:
+            return "—"
+        fwhm = _display_value(name, value)
+        return f"{abs(cal.derivative(reference_position)) * fwhm:.6g}"
+    return "—"
+
+
 class FitModeController(QObject):
     """Qt/matplotlib-facing wrapper around FitModeState: tracks which of
     b/r/p is currently held via a Qt event filter on the canvas (not
@@ -264,6 +292,7 @@ class FitModeController(QObject):
         self._progress_artists = []
         self._status_message_until = 0.0
         self._parameter_names_shown = []
+        self._parameters_panel_values_shown = {}
         self._results_row_fit_index = []
 
         canvas = main_window.canvas
@@ -587,8 +616,8 @@ class FitModeController(QObject):
             "Allow a small low-channel tail contribution to each peak's shape"
         )
 
-        self.parameters_table = QTableWidget(0, 3)
-        self.parameters_table.setHorizontalHeaderLabels(["Parameter", "Value", "Fix"])
+        self.parameters_table = QTableWidget(0, 4)
+        self.parameters_table.setHorizontalHeaderLabels(["Parameter", "Value", "Fix", "Energy (keV)"])
 
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -632,7 +661,11 @@ class FitModeController(QObject):
         next fit (fixed_params_from_panel); an unchecked row's edited
         value is read as that parameter's starting guess for the next
         fit (initial_guess_overrides_from_panel) -- the parameter stays
-        free, the optimizer can still move it."""
+        free, the optimizer can still move it. The Energy (keV) column
+        is read-only derived info (never fed back into a fit) and is
+        refreshed alongside Value, under the same Fix-checkbox gating,
+        so a fixed row's displayed energy always matches its displayed
+        channel value rather than silently drifting out of sync."""
         if names != self._parameter_names_shown:
             self.parameters_table.setRowCount(0)
             self._parameter_names_shown = list(names)
@@ -652,6 +685,10 @@ class FitModeController(QObject):
 
                 fix_checkbox = QCheckBox()
                 self.parameters_table.setCellWidget(row, 2, fix_checkbox)
+
+                energy_item = QTableWidgetItem(_panel_energy_text(self.main_window, name, values_by_name))
+                energy_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                self.parameters_table.setItem(row, 3, energy_item)
         else:
             for row, name in enumerate(names):
                 fix_checkbox = self.parameters_table.cellWidget(row, 2)
@@ -659,6 +696,23 @@ class FitModeController(QObject):
                     self.parameters_table.item(row, 1).setText(
                         f"{_display_value(name, values_by_name[name]):.6g}"
                     )
+                    self.parameters_table.item(row, 3).setText(
+                        _panel_energy_text(self.main_window, name, values_by_name)
+                    )
+        self._parameters_panel_values_shown = dict(values_by_name)
+
+    def refresh_parameters_panel_calibration(self):
+        """Re-renders the Fit Parameters panel's Energy (keV) column
+        for the current calibration state, reusing whatever values
+        were last shown -- called when calibration is toggled so an
+        already-populated panel doesn't lag behind the plot and Fit
+        Results table, which both already refresh immediately via
+        MainWindow._apply_calibration_change's own _plot_data() call.
+        A no-op if nothing has been shown yet (names is empty, so
+        update_parameters_panel would otherwise wipe an empty table
+        against itself harmlessly, but there's nothing to refresh)."""
+        if self._parameter_names_shown:
+            self.update_parameters_panel(self._parameter_names_shown, self._parameters_panel_values_shown)
 
     def fixed_params_from_panel(self):
         """Reads the current Fix checkboxes/values from the Fit

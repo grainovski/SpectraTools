@@ -2982,3 +2982,170 @@ def test_calibration_toggle_action_icon_updates_with_checked_state(qapp):
     main_window.calibration_toggle_action.setChecked(True)
     on_icon_bytes = main_window.calibration_toggle_action.icon().pixmap(24, 24).toImage()
     assert off_icon_bytes != on_icon_bytes
+
+
+def test_parameters_panel_has_no_energy_column_content_when_inactive(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+
+    table = main_window.fit_controller.parameters_table
+    assert table.horizontalHeaderItem(3).text() == "Energy (keV)"
+    for row in range(table.rowCount()):
+        assert table.item(row, 3).text() == "—"
+
+
+def test_parameters_panel_shows_energy_column_when_active(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    main_window.calibration_toggle_action.setEnabled(True)
+    main_window.calibration_toggle_action.setChecked(True)
+    main_window._plot_data()
+
+    to_display = main_window.channel_to_display
+    _held_key_click(main_window, "b", to_display(70))
+    _held_key_click(main_window, "b", to_display(85))
+    _held_key_click(main_window, "b", to_display(115))
+    _held_key_click(main_window, "b", to_display(130))
+    _held_key_click(main_window, "r", to_display(85))
+    _held_key_click(main_window, "r", to_display(115))
+    _held_key_click(main_window, "p", to_display(100))
+    main_window.fit_controller.run_fit()
+
+    table = main_window.fit_controller.parameters_table
+    fit = main_window.spectra[0].fits[0]
+    labels = [table.item(row, 0).text() for row in range(table.rowCount())]
+    assert labels == ["Peak 1 amplitude", "Peak 1 position", "Shared FWHM"]
+    # amplitude has no energy-axis equivalent, matching Volume/chi^2 in
+    # the Fit Results table.
+    assert table.item(0, 3).text() == "—"
+    # position converts through the full calibration.
+    assert table.item(1, 3).text() == f"{main_window._calibration.apply(fit.peaks[0].position):.6g}"
+    # FWHM scales by the derivative at the peak's own position.
+    slope = abs(main_window._calibration.derivative(fit.peaks[0].position))
+    assert table.item(2, 3).text() == f"{slope * fit.peaks[0].fwhm:.6g}"
+
+
+def test_parameters_panel_independent_widths_use_each_peaks_own_position(qapp):
+    """Regression guard: the same derivative-evaluation-point mistake
+    already found and fixed twice elsewhere in this feature (evaluating
+    a width's keV slope at the width's own value, or at the wrong
+    peak's position, instead of at THAT peak's own position) must not
+    recur here. Uses a quadratic calibration and two peaks at very
+    different positions, so a wrong reference position produces a
+    substantially different (and easily detectable) wrong answer."""
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    y = np.full(200, 20, dtype=np.int64)
+    y[97:104] += (500 * np.exp(-((np.arange(97, 104) - 100.0) ** 2) / (2 * 3.0 ** 2))).astype(np.int64)
+    y[145:152] += (300 * np.exp(-((np.arange(145, 152) - 148.0) ** 2) / (2 * 2.5 ** 2))).astype(np.int64)
+    spectrum = LoadedSpectrum(os.path.join(tempfile.mkdtemp(), "two_peaks.txt"), y, "#1f77b4")
+    spectrum.active = True
+    main_window.spectra.append(spectrum)
+    main_window._plot_data()
+
+    main_window._calibration = Calibration(kind="quadratic", a=10.0, b=0.5, c=0.001)
+    main_window._calibration_active = True
+    main_window.calibration_toggle_action.setEnabled(True)
+    main_window.calibration_toggle_action.setChecked(True)
+    main_window._plot_data()
+    main_window.independent_widths_action.setChecked(True)
+
+    to_display = main_window.channel_to_display
+    _held_key_click(main_window, "b", to_display(70))
+    _held_key_click(main_window, "b", to_display(85))
+    _held_key_click(main_window, "b", to_display(160))
+    _held_key_click(main_window, "b", to_display(175))
+    _held_key_click(main_window, "r", to_display(85))
+    _held_key_click(main_window, "r", to_display(160))
+    _held_key_click(main_window, "p", to_display(100))
+    _held_key_click(main_window, "p", to_display(148))
+    main_window.fit_controller.run_fit()
+
+    table = main_window.fit_controller.parameters_table
+    fit = spectrum.fits[0]
+    labels = [table.item(row, 0).text() for row in range(table.rowCount())]
+    assert labels == [
+        "Peak 1 amplitude", "Peak 1 position", "Peak 1 FWHM",
+        "Peak 2 amplitude", "Peak 2 position", "Peak 2 FWHM",
+    ]
+    cal = main_window._calibration
+    peak1_slope = abs(cal.derivative(fit.peaks[0].position))
+    peak2_slope = abs(cal.derivative(fit.peaks[1].position))
+    assert peak1_slope != pytest.approx(peak2_slope, rel=0.05)  # positions differ enough to matter
+    assert table.item(2, 3).text() == f"{peak1_slope * fit.peaks[0].fwhm:.6g}"
+    assert table.item(5, 3).text() == f"{peak2_slope * fit.peaks[1].fwhm:.6g}"
+
+
+def test_parameters_panel_energy_column_refreshes_on_calibration_toggle(qapp):
+    """The Energy column must not lag behind an already-populated panel
+    when calibration is toggled without re-fitting -- mirrors the same
+    guarantee the plot and Fit Results table already have."""
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+
+    table = main_window.fit_controller.parameters_table
+    assert table.item(1, 3).text() == "—"
+
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window.calibration_toggle_action.setEnabled(True)
+    main_window.calibration_toggle_action.setChecked(True)  # no re-fit in between
+
+    assert table.item(1, 3).text() == f"{main_window._calibration.apply(100.0):.6g}"
+    assert table.item(1, 3).text() == "60"
+
+
+def test_parameters_panel_fixed_row_energy_survives_calibration_toggle(qapp):
+    """A Fixed row's channel Value is deliberately preserved across
+    refreshes (the user's own entry, not overwritten by the latest fit)
+    -- its Energy column must stay consistent with that preserved
+    value, not silently drift when calibration toggles."""
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window.calibration_toggle_action.setEnabled(True)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+
+    table = main_window.fit_controller.parameters_table
+    main_window.calibration_toggle_action.setChecked(True)
+    table.cellWidget(2, 2).setChecked(True)  # fix "Shared FWHM"
+    fixed_energy = table.item(2, 3).text()
+
+    main_window.calibration_toggle_action.setChecked(False)
+    main_window.calibration_toggle_action.setChecked(True)
+
+    assert table.item(2, 3).text() == fixed_energy
