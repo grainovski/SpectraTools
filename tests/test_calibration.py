@@ -156,3 +156,30 @@ def test_read_coefficients_file_non_utf8_raises(tmp_path):
     path.write_bytes(b"10.5\n\xff\xfe0.487\n")
     with pytest.raises(CalibrationFileError):
         read_coefficients_file(str(path), quadratic=False)
+
+
+def test_rescaled_linear_calibration():
+    cal = Calibration(kind="linear", a=5.0, b=2.0)
+    rescaled = cal.rescaled(4)
+    assert rescaled.kind == "linear"
+    assert rescaled.a == 5.0
+    assert rescaled.b == 8.0
+
+
+def test_rescaled_quadratic_calibration():
+    cal = Calibration(kind="quadratic", a=1.0, b=2.0, c=3.0)
+    rescaled = cal.rescaled(2)
+    assert rescaled.a == 1.0
+    assert rescaled.b == 4.0
+    assert rescaled.c == 12.0
+
+
+def test_rescaled_is_algebraically_equivalent_at_the_new_channel():
+    # Defining property of the transform: E_old(new_channel * factor)
+    # must equal E_new(new_channel), for arbitrary coefficients/factor/
+    # channel -- not just the hand-verified numbers above.
+    cal = Calibration(kind="quadratic", a=3.0, b=1.5, c=0.02)
+    factor = 5
+    rescaled = cal.rescaled(factor)
+    new_channel = 37
+    assert rescaled.apply(new_channel) == pytest.approx(cal.apply(new_channel * factor))

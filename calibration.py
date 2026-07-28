@@ -78,6 +78,15 @@ class Calibration:
             iterations += 1
         return x
 
+    def rescaled(self, factor):
+        """A new Calibration equivalent to this one after every channel
+        number is divided by `factor` (e.g. after rebinning by `factor`,
+        where new channel k represents old channel k*factor) -- exact
+        algebraic substitution ch_old = ch_new*factor into
+        E = a + b*ch_old + c*ch_old**2, giving a'=a, b'=b*factor,
+        c'=c*factor**2."""
+        return Calibration(kind=self.kind, a=self.a, b=self.b * factor, c=self.c * factor ** 2)
+
 
 def read_coefficients_file(path, quadratic):
     """Reads a and b (and c if `quadratic`) from `path`, one coefficient
