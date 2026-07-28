@@ -24,7 +24,10 @@ def test_nav_toolbar_places_custom_zoom_actions_right_after_save(qapp):
     main_window = MainWindow()
     names = [a.text() for a in main_window.nav_toolbar.actions() if a.text()]
     save_index = names.index("Save")
-    assert names[save_index + 1:] == ["Zoom In X", "Zoom Out X", "Show Full Spectrum"]
+    assert names[save_index + 1:] == [
+        "Zoom In X", "Zoom Out X", "Show Full Spectrum",
+        "Load Calibration...", "Calibration Active",
+    ]
 
 
 def test_nav_toolbar_has_no_stretchy_coordinate_label_between_save_and_zoom(qapp):

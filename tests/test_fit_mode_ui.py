@@ -2816,3 +2816,164 @@ def test_run_fit_auto_log_omits_kev_when_not_calibrated(qapp, tmp_path):
     with open(auto_log_path(path), encoding="utf-8") as f:
         record = json.loads(f.readline())
     assert record["peaks"][0].get("position_keV") is None
+
+
+def test_calibration_toolbar_actions_exist(qapp):
+    main_window = MainWindow()
+    assert hasattr(main_window, "calibration_load_action")
+    assert main_window.calibration_load_action.text() == "Load Calibration..."
+    assert hasattr(main_window, "calibration_toggle_action")
+    assert main_window.calibration_toggle_action.text() == "Calibration Active"
+    assert main_window.calibration_toggle_action.isCheckable() is True
+
+
+def test_calibration_toggle_action_starts_disabled_with_no_calibration_set(qapp):
+    main_window = MainWindow()
+    assert main_window.calibration_toggle_action.isEnabled() is False
+    assert main_window.calibration_toggle_action.isChecked() is False
+
+
+def test_calibration_load_action_opens_the_dialog(qapp, monkeypatch):
+    from calibration_dialog import CalibrationDialog
+
+    main_window = MainWindow()
+    opened = []
+    monkeypatch.setattr(CalibrationDialog, "exec", lambda self: (opened.append(True), QDialog.DialogCode.Rejected)[1])
+    main_window.calibration_load_action.trigger()
+    assert opened == [True]
+
+
+def test_calibration_toggle_action_becomes_enabled_after_calibration_set(qapp, monkeypatch):
+    from calibration import Calibration
+    from calibration_dialog import CalibrationDialog
+
+    main_window = MainWindow()
+
+    def fake_exec(self):
+        self.result_calibration = Calibration(kind="linear", a=10.0, b=0.5)
+        self.result_active = True
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(CalibrationDialog, "exec", fake_exec)
+    main_window._open_calibration_dialog()
+
+    assert main_window.calibration_toggle_action.isEnabled() is True
+    assert main_window.calibration_toggle_action.isChecked() is True
+
+
+def test_applying_calibration_preserves_the_equivalent_channel_view(qapp, monkeypatch):
+    """Regression test: applying a calibration must keep the same
+    detector-channel region in view (now shown in keV), not reset to
+    the full spectrum -- a real bug reported after the calibration
+    feature's first release."""
+    from calibration import Calibration
+    from calibration_dialog import CalibrationDialog
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window.axes.set_xlim(80.0, 120.0)  # simulates a user having zoomed in
+
+    def fake_exec(self):
+        self.result_calibration = Calibration(kind="linear", a=10.0, b=0.5)
+        self.result_active = True
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(CalibrationDialog, "exec", fake_exec)
+    main_window._open_calibration_dialog()
+
+    xlim = main_window.axes.get_xlim()
+    # Channel 80 -> keV 50.0, channel 120 -> keV 70.0 -- the SAME
+    # channel region, not the full spectrum's [10.0, 109.5] range.
+    assert xlim[0] == pytest.approx(50.0, abs=1.0)
+    assert xlim[1] == pytest.approx(70.0, abs=1.0)
+
+
+def test_deactivating_calibration_via_dialog_preserves_the_equivalent_view(qapp, monkeypatch):
+    from calibration import Calibration
+    from calibration_dialog import CalibrationDialog
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    main_window._plot_data()
+    main_window.axes.set_xlim(50.0, 70.0)  # zoomed to keV 50-70 (channels 80-120)
+
+    def fake_exec(self):
+        self.result_calibration = main_window._calibration
+        self.result_active = False
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(CalibrationDialog, "exec", fake_exec)
+    main_window._open_calibration_dialog()
+
+    xlim = main_window.axes.get_xlim()
+    assert xlim[0] == pytest.approx(80.0, abs=1.0)
+    assert xlim[1] == pytest.approx(120.0, abs=1.0)
+
+
+def test_calibration_toggle_action_flips_active_state_and_preserves_view(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = False
+    main_window.calibration_toggle_action.setEnabled(True)
+    main_window._plot_data()
+    main_window.axes.set_xlim(80.0, 120.0)
+
+    main_window.calibration_toggle_action.setChecked(True)
+
+    assert main_window._calibration_active is True
+    xlim = main_window.axes.get_xlim()
+    assert xlim[0] == pytest.approx(50.0, abs=1.0)
+    assert xlim[1] == pytest.approx(70.0, abs=1.0)
+
+    main_window.calibration_toggle_action.setChecked(False)
+    assert main_window._calibration_active is False
+    xlim = main_window.axes.get_xlim()
+    assert xlim[0] == pytest.approx(80.0, abs=1.0)
+    assert xlim[1] == pytest.approx(120.0, abs=1.0)
+
+
+def test_toggle_action_and_dialog_stay_in_sync(qapp, monkeypatch):
+    """Applying a calibration via the dialog must update the toolbar
+    toggle button's checked state to match, so the two controls never
+    disagree about whether calibration is active."""
+    from calibration import Calibration
+    from calibration_dialog import CalibrationDialog
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    def fake_exec_active(self):
+        self.result_calibration = Calibration(kind="linear", a=10.0, b=0.5)
+        self.result_active = True
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(CalibrationDialog, "exec", fake_exec_active)
+    main_window._open_calibration_dialog()
+    assert main_window.calibration_toggle_action.isChecked() is True
+
+    def fake_exec_inactive(self):
+        self.result_calibration = main_window._calibration
+        self.result_active = False
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(CalibrationDialog, "exec", fake_exec_inactive)
+    main_window._open_calibration_dialog()
+    assert main_window.calibration_toggle_action.isChecked() is False
+
+
+def test_calibration_toggle_action_icon_updates_with_checked_state(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window.calibration_toggle_action.setEnabled(True)
+
+    off_icon_bytes = main_window.calibration_toggle_action.icon().pixmap(24, 24).toImage()
+    main_window.calibration_toggle_action.setChecked(True)
+    on_icon_bytes = main_window.calibration_toggle_action.icon().pixmap(24, 24).toImage()
+    assert off_icon_bytes != on_icon_bytes

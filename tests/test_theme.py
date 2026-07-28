@@ -178,6 +178,8 @@ def test_zoom_icons_and_builtin_save_icon_match_color_in_both_themes(qapp):
             assert _opaque_icon_colors(main_window.zoom_in_action.icon()) == {expected}
             assert _opaque_icon_colors(main_window.zoom_out_action.icon()) == {expected}
             assert _opaque_icon_colors(main_window.full_spectrum_action.icon()) == {expected}
+            assert _opaque_icon_colors(main_window.calibration_load_action.icon()) == {expected}
+            assert _opaque_icon_colors(main_window.calibration_toggle_action.icon()) == {expected}
     finally:
         main_window.settings.set_theme(original_theme)
 

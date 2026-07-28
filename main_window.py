@@ -99,6 +99,63 @@ def _full_spectrum_icon(dark=False):
     return QIcon(pixmap)
 
 
+def _calibration_icon(dark=False):
+    # A diagonal ruler with notched tick marks -- evokes calibration/
+    # measurement, visually distinct from the magnifying-glass zoom
+    # icons and the full-spectrum bar chart already in this toolbar.
+    # Ticks are cut as transparent notches out of the solid ruler body
+    # via OddEvenFill (the same technique _magnifier_icon uses for its
+    # ring), which reads correctly on any toolbar background.
+    pixmap = QPixmap(_ICON_SIZE, _ICON_SIZE)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    color = QColor("white") if dark else QColor("black")
+
+    painter.translate(_ICON_SIZE / 2, _ICON_SIZE / 2)
+    painter.rotate(-40)
+
+    path = QPainterPath()
+    path.setFillRule(Qt.FillRule.OddEvenFill)
+    path.addRect(QRectF(-9.5, -3.0, 19.0, 6.0))
+    for x in (-6.5, -2.5, 1.5, 5.5):
+        path.addRect(QRectF(x, -3.0, 1.2, 3.0))
+    painter.fillPath(path, color)
+
+    painter.end()
+    return QIcon(pixmap)
+
+
+def _calibration_active_icon(active, dark=False):
+    # A toggle-switch glyph -- outlined pill track with a filled knob on
+    # the right when active, left when inactive. Two distinct pixmaps
+    # (not a single icon relying on Qt's checked-state highlight, which
+    # this project has found unreliable across themes -- see the
+    # matplotlib/Qt toolbar gotchas already worked around for the
+    # built-in icons) so on/off stays unambiguous regardless of theme.
+    pixmap = QPixmap(_ICON_SIZE, _ICON_SIZE)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    color = QColor("white") if dark else QColor("black")
+
+    track = QRectF(2.0, 8.0, 20.0, 8.0)
+    radius = track.height() / 2
+    painter.setPen(QPen(color, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(track, radius, radius)
+
+    knob_d = 6.0
+    knob_x = track.right() - knob_d - 1.2 if active else track.left() + 1.2
+    knob_y = track.center().y() - knob_d / 2
+    painter.setBrush(color)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.drawEllipse(QRectF(knob_x, knob_y, knob_d, knob_d))
+
+    painter.end()
+    return QIcon(pixmap)
+
+
 def _color_swatch_pixmap(color):
     pixmap = QPixmap(16, 16)
     pixmap.fill(QColor(color))
@@ -205,6 +262,7 @@ class MainWindow(QMainWindow):
         self.canvas.mpl_connect("scroll_event", self._on_scroll)
 
         self._build_zoom_buttons()
+        self._build_calibration_toolbar_buttons()
 
         self.fit_controller = FitModeController(self)
         self._build_fit_mode_buttons()
@@ -270,6 +328,7 @@ class MainWindow(QMainWindow):
         self._theme = theme
         self._style_nav_toolbar_palette(theme)
         self._refresh_zoom_icons()
+        self._refresh_calibration_icons()
         # Re-derive each already-loaded spectrum's trace color from the
         # new theme's palette, using the index remembered at load time --
         # spectra loaded via a direct LoadedSpectrum(...) construction
@@ -302,14 +361,36 @@ class MainWindow(QMainWindow):
             self, initial=self._calibration, initially_active=self._calibration_active
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._calibration = dialog.result_calibration
-            self._calibration_active = dialog.result_active
-            if self.spectra:
-                # preserve_view intentionally omitted (defaults to
-                # False): the previous xlim was in the other unit
-                # (channels vs keV) and carrying it over would show a
-                # nonsensical view.
-                self._plot_data()
+            self._apply_calibration_change(dialog.result_calibration, dialog.result_active)
+
+    def _apply_calibration_change(self, new_calibration, new_active):
+        """Applies a new calibration/active state and replots, keeping
+        the same detector-channel region in view across the unit change
+        -- re-expresses the current view's bounds (captured in channel
+        space using the OLD calibration state, below) through the NEW
+        calibration, rather than resetting to the full spectrum or
+        reusing the old view's raw x-values verbatim (which would show
+        a nonsensical region once the axis units change). Shared by the
+        calibration dialog's OK handler and the toolbar's quick Active
+        toggle, so either path keeps the plot, the toolbar button, and
+        the Fit Results table in sync."""
+        channel_bounds = None
+        if self.spectra:
+            old_xlim = self.axes.get_xlim()
+            channel_bounds = (
+                self.display_to_channel(old_xlim[0]),
+                self.display_to_channel(old_xlim[1]),
+            )
+        self._calibration = new_calibration
+        self._calibration_active = new_active
+        self.calibration_toggle_action.setEnabled(new_calibration is not None)
+        self.calibration_toggle_action.setChecked(new_active)
+        if self.spectra:
+            new_xlim = (
+                self.channel_to_display(channel_bounds[0]),
+                self.channel_to_display(channel_bounds[1]),
+            )
+            self._plot_data(xlim_override=new_xlim)
 
     def _style_nav_toolbar_palette(self, theme):
         """Sets the navigation toolbar's actual QPalette -- not just this
@@ -402,7 +483,7 @@ class MainWindow(QMainWindow):
         if failures:
             QMessageBox.warning(self, "Some files could not be loaded", "\n".join(failures))
 
-    def _plot_data(self, preserve_view=False):
+    def _plot_data(self, preserve_view=False, xlim_override=None):
         # Captured before axes.clear() (which resets limits) -- used to
         # keep the user's current zoom when a replot is triggered by
         # something unrelated to loading/showing a spectrum, e.g.
@@ -426,7 +507,9 @@ class MainWindow(QMainWindow):
             # as such. Span the widest currently-visible spectrum, since
             # loaded files can have different channel counts.
             max_channel = max(len(s.data) for s in visible) - 1
-            if saved_xlim is not None:
+            if xlim_override is not None:
+                xlim = xlim_override
+            elif saved_xlim is not None:
                 xlim = saved_xlim
             else:
                 xlim = (self.channel_to_display(0), self.channel_to_display(max_channel))
@@ -607,6 +690,43 @@ class MainWindow(QMainWindow):
         self.zoom_in_action.setIcon(_magnifier_icon("+", dark))
         self.zoom_out_action.setIcon(_magnifier_icon("-", dark))
         self.full_spectrum_action.setIcon(_full_spectrum_icon(dark))
+
+    def _build_calibration_toolbar_buttons(self):
+        self.nav_toolbar.addSeparator()
+        dark = self._theme == "dark"
+
+        self.calibration_load_action = QAction(_calibration_icon(dark), "Load Calibration...", self)
+        self.calibration_load_action.triggered.connect(self._open_calibration_dialog)
+        self.nav_toolbar.addAction(self.calibration_load_action)
+
+        self.calibration_toggle_action = QAction(
+            _calibration_active_icon(False, dark), "Calibration Active", self
+        )
+        self.calibration_toggle_action.setCheckable(True)
+        self.calibration_toggle_action.setEnabled(self._calibration is not None)
+        self.calibration_toggle_action.toggled.connect(self._on_calibration_toggle_action)
+        self.nav_toolbar.addAction(self.calibration_toggle_action)
+
+    def _refresh_calibration_icons(self):
+        """Re-renders this app's own calibration toolbar icons for the
+        current theme -- mirrors _refresh_zoom_icons; a no-op before
+        _build_calibration_toolbar_buttons has run (e.g. the initial
+        _apply_theme call in __init__)."""
+        if not hasattr(self, "calibration_load_action"):
+            return
+        dark = self._theme == "dark"
+        self.calibration_load_action.setIcon(_calibration_icon(dark))
+        self.calibration_toggle_action.setIcon(
+            _calibration_active_icon(self.calibration_toggle_action.isChecked(), dark)
+        )
+
+    def _on_calibration_toggle_action(self, checked):
+        self.calibration_toggle_action.setIcon(
+            _calibration_active_icon(checked, self._theme == "dark")
+        )
+        if self._calibration is None or checked == self._calibration_active:
+            return
+        self._apply_calibration_change(self._calibration, checked)
 
     def _build_fit_mode_buttons(self):
         self.fit_button = QAction("Fit", self)
