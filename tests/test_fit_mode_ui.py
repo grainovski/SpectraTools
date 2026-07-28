@@ -2838,7 +2838,12 @@ def test_calibration_load_action_opens_the_dialog(qapp, monkeypatch):
 
     main_window = MainWindow()
     opened = []
-    monkeypatch.setattr(CalibrationDialog, "exec", lambda self: (opened.append(True), QDialog.DialogCode.Rejected)[1])
+
+    def fake_exec(self):
+        opened.append(True)
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(CalibrationDialog, "exec", fake_exec)
     main_window.calibration_load_action.trigger()
     assert opened == [True]
 

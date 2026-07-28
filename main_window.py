@@ -141,6 +141,10 @@ def _calibration_active_icon(active, dark=False):
 
     track = QRectF(2.0, 8.0, 20.0, 8.0)
     radius = track.height() / 2
+    # Stroked outline rather than this file's usual flat-filled
+    # silhouette (see _magnifier_icon) -- a filled pill would read as a
+    # solid bar, not a switch; the outline is what makes the track
+    # legible as a track for the knob below to sit in.
     painter.setPen(QPen(color, 1.6))
     painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.drawRoundedRect(track, radius, radius)
