@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from fit_export import (
     append_auto_log, auto_log_path, fit_result_to_json_record,
     fit_result_to_text_report, integration_result_to_json_record,
@@ -201,3 +203,68 @@ def test_write_text_report_handles_a_mix_of_fit_and_integration_results(tmp_path
 
     text = out_path.read_text(encoding="utf-8")
     assert text.index("Fit 1") < text.index("Fit 2 (Integration)")
+
+
+def test_json_record_omits_kev_fields_without_calibration():
+    result = _make_result()
+    record = fit_result_to_json_record(result, "eu.spe")
+    assert record["peaks"][0].get("position_keV") is None
+
+
+def test_json_record_includes_kev_fields_with_calibration():
+    from calibration import Calibration
+
+    result = _make_result()
+    cal = Calibration(kind="linear", a=10.0, b=0.5)
+    record = fit_result_to_json_record(result, "eu.spe", calibration=cal)
+    peak_record = record["peaks"][0]
+    # _make_result()'s peak: position=100.0, position_err=0.1, fwhm=7.0, fwhm_err=0.2
+    assert peak_record["position_keV"] == pytest.approx(cal.apply(100.0))
+    assert peak_record["position_err_keV"] == pytest.approx(abs(cal.derivative(100.0)) * 0.1)
+    assert peak_record["fwhm_keV"] == pytest.approx(abs(cal.derivative(100.0)) * 7.0)
+    assert peak_record["fwhm_err_keV"] == pytest.approx(abs(cal.derivative(100.0)) * 0.2)
+
+
+def test_json_record_fwhm_keV_uses_derivative_at_position_for_quadratic():
+    """Regression guard: fwhm_keV/fwhm_err_keV must use the calibration's
+    derivative evaluated at the peak's POSITION (100.0), not at the
+    FWHM's own numeric value (7.0) -- for a quadratic calibration these
+    differ substantially, unlike linear where the derivative is
+    constant everywhere and this distinction is invisible."""
+    from calibration import Calibration
+
+    result = _make_result()
+    cal = Calibration(kind="quadratic", a=0.0, b=1.0, c=0.5)
+    record = fit_result_to_json_record(result, "eu.spe", calibration=cal)
+    peak_record = record["peaks"][0]
+    correct_slope = abs(cal.derivative(100.0))  # NOT cal.derivative(7.0)
+    assert peak_record["fwhm_keV"] == pytest.approx(correct_slope * 7.0)
+    assert peak_record["fwhm_err_keV"] == pytest.approx(correct_slope * 0.2)
+
+
+def test_text_report_includes_kev_parenthetical_with_calibration():
+    from calibration import Calibration
+
+    result = _make_result()
+    cal = Calibration(kind="linear", a=10.0, b=0.5)
+    report = fit_result_to_text_report(result, "eu.spe", calibration=cal)
+    assert "keV" in report
+
+
+def test_text_report_omits_kev_parenthetical_without_calibration():
+    result = _make_result()
+    report = fit_result_to_text_report(result, "eu.spe")
+    assert "keV" not in report
+
+
+def test_text_report_fwhm_keV_uses_derivative_at_position_for_quadratic():
+    """Same regression guard as the JSON test above, for the text-report
+    path (_format_dual) instead of the JSON path (_peak_record)."""
+    from calibration import Calibration
+
+    result = _make_result()
+    cal = Calibration(kind="quadratic", a=0.0, b=1.0, c=0.5)
+    report = fit_result_to_text_report(result, "eu.spe", calibration=cal)
+    correct_slope = abs(cal.derivative(100.0))  # NOT cal.derivative(7.0)
+    correct_fwhm_keV = correct_slope * 7.0
+    assert f"{correct_fwhm_keV:.6g}" in report
