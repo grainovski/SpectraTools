@@ -300,7 +300,8 @@ class FitModeController(QObject):
         redraw work (never more than a handful of artists) for avoiding
         any incremental per-artist bookkeeping -- no risk of a stale
         artist left behind by an evicted background region or a
-        removed peak."""
+        removed peak. FitModeState itself always stays channel-based;
+        to_display converts to keV for drawing only, when calibrated."""
         for artist in self._progress_artists:
             try:
                 artist.remove()
@@ -310,28 +311,38 @@ class FitModeController(QObject):
 
         axes = self.main_window.axes
         state = self.state
+        to_display = self.main_window.channel_to_display
 
         if state.pending_bg_click is not None:
             self._progress_artists.append(
-                axes.axvline(state.pending_bg_click, color="gray", linestyle="--", linewidth=1)
+                axes.axvline(
+                    to_display(state.pending_bg_click), color="gray", linestyle="--", linewidth=1
+                )
             )
-        for region in state.bg_regions:
+        for lo, hi in state.bg_regions:
             self._progress_artists.append(
-                axes.axvspan(*region, color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA)
+                axes.axvspan(
+                    to_display(lo), to_display(hi), color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA
+                )
             )
 
         if state.pending_fit_click is not None:
             self._progress_artists.append(
-                axes.axvline(state.pending_fit_click, color="tab:blue", linestyle="--", linewidth=1)
+                axes.axvline(
+                    to_display(state.pending_fit_click), color="tab:blue", linestyle="--", linewidth=1
+                )
             )
         if state.fit_region is not None:
+            lo, hi = state.fit_region
             self._progress_artists.append(
-                axes.axvspan(*state.fit_region, color=FIT_REGION_COLOR, alpha=FIT_REGION_ALPHA)
+                axes.axvspan(
+                    to_display(lo), to_display(hi), color=FIT_REGION_COLOR, alpha=FIT_REGION_ALPHA
+                )
             )
 
         for x in state.peak_positions:
             self._progress_artists.append(
-                axes.axvline(x, color="red", linestyle=":", linewidth=1)
+                axes.axvline(to_display(x), color="red", linestyle=":", linewidth=1)
             )
 
         self.main_window.canvas.draw_idle()

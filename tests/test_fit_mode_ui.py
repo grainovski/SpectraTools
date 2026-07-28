@@ -2417,3 +2417,66 @@ def test_on_mouse_move_reports_correct_channel_when_calibrated(qapp):
 
     message = main_window.statusBar().currentMessage()
     assert "12345" in message
+
+
+def test_redraw_progress_draws_marks_at_calibrated_position(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    main_window._plot_data()
+
+    fc = main_window.fit_controller
+    fc.state.peak_positions = [100.0]  # channel 100
+    fc._redraw_progress()
+
+    # The peak-position progress line should be drawn at keV 60, not
+    # channel 100.
+    peak_lines = [
+        line for line in main_window.axes.lines
+        if line.get_linestyle() == ":" and line.get_color() == "red"
+    ]
+    assert len(peak_lines) == 1
+    assert peak_lines[0].get_xdata()[0] == pytest.approx(60.0)
+
+
+def test_marks_survive_toggling_calibration_mid_session(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    fc = main_window.fit_controller
+
+    # Mark a peak position while uncalibrated.
+    fc.state.fit_region = (85.0, 115.0)
+    fc.state.peak_positions = [100.0]
+    fc._redraw_progress()
+    peak_line = [
+        line for line in main_window.axes.lines
+        if line.get_linestyle() == ":" and line.get_color() == "red"
+    ][0]
+    assert peak_line.get_xdata()[0] == pytest.approx(100.0)
+
+    # Turn calibration on -- the mark's stored value is untouched, only
+    # where it's drawn changes.
+    main_window._calibration = Calibration(kind="linear", a=10.0, b=0.5)
+    main_window._calibration_active = True
+    fc._redraw_progress()
+    assert fc.state.peak_positions == [100.0]  # stored value unchanged
+    peak_line = [
+        line for line in main_window.axes.lines
+        if line.get_linestyle() == ":" and line.get_color() == "red"
+    ][0]
+    assert peak_line.get_xdata()[0] == pytest.approx(60.0)  # drawn at keV now
+
+    # Turn it back off -- redraws at the original channel position again.
+    main_window._calibration_active = False
+    fc._redraw_progress()
+    assert fc.state.peak_positions == [100.0]
+    peak_line = [
+        line for line in main_window.axes.lines
+        if line.get_linestyle() == ":" and line.get_color() == "red"
+    ][0]
+    assert peak_line.get_xdata()[0] == pytest.approx(100.0)
