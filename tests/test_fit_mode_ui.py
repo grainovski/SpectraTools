@@ -355,6 +355,47 @@ def test_results_table_shows_dual_units_when_active(qapp):
     assert volume_text == "1000.0 ± 50.0"  # unchanged -- area has no keV equivalent
 
 
+def test_results_table_fwhm_kev_uses_derivative_at_peak_position_not_fwhm_value(qapp):
+    """Regression test: converting a width to keV must use the
+    calibration's slope evaluated at the peak's own POSITION, not at
+    the width's numeric value (which has no meaning as a channel
+    index) -- for a quadratic calibration these differ substantially,
+    unlike linear where the derivative is constant everywhere and the
+    bug this guards against is invisible."""
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_slope=0.0, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0, amplitude=200.0, sigma=2.0,
+                )
+            ],
+        )
+    )
+    cal = Calibration(kind="quadratic", a=0.0, b=1.0, c=0.5)
+    main_window._calibration = cal
+    main_window._calibration_active = True
+
+    main_window.fit_controller.update_results_list()
+
+    table = main_window.fit_controller.results_table
+    fwhm_text = table.item(0, 2).text()
+    # Correct slope is the derivative AT THE PEAK'S POSITION (100), not
+    # at the fwhm's own numeric value (5): derivative(100) = 1+2*0.5*100
+    # = 101, vs. the buggy derivative(5) = 1+2*0.5*5 = 6 -- very different,
+    # so this fails loudly if the bug reappears.
+    expected_slope = abs(cal.derivative(100.0))
+    expected_energy = expected_slope * 5.0
+    expected_err = expected_slope * 0.2
+    assert fwhm_text == f"5.00 ± 0.20 ch ({expected_energy:.2f} ± {expected_err:.2f} keV)"
+
+
 def test_remove_fit_from_context_menu_removes_the_correct_fit_by_row(qapp, monkeypatch):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)

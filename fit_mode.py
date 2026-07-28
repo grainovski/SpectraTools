@@ -175,15 +175,17 @@ def _parameter_label(name):
     return f"Peak {peak_num} {kind}"
 
 
-def _dual_unit_value(main_window, channel_value, channel_err, is_width):
+def _dual_unit_value(main_window, channel_value, channel_err, is_width, reference_position=None):
     """Formats a channel-space value+error as "X.XX ± Y.YY ch (E.EE ±
     F.FF keV)" when calibration is active, or plain "X.XX ± Y.YY"
     otherwise. `is_width=False` (a position, e.g. peak centroid)
     converts through the full calibration (cal.apply, including the
-    offset `a`); `is_width=True` (e.g. FWHM) scales by the local
-    derivative only -- a width has no absolute position of its own, and
-    running it through apply() would incorrectly add `a`. keV
-    uncertainty is first-order error propagation through the
+    offset `a`), with its own local derivative used for error
+    propagation. `is_width=True` (e.g. FWHM) scales by the calibration's
+    local derivative evaluated at `reference_position` -- the peak's own
+    position, NOT the width's numeric value, which has no location on
+    the calibration curve of its own; required when is_width is True.
+    keV uncertainty is first-order error propagation through the
     calibration's local derivative in both cases -- exact for linear
     calibration, a good approximation for quadratic given realistic
     peak-width uncertainties are small relative to the calibration's
@@ -191,10 +193,11 @@ def _dual_unit_value(main_window, channel_value, channel_err, is_width):
     if not main_window._calibration_active or main_window._calibration is None:
         return f"{channel_value:.2f} ± {channel_err:.2f}"
     cal = main_window._calibration
-    slope = abs(cal.derivative(channel_value))
     if is_width:
+        slope = abs(cal.derivative(reference_position))
         energy = slope * channel_value
     else:
+        slope = abs(cal.derivative(channel_value))
         energy = cal.apply(channel_value)
     energy_err = slope * channel_err
     return f"{channel_value:.2f} ± {channel_err:.2f} ch ({energy:.2f} ± {energy_err:.2f} keV)"
@@ -219,7 +222,7 @@ def _integration_tooltip(main_window, result):
         lines.append(
             f"{label}: area={area:.1f}±{area_err:.1f}, "
             f"centroid={_dual_unit_value(main_window, centroid, centroid_err, is_width=False)}, "
-            f"FWHM={_dual_unit_value(main_window, fwhm, fwhm_err, is_width=True)}, "
+            f"FWHM={_dual_unit_value(main_window, fwhm, fwhm_err, is_width=True, reference_position=centroid)}, "
             f"skewness={skewness:.3g}±{skewness_err:.3g}"
         )
     return "\n".join(lines)
@@ -720,7 +723,8 @@ class FitModeController(QObject):
                         self.main_window, result.net_centroid, result.net_centroid_err, is_width=False
                     ),
                     _dual_unit_value(
-                        self.main_window, result.net_fwhm, result.net_fwhm_err, is_width=True
+                        self.main_window, result.net_fwhm, result.net_fwhm_err,
+                        is_width=True, reference_position=result.net_centroid,
                     ),
                     f"{result.net_area:.1f} ± {result.net_area_err:.1f}",
                     "—",  # no chi^2 concept for a direct-sum Integration result
@@ -770,7 +774,8 @@ class FitModeController(QObject):
                         self.main_window, peak.position, peak.position_err, is_width=False
                     ),
                     _dual_unit_value(
-                        self.main_window, peak.fwhm, peak.fwhm_err, is_width=True
+                        self.main_window, peak.fwhm, peak.fwhm_err,
+                        is_width=True, reference_position=peak.position,
                     ),
                     f"{peak.area:.1f} ± {peak.area_err:.1f}",
                     f"{result.reduced_chi2:.3g}" if result.reduced_chi2 is not None else "—",
