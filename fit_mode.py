@@ -641,6 +641,16 @@ class FitModeController(QObject):
         self.results_table.customContextMenuRequested.connect(self._on_results_context_menu)
         self.results_table.itemDoubleClicked.connect(self._on_result_double_clicked)
 
+        self.clear_all_fits_action = QAction("Clear All Fits", mw)
+        self.clear_all_fits_action.setShortcut("Ctrl+Shift+C")
+        self.clear_all_fits_action.triggered.connect(self._clear_all_fits)
+        mw.addAction(self.clear_all_fits_action)
+
+        self.export_all_fits_action = QAction("Export All Fits...", mw)
+        self.export_all_fits_action.setShortcut("Ctrl+E")
+        self.export_all_fits_action.triggered.connect(self._export_all_fits)
+        mw.addAction(self.export_all_fits_action)
+
         self.results_dock = QDockWidget("Fit Results", mw)
         self.results_dock.setWidget(self.results_table)
         mw.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.results_dock)
@@ -943,10 +953,22 @@ class FitModeController(QObject):
             fit_index = self._results_row_fit_index[item.row()]
             self._export_fits(active, [fit_index])
         elif export_all_action is not None and chosen == export_all_action:
-            self._export_fits(active, list(range(len(active.fits))))
+            self._export_all_fits()
         elif chosen == clear_action:
-            active.fits.clear()
-            mw._plot_data(preserve_view=True)
+            self._clear_all_fits()
+
+    def _clear_all_fits(self):
+        active = next((s for s in self.main_window.spectra if s.active), None)
+        if active is None:
+            return
+        active.fits.clear()
+        self.main_window._plot_data(preserve_view=True)
+
+    def _export_all_fits(self):
+        active = next((s for s in self.main_window.spectra if s.active), None)
+        if active is None or not active.fits:
+            return
+        self._export_fits(active, list(range(len(active.fits))))
 
     def _export_fits(self, active, fit_indices):
         """Opens a save-file dialog and writes a plain-text report

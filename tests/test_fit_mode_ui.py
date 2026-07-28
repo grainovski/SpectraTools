@@ -3361,3 +3361,32 @@ def test_fixed_kev_fwhm_with_independent_widths_is_honored_by_a_real_refit(qapp)
     peak1_slope = abs(cal.derivative(fit.peaks[0].position))
     peak2_slope = abs(cal.derivative(fit.peaks[1].position))
     assert peak1_slope != pytest.approx(peak2_slope, rel=0.05)
+
+
+def test_clear_all_fits_shortcut_deletes_fits(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(_fit_result_with_one_peak())
+
+    main_window.fit_controller.clear_all_fits_action.trigger()
+
+    assert spectrum.fits == []
+
+
+def test_clear_all_fits_action_has_shortcut(qapp):
+    from PySide6.QtGui import QKeySequence
+    main_window = MainWindow()
+    assert main_window.fit_controller.clear_all_fits_action.shortcut() == QKeySequence("Ctrl+Shift+C")
+
+
+def test_export_all_fits_action_has_shortcut(qapp):
+    from PySide6.QtGui import QKeySequence
+    main_window = MainWindow()
+    assert main_window.fit_controller.export_all_fits_action.shortcut() == QKeySequence("Ctrl+E")
+
+
+def test_export_all_fits_shortcut_does_nothing_with_no_fits(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    main_window.fit_controller.export_all_fits_action.trigger()  # must not raise/open a dialog
