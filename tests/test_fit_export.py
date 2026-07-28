@@ -184,6 +184,33 @@ def test_integration_result_to_text_report_includes_all_three_layers():
     assert "800" in report
 
 
+def test_integration_result_json_fwhm_keV_uses_derivative_at_centroid_for_quadratic():
+    """Regression guard for the Integration-result JSON path (mirrors
+    the FitResult version above) -- fwhm_keV must use the calibration's
+    derivative at the layer's own centroid, not at the fwhm's own
+    numeric value."""
+    from calibration import Calibration
+
+    result = _make_integration_result()
+    cal = Calibration(kind="quadratic", a=0.0, b=1.0, c=0.5)
+    record = integration_result_to_json_record(result, "eu.spe", calibration=cal)
+    correct_slope = abs(cal.derivative(100.0))  # net_centroid, NOT net_fwhm (7.5)
+    assert record["net"]["fwhm_keV"] == pytest.approx(correct_slope * 7.5)
+    assert record["net"]["fwhm_err_keV"] == pytest.approx(correct_slope * 0.4)
+
+
+def test_integration_result_text_report_fwhm_keV_uses_derivative_at_centroid_for_quadratic():
+    """Same regression guard for the Integration-result text-report path."""
+    from calibration import Calibration
+
+    result = _make_integration_result()
+    cal = Calibration(kind="quadratic", a=0.0, b=1.0, c=0.5)
+    report = integration_result_to_text_report(result, "eu.spe", calibration=cal)
+    correct_slope = abs(cal.derivative(100.0))  # net_centroid, NOT net_fwhm (7.5)
+    correct_fwhm_keV = correct_slope * 7.5
+    assert f"{correct_fwhm_keV:.6g}" in report
+
+
 def test_write_text_report_handles_a_mix_of_fit_and_integration_results(tmp_path):
     from peak_fit import FitResult, PeakResult
 
