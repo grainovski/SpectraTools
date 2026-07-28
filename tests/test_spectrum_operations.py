@@ -85,6 +85,19 @@ def test_reference_value_region_clamped_to_bounds():
     assert reference_value(data, region=(-5, 100)) == 60
 
 
+def test_reference_value_region_entirely_before_the_start_is_zero():
+    data = np.array([10, 20, 30])
+    # hi=-2 is deliberate, not just "some negative number": after
+    # clamping, hi+1=-1 is still within -len(data), so Python's slice
+    # indexing would silently wrap it to a real, non-empty slice
+    # (data[0:-1] = [10, 20], sum 30) if the lo > hi guard in
+    # reference_value() were ever removed. A more negative hi (e.g.
+    # -5) doesn't expose this: -5+1=-4 falls outside -len(data), so
+    # the slice clamps to empty on its own and the test would pass
+    # whether or not the guard exists.
+    assert reference_value(data, region=(-5, -2)) == 0
+
+
 def test_normalize_factors_scales_up_to_the_maximum():
     factors = normalize_factors([50, 100, 25])
     assert factors == [2.0, 1.0, 4.0]
