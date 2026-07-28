@@ -59,6 +59,6 @@ def test_rebin_by_factor_larger_than_length_is_a_single_bin():
 
 
 def test_rebin_preserves_int64_dtype():
-    data = np.array([1, 2, 3, 4], dtype=np.int64)
+    data = np.array([1, 2, 3, 4, 5], dtype=np.int64)
     result = rebin(data, 2)
     assert result.dtype == np.int64
