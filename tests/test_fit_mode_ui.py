@@ -3385,8 +3385,22 @@ def test_export_all_fits_action_has_shortcut(qapp):
     assert main_window.fit_controller.export_all_fits_action.shortcut() == QKeySequence("Ctrl+E")
 
 
-def test_export_all_fits_shortcut_does_nothing_with_no_fits(qapp):
+def test_export_all_fits_shortcut_does_nothing_with_no_fits(qapp, monkeypatch):
+    # A plain "must not raise" assertion is too weak here: QFileDialog's
+    # modal .exec() never returns under the offscreen Qt platform this
+    # suite runs under, so if _export_all_fits()'s no-fits guard ever
+    # regresses, an unguarded call would hang the whole test run instead
+    # of failing cleanly. Spying on getSaveFileName -- the same
+    # monkeypatch target test_export_cancelled_dialog_does_not_write_a_report_file
+    # uses above -- proves the dialog path was never reached at all.
+    save_dialog_calls = []
+    monkeypatch.setattr(
+        fit_mode.QFileDialog, "getSaveFileName",
+        lambda *a, **k: save_dialog_calls.append(True) or ("", ""),
+    )
     main_window = MainWindow()
     _make_active_spectrum(main_window)
 
-    main_window.fit_controller.export_all_fits_action.trigger()  # must not raise/open a dialog
+    main_window.fit_controller.export_all_fits_action.trigger()
+
+    assert save_dialog_calls == []
