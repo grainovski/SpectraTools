@@ -374,12 +374,20 @@ class FitModeController(QObject):
         self._status_message_until = time.monotonic() + duration_ms / 1000.0
 
     def clear(self):
-        self._clear_progress()
+        self.reset_marks()
         active = next((s for s in self.main_window.spectra if s.active), None)
         if active is not None:
-            for result in active.fits:
-                result.visible = False
+            active.fits.clear()
         self.main_window._plot_data(preserve_view=True)
+
+    def reset_marks(self):
+        """Public entry point for resetting in-progress marking state
+        (in-progress background/fit-region/peak clicks and their drawn
+        artists) without touching committed fits or replotting -- used
+        by clear() (Ctrl+C) and by Multiply/Rebin/Normalize
+        (main_window.py) after they change a spectrum's data, per the
+        design spec's "Fits/Marks Clearing Semantics"."""
+        self._clear_progress()
 
     def _clear_progress(self):
         for artist in self._progress_artists:

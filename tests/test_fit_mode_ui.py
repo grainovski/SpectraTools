@@ -990,7 +990,10 @@ def test_double_click_reloads_a_committed_fit_for_editing(qapp):
     table.cellWidget(2, 2).setChecked(True)  # fix "Shared FWHM"
     main_window.fit_controller.run_fit()  # second entry, sigma fixed
 
-    main_window.fit_controller.clear()
+    # Reset marks only (not clear()) -- clear() now deletes the active
+    # spectrum's fits, and this test needs both committed fits to still
+    # be listed so it can double-click the historical row below.
+    main_window.fit_controller.reset_marks()
     assert main_window.fit_controller.state.bg_regions == []
 
     item = main_window.fit_controller.results_table.item(1, 0)
@@ -1555,7 +1558,7 @@ def test_clear_discards_in_progress_marks_without_committing(qapp):
     assert len(spectrum.fits) == 0
 
 
-def test_clear_hides_every_fit_for_the_active_spectrum_without_deleting_it(qapp):
+def test_clear_deletes_every_fit_for_the_active_spectrum(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
 
@@ -1567,12 +1570,11 @@ def test_clear_hides_every_fit_for_the_active_spectrum_without_deleting_it(qapp)
     _held_key_click(main_window, "r", 115)
     _held_key_click(main_window, "p", 100)
     main_window.fit_controller.run_fit()
-    assert spectrum.fits[0].visible is True
+    assert len(spectrum.fits) == 1
 
     main_window.fit_controller.clear()
 
-    assert len(spectrum.fits) == 1  # nothing deleted
-    assert spectrum.fits[0].visible is False  # but no longer drawn
+    assert spectrum.fits == []
 
 
 def test_clear_forces_a_replot_so_the_canvas_actually_goes_blank(qapp):
@@ -2479,7 +2481,10 @@ def test_double_click_reloads_an_integration_result_marks_only(qapp):
     _held_key_click(main_window, "r", 115)
     main_window.fit_controller.run_integration()
 
-    main_window.fit_controller.clear()
+    # Reset marks only (not clear()) -- clear() now deletes the active
+    # spectrum's fits, and this test needs the committed integration
+    # result to still be listed so it can double-click its row below.
+    main_window.fit_controller.reset_marks()
     assert main_window.fit_controller.state.bg_regions == []
 
     item = main_window.fit_controller.results_table.item(0, 0)
