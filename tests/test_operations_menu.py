@@ -74,7 +74,10 @@ def test_operations_menu_exists_with_calibration_items(qapp):
 
     operations_menu = _menu_named(main_window, "&Operations")
     item_texts = [a.text() for a in operations_menu.actions() if not a.isSeparator()]
-    assert item_texts == ["Calibration...", "Toggle Calibration Active"]
+    # Prefix check, not exact-equality: this menu is designed to grow (Multiply/
+    # Rebin/Normalize are appended after the separator by later tasks), so this
+    # only pins down that the calibration items still lead, in order.
+    assert item_texts[:2] == ["Calibration...", "Toggle Calibration Active"]
 
 
 def test_calibration_no_longer_under_view(qapp):
@@ -123,3 +126,104 @@ def test_toggle_calibration_active_menu_item_syncs_with_toolbar_button(qapp):
 def test_toggle_calibration_active_menu_item_disabled_with_no_calibration(qapp):
     main_window = MainWindow()
     assert main_window.calibration_active_menu_action.isEnabled() is False
+
+
+def test_apply_multiply_scales_data(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    main_window._apply_multiply(spectrum, 2.0)
+
+    assert spectrum.data[0] == 40  # baseline 20 * 2
+
+
+def test_apply_multiply_deletes_fits_and_resets_marks(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    _commit_a_fit(main_window)
+    assert len(spectrum.fits) == 1
+    _held_key_click(main_window, "b", 70)
+
+    main_window._apply_multiply(spectrum, 2.0)
+
+    assert spectrum.fits == []
+    assert main_window.fit_controller.state.pending_bg_click is None
+
+
+def test_apply_multiply_preserves_the_current_view(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    spectrum = main_window.spectra[0]
+    main_window.axes.set_xlim(10, 50)
+
+    main_window._apply_multiply(spectrum, 2.0)
+
+    assert main_window.axes.get_xlim() == (10.0, 50.0)
+
+
+def test_apply_multiply_leaves_other_spectra_untouched(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    original_b = spectrum_b.data.copy()
+
+    main_window._apply_multiply(spectrum_a, 2.0)
+
+    assert list(spectrum_b.data) == list(original_b)
+
+
+def test_open_multiply_dialog_applies_the_entered_factor(qapp, monkeypatch):
+    from factor_dialog import FactorDialog
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    def fake_exec(self):
+        self.result_factor = 3.0
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(FactorDialog, "exec", fake_exec)
+    main_window._open_multiply_dialog()
+
+    assert spectrum.data[0] == 60
+
+
+def test_open_multiply_dialog_does_nothing_when_cancelled(qapp, monkeypatch):
+    from factor_dialog import FactorDialog
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    original = spectrum.data.copy()
+
+    def fake_exec(self):
+        self.result_factor = None
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(FactorDialog, "exec", fake_exec)
+    main_window._open_multiply_dialog()
+
+    assert list(spectrum.data) == list(original)
+
+
+def test_open_multiply_dialog_does_nothing_with_no_active_spectrum(qapp):
+    main_window = MainWindow()
+    main_window._open_multiply_dialog()  # must not raise
+
+
+def test_multiply_action_disabled_with_no_active_spectrum(qapp):
+    main_window = MainWindow()
+    assert main_window.multiply_action.isEnabled() is False
+
+
+def test_multiply_action_enabled_with_active_spectrum(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    assert main_window.multiply_action.isEnabled() is True
+
+
+def test_multiply_action_has_shortcut(qapp):
+    main_window = MainWindow()
+    assert main_window.multiply_action.shortcut() == QKeySequence("Ctrl+M")
+
+
+def test_multiply_action_in_operations_menu(qapp):
+    main_window = MainWindow()
+    assert main_window.multiply_action in main_window.operations_menu.actions()

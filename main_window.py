@@ -31,11 +31,13 @@ from PySide6.QtWidgets import (
 )
 
 from calibration_dialog import CalibrationDialog
+from factor_dialog import FactorDialog
 from fit_mode import FitModeController
 from histogram_io import ParseError, load_histogram
 from settings import Settings
 from spe_io import load_spe
 from spectrum import LoadedSpectrum, next_color
+from spectrum_operations import multiply
 from spk_io import load_spk
 from theme import qt_stylesheet, style_axes
 
@@ -274,6 +276,7 @@ class MainWindow(QMainWindow):
         self.fit_controller.build_parameters_panel()
         self.canvas.mpl_connect("button_press_event", self._on_canvas_click)
         self._update_fit_mode_availability()
+        self._update_operations_availability()
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -337,6 +340,12 @@ class MainWindow(QMainWindow):
         self.operations_menu.addAction(self.calibration_active_menu_action)
 
         self.operations_menu.addSeparator()
+
+        self.multiply_action = QAction("Multiply by Factor...", self)
+        self.multiply_action.setShortcut("Ctrl+M")
+        self.multiply_action.setEnabled(False)
+        self.multiply_action.triggered.connect(self._open_multiply_dialog)
+        self.operations_menu.addAction(self.multiply_action)
 
     def _apply_theme(self, theme):
         app = QApplication.instance()
@@ -412,6 +421,24 @@ class MainWindow(QMainWindow):
             )
             self._plot_data(xlim_override=new_xlim)
         self.fit_controller.refresh_parameters_panel_calibration()
+
+    def _open_multiply_dialog(self):
+        active = next((s for s in self.spectra if s.active), None)
+        if active is None:
+            return
+        dialog = FactorDialog(
+            self, "Multiply by Factor", "Factor:",
+            parse=float,
+            validate=lambda v: None if v > 0 else "Factor must be greater than zero.",
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._apply_multiply(active, dialog.result_factor)
+
+    def _apply_multiply(self, spectrum, factor):
+        spectrum.data = multiply(spectrum.data, factor)
+        self.fit_controller.reset_marks()
+        spectrum.fits.clear()
+        self._plot_data(preserve_view=True)
 
     def _style_nav_toolbar_palette(self, theme):
         """Sets the navigation toolbar's actual QPalette -- not just this
@@ -544,6 +571,7 @@ class MainWindow(QMainWindow):
         self.nav_toolbar.update()
         self.nav_toolbar.push_current()
         self._update_fit_mode_availability()
+        self._update_operations_availability()
         self.fit_controller.update_results_list()
 
     def _on_mouse_move(self, event):
@@ -665,6 +693,7 @@ class MainWindow(QMainWindow):
         for spectrum in self.spectra:
             spectrum.active = spectrum.path == path
         self._update_fit_mode_availability()
+        self._update_operations_availability()
         self.fit_controller.update_results_list()
 
     def _on_spectrum_context_menu(self, position):
@@ -778,6 +807,10 @@ class MainWindow(QMainWindow):
         available = active is not None and active.visible
         self.fit_button.setEnabled(available and self.fit_controller.state.ready_to_fit())
         self.integrate_button.setEnabled(available and self.fit_controller.state.ready_to_integrate())
+
+    def _update_operations_availability(self):
+        active = next((s for s in self.spectra if s.active), None)
+        self.multiply_action.setEnabled(active is not None)
 
     def _on_scroll(self, event):
         if event.inaxes != self.axes or event.xdata is None:
