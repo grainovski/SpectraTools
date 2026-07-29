@@ -1,7 +1,8 @@
+import numpy as np
 import pytest
 from pathlib import Path
 
-from histogram_io import ParseError, load_histogram
+from histogram_io import ParseError, load_histogram, save_histogram
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -58,3 +59,23 @@ def test_bucket_between_4096_and_8192_pads_to_8192(tmp_path):
     assert len(data) == 8192
     assert list(data[:5000]) == values
     assert list(data[5000:]) == [0] * (8192 - 5000)
+
+
+def test_save_histogram_round_trips_through_load_histogram(tmp_path):
+    data = np.array([4, 0, 1, 0, 1, 7, 200])
+    path = tmp_path / "out.txt"
+
+    save_histogram(str(path), data)
+    result = load_histogram(str(path))
+
+    assert list(result[:len(data)]) == list(data)
+
+
+def test_save_histogram_writes_one_value_per_line(tmp_path):
+    data = [1, 2, 3]
+    path = tmp_path / "out.txt"
+
+    save_histogram(str(path), data)
+
+    lines = path.read_text().splitlines()
+    assert lines == ["1", "2", "3"]

@@ -31,3 +31,12 @@ def load_histogram(path: str) -> np.ndarray:
     data = np.zeros(channel_count, dtype=np.int64)
     data[: len(values)] = values
     return data
+
+
+def save_histogram(path: str, data) -> None:
+    """Writes `data` as one integer count per line -- the exact inverse
+    of load_histogram (which ignores blank lines and pads to the next
+    bucket size on read; re-loading a saved file naturally re-pads)."""
+    with open(path, "w") as f:
+        for value in data:
+            f.write(f"{int(value)}\n")
