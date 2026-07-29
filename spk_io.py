@@ -374,3 +374,29 @@ def _load_oldmat(data: bytes, trailer: bytes, path: str) -> np.ndarray:
     if np.issubdtype(dtype, np.floating):
         return np.round(channels).astype(np.int64)
     return channels.astype(np.int64)
+
+
+def save_spk(path: str, data) -> None:
+    """Writes `data` as a single-spectrum, LC2-compressed .spk file --
+    the modern MAT_LC format, version 2, the only writable .spk variant
+    (see design spec). Layout ported from libmfile's own new-file
+    behavior (lc_minfo.c's init_lci/lc_flush, lc_getput.c's writeline):
+    a 44-byte header, one 8-byte position/length table entry right
+    after it, then the LC2-compressed payload."""
+    values = [int(v) for v in data]
+    columns = len(values)
+    compressed = _lc2_compress(values)
+
+    poslentablepos = LC_HEADER_SIZE
+    data_pos = poslentablepos + LC_POSLEN_SIZE
+    freepos = data_pos + len(compressed)
+
+    header = struct.pack(
+        "<11I", LC_MAGIC, 2, 1, 1, columns, poslentablepos, freepos, 0, 0, 0, 0,
+    )
+    poslen = struct.pack("<2I", data_pos, len(compressed))
+
+    with open(path, "wb") as f:
+        f.write(header)
+        f.write(poslen)
+        f.write(compressed)

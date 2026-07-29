@@ -1,12 +1,13 @@
 import struct
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from histogram_io import ParseError
 from spk_io import (
     LC_HEADER_SIZE, LC_MAGIC, MAT_COLMAX, _lc2_compress, _lc2_uncompress, _put_tag_n,
-    _zigzag_decode, _zigzag_encode, load_spk,
+    _zigzag_decode, _zigzag_encode, load_spk, save_spk,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -484,3 +485,63 @@ def test_lc2_compress_same_run_boundary_exactly_4_uses_run_tag():
 
 def test_lc2_compress_same_run_boundary_exactly_3_falls_through_to_pack():
     assert _lc2_compress([0, 0, 0]) == bytes([0x00])
+
+
+def test_save_spk_round_trips_through_load_spk(tmp_path):
+    data = np.array([0, 0, 1, 5, 100, 0, 41580, 2])
+    path = tmp_path / "out.spk"
+
+    save_spk(str(path), data)
+    result = load_spk(str(path))
+
+    assert list(result) == list(data)
+
+
+def test_save_spk_round_trips_the_real_demo_spk_data(tmp_path):
+    original = load_spk(str(FIXTURES / "demo.spk"))
+    path = tmp_path / "roundtrip.spk"
+
+    save_spk(str(path), original)
+    result = load_spk(str(path))
+
+    assert list(result) == list(original)
+
+
+def test_save_spk_writes_version_2_header(tmp_path):
+    data = np.array([1, 2, 3])
+    path = tmp_path / "out.spk"
+
+    save_spk(str(path), data)
+
+    with open(path, "rb") as f:
+        raw = f.read()
+    fields = struct.unpack_from("<11I", raw, 0)
+    magic, version, levels, lines, columns, poslentablepos = fields[:6]
+    assert magic == LC_MAGIC
+    assert version == 2
+    assert levels == 1
+    assert lines == 1
+    assert columns == 3
+    assert poslentablepos == LC_HEADER_SIZE
+
+
+def test_save_spk_round_trips_all_zero_spectrum(tmp_path):
+    data = np.zeros(20, dtype=np.int64)
+    path = tmp_path / "out.spk"
+
+    save_spk(str(path), data)
+    result = load_spk(str(path))
+
+    assert list(result) == [0] * 20
+
+
+def test_save_spk_round_trips_negative_values(tmp_path):
+    # Real spectra are non-negative, but the codec itself is signed --
+    # this exercises that the round-trip holds regardless.
+    data = np.array([0, 1000000, 41580, -5])
+    path = tmp_path / "out.spk"
+
+    save_spk(str(path), data)
+    result = load_spk(str(path))
+
+    assert list(result) == list(data)
