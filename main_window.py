@@ -518,6 +518,13 @@ class MainWindow(QMainWindow):
             return
 
         values = [reference_value(s.data, channel=channel, region=region) for s in visible]
+        if all(v == 0 for v in values):
+            self.fit_controller._show_status_message(
+                "Nothing to normalize -- every visible spectrum reads zero at the marked channel/region.",
+                5000,
+            )
+            self.fit_controller.reset_marks()
+            return
         factors = normalize_factors(values)
 
         skipped = []

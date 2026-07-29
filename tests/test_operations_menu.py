@@ -525,6 +525,23 @@ def test_normalize_skipped_message_survives_a_mouse_move(qapp):
     assert os.path.basename(spectrum_b.path) in message
 
 
+def test_normalize_all_zero_reference_values_shows_a_message_instead_of_silently_doing_nothing(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.data = np.array([0, 0], dtype=np.int64)
+    spectrum_b.data = np.array([0, 0], dtype=np.int64)
+    main_window.fit_controller.state.pending_fit_click = 1
+
+    main_window._normalize_spectra()
+
+    assert list(spectrum_a.data) == [0, 0]
+    assert list(spectrum_b.data) == [0, 0]
+    message = main_window.statusBar().currentMessage()
+    assert "nothing to normalize" in message.lower()
+    assert main_window.fit_controller.state.pending_fit_click is None
+
+
 def test_normalize_clears_fits_only_on_rescaled_spectra(qapp):
     main_window = MainWindow()
     spectrum_a = _make_active_spectrum(main_window)
