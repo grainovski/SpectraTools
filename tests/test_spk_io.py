@@ -545,3 +545,8 @@ def test_save_spk_round_trips_negative_values(tmp_path):
     result = load_spk(str(path))
 
     assert list(result) == list(data)
+
+
+def test_save_spk_rejects_a_channel_count_too_large_for_the_format():
+    with pytest.raises(ValueError):
+        save_spk("unused.spk", [0] * (MAT_COLMAX + 1))

@@ -385,6 +385,10 @@ def save_spk(path: str, data) -> None:
     after it, then the LC2-compressed payload."""
     values = [int(v) for v in data]
     columns = len(values)
+    if not (1 <= columns <= MAT_COLMAX):
+        raise ValueError(
+            f"Channel count {columns} is out of range for a .spk file (must be 1-{MAT_COLMAX})"
+        )
     compressed = _lc2_compress(values)
 
     poslentablepos = LC_HEADER_SIZE
