@@ -324,6 +324,24 @@ def test_apply_rebin_no_warning_with_only_one_spectrum_loaded(qapp):
     assert "other loaded spectra" not in message.lower()
 
 
+def test_apply_rebin_warning_survives_a_mouse_move(qapp):
+    from calibration import Calibration
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=1.0, b=2.0)
+
+    main_window._apply_rebin(spectrum_a, 2)
+
+    ax = main_window.axes
+    px, py = ax.transData.transform((10.0, 10.0))
+    event = MouseEvent("motion_notify_event", main_window.canvas, px, py)
+    main_window.canvas.callbacks.process("motion_notify_event", event)
+
+    message = main_window.statusBar().currentMessage()
+    assert "other loaded spectra" in message.lower()
+
+
 def test_open_rebin_dialog_applies_the_entered_factor(qapp, monkeypatch):
     from factor_dialog import FactorDialog
     main_window = MainWindow()

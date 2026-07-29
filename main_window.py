@@ -470,9 +470,15 @@ class MainWindow(QMainWindow):
             # default (not rescaling would immediately break the spectrum
             # that was just rebinned), so this is flagged to the user via
             # a status message rather than blocked or silently skipped.
+            # fit_controller._show_status_message (not statusBar()
+            # directly) -- it arms _status_message_until, which
+            # _on_mouse_move checks before overwriting the status bar
+            # with the ordinary hover readout. Without this, the warning
+            # gets wiped by the very next mouse move over the canvas,
+            # which is nearly guaranteed to happen right after rebinning.
             self._calibration = self._calibration.rescaled(factor)
             if len(self.spectra) > 1:
-                self.statusBar().showMessage(
+                self.fit_controller._show_status_message(
                     "Rebinned. Calibration was rescaled for this spectrum -- "
                     "it may no longer be correct for other loaded spectra.",
                     8000,
