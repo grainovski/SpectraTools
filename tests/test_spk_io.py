@@ -4,7 +4,9 @@ from pathlib import Path
 import pytest
 
 from histogram_io import ParseError
-from spk_io import MAT_COLMAX, load_spk
+from spk_io import (
+    LC_HEADER_SIZE, LC_MAGIC, MAT_COLMAX, _put_tag_n, _zigzag_decode, _zigzag_encode, load_spk,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -356,3 +358,32 @@ def test_oldmat_rejects_malformed_trailer(tmp_path):
 
     with pytest.raises(ParseError):
         load_spk(str(file_path))
+
+
+def test_zigzag_encode_matches_decode_for_various_values():
+    for value in [-1000, -3, -2, -1, 0, 1, 2, 3, 1000, 158]:
+        assert _zigzag_decode(_zigzag_encode(value)) == value
+
+
+def test_zigzag_encode_known_values():
+    assert _zigzag_encode(0) == 0
+    assert _zigzag_encode(-1) == 1
+    assert _zigzag_encode(1) == 2
+    assert _zigzag_encode(-2) == 3
+    assert _zigzag_encode(158) == 316
+
+
+def test_put_tag_n_single_byte_for_small_values():
+    assert _put_tag_n(0x80, 5) == bytes([0x85])
+    assert _put_tag_n(0x80, 0) == bytes([0x80])
+    assert _put_tag_n(0x80, 59) == bytes([0xBB])
+
+
+def test_put_tag_n_extended_encoding_matches_known_fixture():
+    # Matches test_lc2_extended_single_value_tag above: the zigzag code
+    # for 158 is 316, which must encode as tag 0xBD + [0x00, 0x00].
+    assert _put_tag_n(0x80, 316) == bytes([0xBD, 0x00, 0x00])
+
+
+def test_put_tag_n_same_diff_base():
+    assert _put_tag_n(0xC0, 7) == bytes([0xC7])

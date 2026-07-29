@@ -47,6 +47,32 @@ def _zigzag_decode(i: int) -> int:
     return i >> 1
 
 
+def _zigzag_encode(value: int) -> int:
+    """Inverse of _zigzag_decode above. value can be any integer
+    (positive, negative, or zero)."""
+    return 2 * value if value >= 0 else -2 * value - 1
+
+
+def _put_tag_n(tag_base: int, value: int) -> bytes:
+    """Ported from libmfile's put_tag_n macro (lc_c2.c:39-53): encodes a
+    non-negative `value` as a single tag byte (tag_base + value) when
+    value <= 59, or a tag byte (tag_base + 60 + extra_byte_count) plus
+    1-4 little-endian-ish extension bytes for larger values. Shared by
+    single-value tags (tag_base=0x80) and same-run tags (tag_base=0xC0)."""
+    if value <= 59:
+        return bytes([tag_base + value])
+    t = value - 60
+    extension = [t & 0xFF]
+    extra = 0
+    t >>= 8
+    while t:
+        t -= 1
+        extension.append(t & 0xFF)
+        extra += 1
+        t >>= 8
+    return bytes([tag_base + 60 + extra]) + bytes(extension)
+
+
 def _lc1_uncompress(data: bytes, num: int, path: str) -> list:
     out = []
     last = 0
