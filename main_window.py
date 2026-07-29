@@ -37,7 +37,7 @@ from histogram_io import ParseError, load_histogram
 from settings import Settings
 from spe_io import load_spe
 from spectrum import LoadedSpectrum, next_color
-from spectrum_operations import multiply
+from spectrum_operations import multiply, rebin
 from spk_io import load_spk
 from theme import qt_stylesheet, style_axes
 
@@ -347,6 +347,12 @@ class MainWindow(QMainWindow):
         self.multiply_action.triggered.connect(self._open_multiply_dialog)
         self.operations_menu.addAction(self.multiply_action)
 
+        self.rebin_action = QAction("Rebin by Factor...", self)
+        self.rebin_action.setShortcut("Ctrl+R")
+        self.rebin_action.setEnabled(False)
+        self.rebin_action.triggered.connect(self._open_rebin_dialog)
+        self.operations_menu.addAction(self.rebin_action)
+
     def _apply_theme(self, theme):
         app = QApplication.instance()
         if app is not None:
@@ -439,6 +445,26 @@ class MainWindow(QMainWindow):
         self.fit_controller.reset_marks()
         spectrum.fits.clear()
         self._plot_data(preserve_view=True)
+
+    def _open_rebin_dialog(self):
+        active = next((s for s in self.spectra if s.active), None)
+        if active is None:
+            return
+        dialog = FactorDialog(
+            self, "Rebin by Factor", "Factor:",
+            parse=int,
+            validate=lambda v: None if v >= 2 else "Rebin factor must be an integer of at least 2.",
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._apply_rebin(active, dialog.result_factor)
+
+    def _apply_rebin(self, spectrum, factor):
+        spectrum.data = rebin(spectrum.data, factor)
+        if self._calibration is not None:
+            self._calibration = self._calibration.rescaled(factor)
+        self.fit_controller.reset_marks()
+        spectrum.fits.clear()
+        self._plot_data()
 
     def _style_nav_toolbar_palette(self, theme):
         """Sets the navigation toolbar's actual QPalette -- not just this
@@ -811,6 +837,7 @@ class MainWindow(QMainWindow):
     def _update_operations_availability(self):
         active = next((s for s in self.spectra if s.active), None)
         self.multiply_action.setEnabled(active is not None)
+        self.rebin_action.setEnabled(active is not None)
 
     def _on_scroll(self, event):
         if event.inaxes != self.axes or event.xdata is None:

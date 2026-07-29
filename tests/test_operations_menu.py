@@ -227,3 +227,108 @@ def test_multiply_action_has_shortcut(qapp):
 def test_multiply_action_in_operations_menu(qapp):
     main_window = MainWindow()
     assert main_window.multiply_action in main_window.operations_menu.actions()
+
+
+def test_apply_rebin_reduces_channel_count_and_sums(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.data = np.array([1, 2, 3, 4, 5, 6], dtype=np.int64)
+
+    main_window._apply_rebin(spectrum, 2)
+
+    assert list(spectrum.data) == [3, 7, 11]
+
+
+def test_apply_rebin_adjusts_linear_calibration(qapp):
+    from calibration import Calibration
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.data = np.array([1, 2, 3, 4], dtype=np.int64)
+    main_window._calibration = Calibration(kind="linear", a=1.0, b=2.0)
+
+    main_window._apply_rebin(spectrum, 2)
+
+    assert main_window._calibration.a == 1.0
+    assert main_window._calibration.b == 4.0
+
+
+def test_apply_rebin_adjusts_quadratic_calibration(qapp):
+    from calibration import Calibration
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.data = np.array([1, 2, 3, 4], dtype=np.int64)
+    main_window._calibration = Calibration(kind="quadratic", a=1.0, b=2.0, c=0.5)
+
+    main_window._apply_rebin(spectrum, 3)
+
+    assert main_window._calibration.a == 1.0
+    assert main_window._calibration.b == 6.0
+    assert main_window._calibration.c == 4.5
+
+
+def test_apply_rebin_with_no_calibration_leaves_it_none(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    main_window._apply_rebin(spectrum, 2)
+
+    assert main_window._calibration is None
+
+
+def test_apply_rebin_deletes_fits_and_resets_marks(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    _commit_a_fit(main_window)
+    assert len(spectrum.fits) == 1
+    _held_key_click(main_window, "b", 70)
+
+    main_window._apply_rebin(spectrum, 2)
+
+    assert spectrum.fits == []
+    assert main_window.fit_controller.state.pending_bg_click is None
+
+
+def test_apply_rebin_does_not_preserve_the_current_view(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    main_window.axes.set_xlim(10, 50)
+
+    main_window._apply_rebin(spectrum, 2)
+
+    assert main_window.axes.get_xlim() != (10.0, 50.0)
+
+
+def test_open_rebin_dialog_applies_the_entered_factor(qapp, monkeypatch):
+    from factor_dialog import FactorDialog
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.data = np.array([1, 2, 3, 4], dtype=np.int64)
+
+    def fake_exec(self):
+        self.result_factor = 2
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(FactorDialog, "exec", fake_exec)
+    main_window._open_rebin_dialog()
+
+    assert list(spectrum.data) == [3, 7]
+
+
+def test_open_rebin_dialog_does_nothing_with_no_active_spectrum(qapp):
+    main_window = MainWindow()
+    main_window._open_rebin_dialog()  # must not raise
+
+
+def test_rebin_action_disabled_with_no_active_spectrum(qapp):
+    main_window = MainWindow()
+    assert main_window.rebin_action.isEnabled() is False
+
+
+def test_rebin_action_has_shortcut(qapp):
+    main_window = MainWindow()
+    assert main_window.rebin_action.shortcut() == QKeySequence("Ctrl+R")
+
+
+def test_rebin_action_in_operations_menu(qapp):
+    main_window = MainWindow()
+    assert main_window.rebin_action in main_window.operations_menu.actions()
