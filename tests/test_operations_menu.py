@@ -48,6 +48,20 @@ def _commit_a_fit(main_window):
     main_window.fit_controller.run_fit()
 
 
+class _FakeFit:
+    """Stand-in for a FitResult/IntegrationResult, used where a test only
+    cares whether normalize's fit-clearing touches a given spectrum's
+    .fits list -- not what a real fit looks like. Every real fit result
+    always has `.visible` (peak_fit.FitResult/IntegrationResult both
+    default it to True), and draw_committed_fits (fit_mode.py) reads
+    that attribute first, before anything else, for every spectrum
+    _plot_data redraws -- including spectra a given operation didn't
+    touch. `visible = False` here makes that redraw skip this fake
+    entry immediately, instead of crashing on the fit-region/background
+    fields a bare placeholder (e.g. a plain string) doesn't have."""
+    visible = False
+
+
 def _menu_named(main_window, title):
     # Deliberately not `next(a.menu() for a in main_window.menuBar().actions()
     # if a.text() == title)`: under PySide6 6.8.3, a QMenu fetched via
@@ -398,3 +412,159 @@ def test_rebin_action_has_shortcut(qapp):
 def test_rebin_action_in_operations_menu(qapp):
     main_window = MainWindow()
     assert main_window.rebin_action in main_window.operations_menu.actions()
+
+
+def test_normalize_disabled_with_fewer_than_two_visible_spectra(qapp):
+    main_window = MainWindow()
+    assert main_window.normalize_action.isEnabled() is False
+    _make_active_spectrum(main_window)
+    assert main_window.normalize_action.isEnabled() is False
+
+
+def test_normalize_enabled_with_two_visible_spectra(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    _make_active_spectrum(main_window)
+    assert main_window.normalize_action.isEnabled() is True
+
+
+def test_normalize_action_has_shortcut(qapp):
+    main_window = MainWindow()
+    assert main_window.normalize_action.shortcut() == QKeySequence("Ctrl+N")
+
+
+def test_normalize_action_in_operations_menu(qapp):
+    main_window = MainWindow()
+    assert main_window.normalize_action in main_window.operations_menu.actions()
+
+
+def test_normalize_with_no_marks_shows_a_status_message(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    _make_active_spectrum(main_window)
+
+    main_window._normalize_spectra()
+
+    assert "mark" in main_window.statusBar().currentMessage().lower()
+
+
+def test_normalize_no_marks_message_survives_a_mouse_move(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    _make_active_spectrum(main_window)
+
+    main_window._normalize_spectra()
+
+    ax = main_window.axes
+    px, py = ax.transData.transform((10.0, 10.0))
+    event = MouseEvent("motion_notify_event", main_window.canvas, px, py)
+    main_window.canvas.callbacks.process("motion_notify_event", event)
+
+    assert "mark" in main_window.statusBar().currentMessage().lower()
+
+
+def test_normalize_single_marker_scales_by_bin_count(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.data = np.array([10, 20, 30], dtype=np.int64)
+    spectrum_b.data = np.array([5, 40, 15], dtype=np.int64)
+    main_window.fit_controller.state.pending_fit_click = 1
+
+    main_window._normalize_spectra()
+
+    assert list(spectrum_a.data) == [20, 40, 60]
+    assert list(spectrum_b.data) == [5, 40, 15]
+
+
+def test_normalize_region_marker_scales_by_area(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.data = np.array([10, 20, 30, 5], dtype=np.int64)
+    spectrum_b.data = np.array([5, 10, 15, 5], dtype=np.int64)
+    main_window.fit_controller.state.fit_region = (1, 2)
+
+    main_window._normalize_spectra()
+
+    assert list(spectrum_a.data) == [10, 20, 30, 5]
+    assert list(spectrum_b.data) == [10, 20, 30, 10]
+
+
+def test_normalize_skips_a_zero_reference_spectrum_with_a_message(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.data = np.array([10, 20], dtype=np.int64)
+    spectrum_b.data = np.array([0, 0], dtype=np.int64)
+    main_window.fit_controller.state.pending_fit_click = 1
+
+    main_window._normalize_spectra()
+
+    assert list(spectrum_b.data) == [0, 0]
+    message = main_window.statusBar().currentMessage()
+    assert os.path.basename(spectrum_b.path) in message
+
+
+def test_normalize_skipped_message_survives_a_mouse_move(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.data = np.array([10, 20], dtype=np.int64)
+    spectrum_b.data = np.array([0, 0], dtype=np.int64)
+    main_window.fit_controller.state.pending_fit_click = 1
+
+    main_window._normalize_spectra()
+
+    ax = main_window.axes
+    px, py = ax.transData.transform((10.0, 10.0))
+    event = MouseEvent("motion_notify_event", main_window.canvas, px, py)
+    main_window.canvas.callbacks.process("motion_notify_event", event)
+
+    message = main_window.statusBar().currentMessage()
+    assert os.path.basename(spectrum_b.path) in message
+
+
+def test_normalize_clears_fits_only_on_rescaled_spectra(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.data = np.array([10, 20], dtype=np.int64)
+    spectrum_b.data = np.array([5, 40], dtype=np.int64)
+    fake_fit_a = _FakeFit()
+    fake_fit_b = _FakeFit()
+    spectrum_a.fits.append(fake_fit_a)
+    spectrum_b.fits.append(fake_fit_b)
+    main_window.fit_controller.state.pending_fit_click = 1
+
+    main_window._normalize_spectra()
+
+    assert spectrum_a.fits == []
+    assert spectrum_b.fits == [fake_fit_b]
+
+
+def test_normalize_resets_in_progress_marks(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    _make_active_spectrum(main_window)
+    main_window.fit_controller.state.pending_fit_click = 1
+
+    main_window._normalize_spectra()
+
+    assert main_window.fit_controller.state.pending_fit_click is None
+
+
+def test_normalize_ignores_hidden_spectra(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_c = _make_active_spectrum(main_window)
+    spectrum_a.data = np.array([10, 20], dtype=np.int64)
+    spectrum_b.data = np.array([5, 40], dtype=np.int64)
+    spectrum_c.data = np.array([1, 1000], dtype=np.int64)
+    spectrum_c.visible = False
+    main_window.fit_controller.state.pending_fit_click = 1
+
+    main_window._normalize_spectra()
+
+    assert list(spectrum_c.data) == [1, 1000]

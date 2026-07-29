@@ -37,7 +37,7 @@ from histogram_io import ParseError, load_histogram
 from settings import Settings
 from spe_io import load_spe
 from spectrum import LoadedSpectrum, next_color
-from spectrum_operations import multiply, rebin
+from spectrum_operations import multiply, normalize_factors, rebin, reference_value
 from spk_io import load_spk
 from theme import qt_stylesheet, style_axes
 
@@ -353,6 +353,12 @@ class MainWindow(QMainWindow):
         self.rebin_action.triggered.connect(self._open_rebin_dialog)
         self.operations_menu.addAction(self.rebin_action)
 
+        self.normalize_action = QAction("Normalize Spectra", self)
+        self.normalize_action.setShortcut("Ctrl+N")
+        self.normalize_action.setEnabled(False)
+        self.normalize_action.triggered.connect(self._normalize_spectra)
+        self.operations_menu.addAction(self.normalize_action)
+
     def _apply_theme(self, theme):
         app = QApplication.instance()
         if app is not None:
@@ -486,6 +492,51 @@ class MainWindow(QMainWindow):
         self.fit_controller.reset_marks()
         spectrum.fits.clear()
         self._plot_data()
+
+    def _normalize_spectra(self):
+        # Both status messages below use fit_controller._show_status_message
+        # (not statusBar() directly) -- it arms _status_message_until, which
+        # _on_mouse_move checks before overwriting the status bar with the
+        # ordinary hover readout. Without this, either message gets wiped by
+        # the very next mouse move over the canvas -- and for the first
+        # message in particular, moving the mouse onto the canvas to make a
+        # mark is the literal next thing the message tells the user to do.
+        # (Same class of bug found and fixed for Rebin's warning in Task 10;
+        # applied here proactively rather than waiting to rediscover it.)
+        visible = [s for s in self.spectra if s.visible]
+        if len(visible) < 2:
+            return
+        state = self.fit_controller.state
+        if state.fit_region is not None:
+            region, channel = state.fit_region, None
+        elif state.pending_fit_click is not None:
+            region, channel = None, state.pending_fit_click
+        else:
+            self.fit_controller._show_status_message(
+                "Mark a channel or region (hold r, click) to normalize against.", 5000
+            )
+            return
+
+        values = [reference_value(s.data, channel=channel, region=region) for s in visible]
+        factors = normalize_factors(values)
+
+        skipped = []
+        for spectrum, factor in zip(visible, factors):
+            if factor is None:
+                skipped.append(os.path.basename(spectrum.path))
+                continue
+            if factor == 1.0:
+                continue
+            spectrum.data = multiply(spectrum.data, factor)
+            spectrum.fits.clear()
+
+        self.fit_controller.reset_marks()
+        self._plot_data(preserve_view=True)
+
+        if skipped:
+            self.fit_controller._show_status_message(
+                f"Skipped (zero reference value): {', '.join(skipped)}", 5000
+            )
 
     def _style_nav_toolbar_palette(self, theme):
         """Sets the navigation toolbar's actual QPalette -- not just this
@@ -859,6 +910,8 @@ class MainWindow(QMainWindow):
         active = next((s for s in self.spectra if s.active), None)
         self.multiply_action.setEnabled(active is not None)
         self.rebin_action.setEnabled(active is not None)
+        visible_count = sum(1 for s in self.spectra if s.visible)
+        self.normalize_action.setEnabled(visible_count >= 2)
 
     def _on_scroll(self, event):
         if event.inaxes != self.axes or event.xdata is None:
