@@ -66,6 +66,11 @@ def _put_tag_n(tag_base: int, value: int) -> bytes:
     extra = 0
     t >>= 8
     while t:
+        if extra == 3:
+            raise ValueError(
+                f"value {value} is too large to encode in LC2's tag format "
+                "(supports at most 4 extension bytes)"
+            )
         t -= 1
         extension.append(t & 0xFF)
         extra += 1

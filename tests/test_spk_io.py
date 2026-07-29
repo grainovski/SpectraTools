@@ -444,3 +444,43 @@ def test_lc2_compress_recompresses_demo_spk_to_the_identical_bytes():
     recompressed = _lc2_compress(decoded)
 
     assert recompressed == original_compressed
+
+
+def test_put_tag_n_succeeds_at_max_valid_value():
+    # LC2's tag byte is tag_base + 60 + extra, and the format only allows
+    # extra in [0,3] (1-4 extension bytes -- matching _lc2_uncompress's
+    # own "extra_bytes = v - 59" for v in [60,63]). The largest value
+    # representable with the maximum 4 extension bytes (all 0xFF) is
+    # 59 + sum((0xFF + 1) << (8*i) for i in range(4)) == 4311810363,
+    # independently confirmed by binary search against this function and
+    # cross-checked against _lc2_uncompress's own reconstruction formula.
+    assert _put_tag_n(0x80, 4311810363) == bytes([0xBF, 0xFF, 0xFF, 0xFF, 0xFF])
+
+
+def test_put_tag_n_rejects_value_one_past_max_valid():
+    # One more than the boundary above -- would require a 5th extension
+    # byte, which the LC2 tag format has no room to represent.
+    with pytest.raises(ValueError):
+        _put_tag_n(0x80, 4311810364)
+
+
+def test_lc2_compress_raises_value_error_instead_of_corrupting_or_crashing():
+    # Regression coverage for a real failure class: Python ints don't
+    # wrap like the C reference's 32-bit int, so nothing previously
+    # bounded how large a delta could be. Oversized deltas used to
+    # either silently corrupt (wrong tag byte, still "successfully"
+    # decoded to different values) or crash deep inside _put_tag_n with
+    # an unhelpful "bytes must be in range(0, 256)" ValueError. They must
+    # now raise a clear, purposeful ValueError instead.
+    with pytest.raises(ValueError):
+        _lc2_compress([2**40])
+    with pytest.raises(ValueError):
+        _lc2_compress([2**600])
+
+
+def test_lc2_compress_same_run_boundary_exactly_4_uses_run_tag():
+    assert _lc2_compress([0, 0, 0, 0]) == bytes([0xC0])
+
+
+def test_lc2_compress_same_run_boundary_exactly_3_falls_through_to_pack():
+    assert _lc2_compress([0, 0, 0]) == bytes([0x00])
