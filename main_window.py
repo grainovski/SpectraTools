@@ -461,7 +461,22 @@ class MainWindow(QMainWindow):
     def _apply_rebin(self, spectrum, factor):
         spectrum.data = rebin(spectrum.data, factor)
         if self._calibration is not None:
+            # Calibration is a single MainWindow-level object shared by
+            # every loaded spectrum (see __init__), but rebinning changes
+            # only THIS spectrum's channel count -- rescaling it here keeps
+            # the just-rebinned spectrum's keV axis correct at the cost of
+            # desyncing it for any OTHER already-loaded spectrum, which
+            # still has its original channel scale. Rescaling is the right
+            # default (not rescaling would immediately break the spectrum
+            # that was just rebinned), so this is flagged to the user via
+            # a status message rather than blocked or silently skipped.
             self._calibration = self._calibration.rescaled(factor)
+            if len(self.spectra) > 1:
+                self.statusBar().showMessage(
+                    "Rebinned. Calibration was rescaled for this spectrum -- "
+                    "it may no longer be correct for other loaded spectra.",
+                    8000,
+                )
         self.fit_controller.reset_marks()
         spectrum.fits.clear()
         self._plot_data()

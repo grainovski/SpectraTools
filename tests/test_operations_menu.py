@@ -298,6 +298,32 @@ def test_apply_rebin_does_not_preserve_the_current_view(qapp):
     assert main_window.axes.get_xlim() != (10.0, 50.0)
 
 
+def test_apply_rebin_warns_when_other_spectra_are_loaded(qapp):
+    from calibration import Calibration
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=1.0, b=2.0)
+
+    main_window._apply_rebin(spectrum_a, 2)
+
+    assert main_window._calibration.b == 4.0
+    message = main_window.statusBar().currentMessage()
+    assert "other loaded spectra" in message.lower()
+
+
+def test_apply_rebin_no_warning_with_only_one_spectrum_loaded(qapp):
+    from calibration import Calibration
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    main_window._calibration = Calibration(kind="linear", a=1.0, b=2.0)
+
+    main_window._apply_rebin(spectrum, 2)
+
+    message = main_window.statusBar().currentMessage()
+    assert "other loaded spectra" not in message.lower()
+
+
 def test_open_rebin_dialog_applies_the_entered_factor(qapp, monkeypatch):
     from factor_dialog import FactorDialog
     main_window = MainWindow()
@@ -314,6 +340,22 @@ def test_open_rebin_dialog_applies_the_entered_factor(qapp, monkeypatch):
     assert list(spectrum.data) == [3, 7]
 
 
+def test_open_rebin_dialog_does_nothing_when_cancelled(qapp, monkeypatch):
+    from factor_dialog import FactorDialog
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    original = spectrum.data.copy()
+
+    def fake_exec(self):
+        self.result_factor = None
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(FactorDialog, "exec", fake_exec)
+    main_window._open_rebin_dialog()
+
+    assert list(spectrum.data) == list(original)
+
+
 def test_open_rebin_dialog_does_nothing_with_no_active_spectrum(qapp):
     main_window = MainWindow()
     main_window._open_rebin_dialog()  # must not raise
@@ -322,6 +364,12 @@ def test_open_rebin_dialog_does_nothing_with_no_active_spectrum(qapp):
 def test_rebin_action_disabled_with_no_active_spectrum(qapp):
     main_window = MainWindow()
     assert main_window.rebin_action.isEnabled() is False
+
+
+def test_rebin_action_enabled_with_active_spectrum(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    assert main_window.rebin_action.isEnabled() is True
 
 
 def test_rebin_action_has_shortcut(qapp):
