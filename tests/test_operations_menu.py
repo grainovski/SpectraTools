@@ -542,6 +542,38 @@ def test_normalize_all_zero_reference_values_shows_a_message_instead_of_silently
     assert main_window.fit_controller.state.pending_fit_click is None
 
 
+def test_normalize_all_zero_reference_values_replots_after_resetting_marks(qapp, monkeypatch):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    main_window.spectra[0].data = np.zeros_like(main_window.spectra[0].data)
+    spectrum_b.data = np.zeros_like(spectrum_b.data)
+    # A real click (not just setting state.pending_fit_click directly) so an
+    # actual mark artist gets drawn on the canvas -- reset_marks() detaches
+    # it from the axes synchronously either way (artist.remove() doesn't
+    # need a redraw to update axes.lines), so checking _progress_artists or
+    # axes.lines alone can't tell a replot apart from no replot at all; both
+    # already read empty/removed the instant reset_marks() runs. What can't
+    # happen without an actual replot is nav_toolbar.push_current(), called
+    # unconditionally near the end of _plot_data() (see main_window.py) and
+    # nothing else on this path -- spying on it is the same proxy
+    # test_reset_marks_clears_progress_without_touching_fits_or_replotting
+    # (test_fit_mode_ui.py) uses for this exact "was a replot triggered"
+    # question.
+    _held_key_click(main_window, "r", 10)
+    assert main_window.fit_controller._progress_artists != []
+
+    replot_calls = []
+    monkeypatch.setattr(
+        main_window.nav_toolbar, "push_current", lambda: replot_calls.append(True)
+    )
+
+    main_window._normalize_spectra()
+
+    assert replot_calls != []
+    assert main_window.fit_controller._progress_artists == []
+
+
 def test_normalize_clears_fits_only_on_rescaled_spectra(qapp):
     main_window = MainWindow()
     spectrum_a = _make_active_spectrum(main_window)

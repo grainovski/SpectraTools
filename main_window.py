@@ -524,6 +524,7 @@ class MainWindow(QMainWindow):
                 5000,
             )
             self.fit_controller.reset_marks()
+            self._plot_data(preserve_view=True)
             return
         factors = normalize_factors(values)
 
