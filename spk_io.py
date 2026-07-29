@@ -73,6 +73,65 @@ def _put_tag_n(tag_base: int, value: int) -> bytes:
     return bytes([tag_base + 60 + extra]) + bytes(extension)
 
 
+def _fits_in_bits(value: int, bits: int) -> bool:
+    return (value >> bits) == 0
+
+
+def _lc2_compress(values) -> bytes:
+    """Ported from libmfile's lc2_compress (lc_c2.c:63-126). `values` is
+    a sequence of ints (one spectrum's channel counts). Returns the
+    LC2-compressed bytes, choosing the most compact of: a run of the
+    previous value (>=4 elements), a 3-value pack (2 bits each,
+    anchor-relative to the same running `last`), a 2-value pack (3 bits
+    each), or a single value (with extension bytes for large deltas)."""
+    out = bytearray()
+    last = 0
+    n = len(values)
+    idx = 0
+
+    while idx < n:
+        remaining = n - idx
+        d = values[idx] - last
+        i = 1
+        if 0 <= d < 2:
+            while i < remaining and values[idx + i] == last:
+                i += 1
+        same = i - 1
+
+        if same >= 3:
+            out += _put_tag_n(0xC0, ((same - 3) << 1) + d)
+            idx += i
+            continue
+
+        s0 = values[idx]
+        a = _zigzag_encode(s0 - last)
+
+        if _fits_in_bits(a, 3) and remaining >= 2:
+            s1 = values[idx + 1]
+            b = _zigzag_encode(s1 - last)
+
+            if _fits_in_bits(a | b, 2) and remaining >= 3:
+                s2 = values[idx + 2]
+                c = _zigzag_encode(s2 - last)
+                if _fits_in_bits(c, 2):
+                    out.append(a + (b << 2) + (c << 4))
+                    idx += 3
+                    last = s2
+                    continue
+
+            if _fits_in_bits(b, 3):
+                out.append(0x40 + a + (b << 3))
+                idx += 2
+                last = s1
+                continue
+
+        out += _put_tag_n(0x80, a)
+        idx += 1
+        last = s0
+
+    return bytes(out)
+
+
 def _lc1_uncompress(data: bytes, num: int, path: str) -> list:
     out = []
     last = 0

@@ -5,7 +5,8 @@ import pytest
 
 from histogram_io import ParseError
 from spk_io import (
-    LC_HEADER_SIZE, LC_MAGIC, MAT_COLMAX, _put_tag_n, _zigzag_decode, _zigzag_encode, load_spk,
+    LC_HEADER_SIZE, LC_MAGIC, MAT_COLMAX, _lc2_compress, _lc2_uncompress, _put_tag_n,
+    _zigzag_decode, _zigzag_encode, load_spk,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -387,3 +388,59 @@ def test_put_tag_n_extended_encoding_matches_known_fixture():
 
 def test_put_tag_n_same_diff_base():
     assert _put_tag_n(0xC0, 7) == bytes([0xC7])
+
+
+def test_lc2_compress_3value_tag():
+    assert _lc2_compress([0, -1, 1]) == bytes([0x24])
+
+
+def test_lc2_compress_2value_tag():
+    assert _lc2_compress([-2, 1]) == bytes([0x53])
+
+
+def test_lc2_compress_1value_tag():
+    assert _lc2_compress([-3]) == bytes([0x85])
+
+
+def test_lc2_compress_same_run_tag():
+    assert _lc2_compress([1, 0, 0, 0, 0, 0, 0]) == bytes([0xC7])
+
+
+def test_lc2_compress_extended_single_value_tag():
+    assert _lc2_compress([158]) == bytes([0xBD, 0x00, 0x00])
+
+
+def test_lc2_compress_empty_input():
+    assert _lc2_compress([]) == b""
+
+
+def test_lc2_compress_round_trips_through_uncompress_for_varied_data():
+    samples = [
+        [0] * 20,
+        list(range(50)),
+        [5, 5, 5, 5, 5, 5, 5, 5, -100, 200, 0, 0, 0],
+        [1000, -1000, 500, -500, 0, 0, 0, 0, 0, 1],
+        [7],
+    ]
+    for values in samples:
+        compressed = _lc2_compress(values)
+        decoded = _lc2_uncompress(compressed, len(values), "test")
+        assert decoded == values
+
+
+def test_lc2_compress_recompresses_demo_spk_to_the_identical_bytes():
+    # The strongest possible check: decode demo.spk's real compressed
+    # payload, recompress the decoded values, and confirm the output
+    # matches the original file's bytes exactly -- not just that it
+    # round-trips through our own decoder.
+    with open(FIXTURES / "demo.spk", "rb") as f:
+        raw = f.read()
+    fields = struct.unpack_from("<11I", raw, 0)
+    _magic, _version, _levels, _lines, columns, poslentablepos = fields[:6]
+    pos, length = struct.unpack_from("<2I", raw, poslentablepos)
+    original_compressed = raw[pos:pos + length]
+
+    decoded = _lc2_uncompress(original_compressed, columns, "demo.spk")
+    recompressed = _lc2_compress(decoded)
+
+    assert recompressed == original_compressed
