@@ -33,12 +33,12 @@ from PySide6.QtWidgets import (
 from calibration_dialog import CalibrationDialog
 from factor_dialog import FactorDialog
 from fit_mode import FitModeController
-from histogram_io import ParseError, load_histogram
+from histogram_io import ParseError, load_histogram, save_histogram
 from settings import Settings
-from spe_io import load_spe
+from spe_io import load_spe, save_spe
 from spectrum import LoadedSpectrum, next_color
 from spectrum_operations import multiply, normalize_factors, rebin, reference_value
-from spk_io import load_spk
+from spk_io import load_spk, save_spk
 from theme import qt_stylesheet, style_axes
 
 ZOOM_FACTOR = 1.5
@@ -299,6 +299,12 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(self._open_file_dialog)
         self.file_menu.addAction(open_action)
 
+        self.save_spectrum_action = QAction("Save Spectrum...", self)
+        self.save_spectrum_action.setShortcut("Ctrl+S")
+        self.save_spectrum_action.setEnabled(False)
+        self.save_spectrum_action.triggered.connect(self._open_save_spectrum_dialog)
+        self.file_menu.addAction(self.save_spectrum_action)
+
         self.recent_menu = self.file_menu.addMenu("Recent Files")
 
         self.file_menu.addSeparator()
@@ -545,6 +551,37 @@ class MainWindow(QMainWindow):
             self.fit_controller._show_status_message(
                 f"Skipped (zero reference value): {', '.join(skipped)}", 5000
             )
+
+    def _open_save_spectrum_dialog(self):
+        active = next((s for s in self.spectra if s.active), None)
+        if active is None:
+            return
+        path, chosen_filter = QFileDialog.getSaveFileName(
+            self, "Save Spectrum", os.path.dirname(active.path),
+            "SPE files (*.spe);;SPK files (*.spk);;Text files (*.txt);;All files (*)",
+        )
+        if not path:
+            return
+        self._write_spectrum(active, path, chosen_filter)
+
+    def _write_spectrum(self, spectrum, path, chosen_filter):
+        lower = path.lower()
+        if lower.endswith(".spe"):
+            writer = save_spe
+        elif lower.endswith(".spk"):
+            writer = save_spk
+        elif lower.endswith(".txt"):
+            writer = save_histogram
+        elif chosen_filter.startswith("SPE"):
+            writer = save_spe
+        elif chosen_filter.startswith("SPK"):
+            writer = save_spk
+        else:
+            writer = save_histogram
+        try:
+            writer(path, spectrum.data)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Save Spectrum", f"Could not save: {exc}")
 
     def _style_nav_toolbar_palette(self, theme):
         """Sets the navigation toolbar's actual QPalette -- not just this
@@ -918,6 +955,7 @@ class MainWindow(QMainWindow):
         active = next((s for s in self.spectra if s.active), None)
         self.multiply_action.setEnabled(active is not None)
         self.rebin_action.setEnabled(active is not None)
+        self.save_spectrum_action.setEnabled(active is not None)
         visible_count = sum(1 for s in self.spectra if s.visible)
         self.normalize_action.setEnabled(visible_count >= 2)
 

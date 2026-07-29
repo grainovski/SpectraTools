@@ -617,3 +617,89 @@ def test_normalize_ignores_hidden_spectra(qapp):
     main_window._normalize_spectra()
 
     assert list(spectrum_c.data) == [1, 1000]
+
+
+def test_save_spectrum_action_disabled_with_no_active_spectrum(qapp):
+    main_window = MainWindow()
+    assert main_window.save_spectrum_action.isEnabled() is False
+
+
+def test_save_spectrum_action_enabled_with_active_spectrum(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    assert main_window.save_spectrum_action.isEnabled() is True
+
+
+def test_save_spectrum_action_has_shortcut(qapp):
+    main_window = MainWindow()
+    assert main_window.save_spectrum_action.shortcut() == QKeySequence("Ctrl+S")
+
+
+def test_save_spectrum_action_in_file_menu_before_recent_files(qapp):
+    main_window = MainWindow()
+    actions = main_window.file_menu.actions()
+    assert main_window.save_spectrum_action in actions
+    save_index = actions.index(main_window.save_spectrum_action)
+    recent_index = actions.index(main_window.recent_menu.menuAction())
+    assert save_index < recent_index
+
+
+def test_write_spectrum_extension_takes_priority_over_chosen_filter(qapp, tmp_path):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    txt_path = tmp_path / "out.txt"
+    main_window._write_spectrum(spectrum, str(txt_path), "SPE files (*.spe)")
+
+    from histogram_io import load_histogram
+    assert list(load_histogram(str(txt_path))[:len(spectrum.data)]) == list(spectrum.data)
+
+
+def test_write_spectrum_falls_back_to_the_chosen_filter_with_no_recognized_extension(qapp, tmp_path):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    path = tmp_path / "out"
+    main_window._write_spectrum(spectrum, str(path), "SPK files (*.spk)")
+
+    from spk_io import load_spk
+    assert list(load_spk(str(path))) == list(spectrum.data)
+
+
+def test_write_spectrum_defaults_to_text_with_no_extension_or_recognized_filter(qapp, tmp_path):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    path = tmp_path / "out"
+    main_window._write_spectrum(spectrum, str(path), "All files (*)")
+
+    from histogram_io import load_histogram
+    assert list(load_histogram(str(path))[:len(spectrum.data)]) == list(spectrum.data)
+
+
+def test_open_save_spectrum_dialog_writes_the_chosen_file(qapp, monkeypatch, tmp_path):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    target = tmp_path / "chosen.spk"
+
+    monkeypatch.setattr(
+        "main_window.QFileDialog.getSaveFileName",
+        lambda *a, **k: (str(target), "SPK files (*.spk)"),
+    )
+    main_window._open_save_spectrum_dialog()
+
+    from spk_io import load_spk
+    assert list(load_spk(str(target))) == list(spectrum.data)
+
+
+def test_open_save_spectrum_dialog_does_nothing_when_cancelled(qapp, monkeypatch, tmp_path):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    monkeypatch.setattr("main_window.QFileDialog.getSaveFileName", lambda *a, **k: ("", ""))
+    main_window._open_save_spectrum_dialog()  # must not raise
+
+
+def test_open_save_spectrum_dialog_does_nothing_with_no_active_spectrum(qapp):
+    main_window = MainWindow()
+    main_window._open_save_spectrum_dialog()  # must not raise
