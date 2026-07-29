@@ -1,10 +1,11 @@
 import struct
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from histogram_io import ParseError
-from spe_io import load_spe
+from spe_io import load_spe, save_spe
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -69,3 +70,33 @@ def test_raises_parse_error_on_truncated_spe(tmp_path):
     file_path.write_bytes(good_bytes[:-4])  # cut off the final trailing marker
     with pytest.raises(ParseError):
         load_spe(str(file_path))
+
+
+def test_save_spe_round_trips_through_load_spe(tmp_path):
+    data = np.array([4, 0, 1, 0, 1, 7, 200], dtype=np.int64)
+    path = tmp_path / "out.spe"
+
+    save_spe(str(path), data)
+    result = load_spe(str(path))
+
+    assert list(result) == list(data)
+
+
+def test_save_spe_round_trips_large_values(tmp_path):
+    data = np.array([0, 1000000, 41580], dtype=np.int64)
+    path = tmp_path / "out.spe"
+
+    save_spe(str(path), data)
+    result = load_spe(str(path))
+
+    assert list(result) == list(data)
+
+
+def test_save_spe_round_trips_all_zero_spectrum(tmp_path):
+    data = np.zeros(10, dtype=np.int64)
+    path = tmp_path / "out.spe"
+
+    save_spe(str(path), data)
+    result = load_spe(str(path))
+
+    assert list(result) == [0] * 10

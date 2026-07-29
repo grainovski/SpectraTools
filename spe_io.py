@@ -59,3 +59,28 @@ def load_spe(path: str) -> np.ndarray:
     dtype = np.dtype(endian + "f4")
     channels = np.frombuffer(data, dtype=dtype, count=idim1, offset=data_start)
     return np.round(channels).astype(np.int64)
+
+
+def save_spe(path: str, data) -> None:
+    """Writes `data` as a little-endian Fortran-unformatted-record .spe
+    file -- the exact inverse of load_spe's parsing. Not a native TV
+    format (see design spec); idim2/ired1/ired2 are placeholder values,
+    matched by load_spe's own disregard of them (name is also never
+    read back)."""
+    idim1 = len(data)
+    record1_payload = struct.pack("<8s4i", b"SPECTRUM", idim1, 1, 0, 0)
+    record1 = (
+        struct.pack("<i", RECORD1_PAYLOAD_SIZE) + record1_payload
+        + struct.pack("<i", RECORD1_PAYLOAD_SIZE)
+    )
+
+    payload_size = idim1 * 4
+    values = [float(v) for v in data]
+    record2_payload = struct.pack(f"<{idim1}f", *values)
+    record2 = (
+        struct.pack("<i", payload_size) + record2_payload + struct.pack("<i", payload_size)
+    )
+
+    with open(path, "wb") as f:
+        f.write(record1)
+        f.write(record2)
