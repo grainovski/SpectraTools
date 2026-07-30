@@ -305,6 +305,12 @@ class MainWindow(QMainWindow):
         self.save_spectrum_action.triggered.connect(self._open_save_spectrum_dialog)
         self.file_menu.addAction(self.save_spectrum_action)
 
+        self.close_spectrum_action = QAction("Close Spectrum", self)
+        self.close_spectrum_action.setShortcut("Ctrl+W")
+        self.close_spectrum_action.setEnabled(False)
+        self.close_spectrum_action.triggered.connect(self._close_active_spectrum)
+        self.file_menu.addAction(self.close_spectrum_action)
+
         self.recent_menu = self.file_menu.addMenu("Recent Files")
 
         self.file_menu.addSeparator()
@@ -854,12 +860,21 @@ class MainWindow(QMainWindow):
         chosen = menu.exec(self.spectrum_list.viewport().mapToGlobal(position))
         if chosen == remove_action:
             path = item.data(Qt.ItemDataRole.UserRole)
-            removed_was_active = any(s.path == path and s.active for s in self.spectra)
-            self.spectra = [s for s in self.spectra if s.path != path]
-            if removed_was_active and self.spectra:
-                self.spectra[0].active = True
-            self._update_spectrum_list()
-            self._plot_data()
+            self._remove_spectrum(path)
+
+    def _remove_spectrum(self, path):
+        removed_was_active = any(s.path == path and s.active for s in self.spectra)
+        self.spectra = [s for s in self.spectra if s.path != path]
+        if removed_was_active and self.spectra:
+            self.spectra[0].active = True
+        self._update_spectrum_list()
+        self._plot_data()
+
+    def _close_active_spectrum(self):
+        active = next((s for s in self.spectra if s.active), None)
+        if active is None:
+            return
+        self._remove_spectrum(active.path)
 
     def _build_zoom_buttons(self):
         self.nav_toolbar.addSeparator()
@@ -962,6 +977,7 @@ class MainWindow(QMainWindow):
         self.multiply_action.setEnabled(active is not None)
         self.rebin_action.setEnabled(active is not None)
         self.save_spectrum_action.setEnabled(active is not None)
+        self.close_spectrum_action.setEnabled(active is not None)
         visible_count = sum(1 for s in self.spectra if s.visible)
         self.normalize_action.setEnabled(visible_count >= 2)
 

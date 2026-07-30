@@ -763,3 +763,83 @@ def test_open_save_spectrum_dialog_does_nothing_when_cancelled(qapp, monkeypatch
 def test_open_save_spectrum_dialog_does_nothing_with_no_active_spectrum(qapp):
     main_window = MainWindow()
     main_window._open_save_spectrum_dialog()  # must not raise
+
+
+def test_remove_spectrum_removes_only_the_matching_path(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.active = False
+    spectrum_b.active = True
+
+    main_window._remove_spectrum(spectrum_a.path)
+
+    assert main_window.spectra == [spectrum_b]
+    assert spectrum_b.active is True
+
+
+def test_remove_spectrum_promotes_another_to_active_when_the_active_one_is_removed(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.active = True
+    spectrum_b.active = False
+
+    main_window._remove_spectrum(spectrum_a.path)
+
+    assert main_window.spectra == [spectrum_b]
+    assert spectrum_b.active is True
+
+
+def test_remove_spectrum_leaves_the_program_empty_when_it_was_the_only_one(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    main_window._remove_spectrum(spectrum.path)
+
+    assert main_window.spectra == []
+
+
+def test_close_active_spectrum_removes_the_active_one(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.active = False
+    spectrum_b.active = True
+
+    main_window._close_active_spectrum()
+
+    assert main_window.spectra == [spectrum_a]
+    assert spectrum_a.active is True
+
+
+def test_close_active_spectrum_does_nothing_with_no_spectra_loaded(qapp):
+    main_window = MainWindow()
+    main_window._close_active_spectrum()  # must not raise
+    assert main_window.spectra == []
+
+
+def test_close_spectrum_action_disabled_with_no_active_spectrum(qapp):
+    main_window = MainWindow()
+    assert main_window.close_spectrum_action.isEnabled() is False
+
+
+def test_close_spectrum_action_enabled_with_active_spectrum(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    assert main_window.close_spectrum_action.isEnabled() is True
+
+
+def test_close_spectrum_action_has_shortcut(qapp):
+    main_window = MainWindow()
+    assert main_window.close_spectrum_action.shortcut() == QKeySequence("Ctrl+W")
+
+
+def test_close_spectrum_action_in_file_menu_between_save_and_recent_files(qapp):
+    main_window = MainWindow()
+    actions = main_window.file_menu.actions()
+    assert main_window.close_spectrum_action in actions
+    save_index = actions.index(main_window.save_spectrum_action)
+    close_index = actions.index(main_window.close_spectrum_action)
+    recent_index = actions.index(main_window.recent_menu.menuAction())
+    assert save_index < close_index < recent_index
