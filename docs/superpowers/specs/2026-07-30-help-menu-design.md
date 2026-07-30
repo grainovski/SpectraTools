@@ -100,7 +100,7 @@ Written sections, each cross-referencing one of the four figures from `help_figu
 1. Why gamma-spectroscopy peak fits use a tailed Gaussian (brief, physical motivation — not a textbook chapter)
 2. The Hypermet shape function this app actually uses (the formula from `peak_fit.py`, in words and in the same notation as the source), illustrated by the anatomy-of-a-fit figure
 3. Parameter meaning table: position, FWHM (shared across a multiplet), amplitude, tail fraction `r`, tail β, background slope/intercept — cross-referenced to the tail-effect and multiplet figures
-4. Gross area vs. net area — what the Fit Results panel's two area columns mean, and how their uncertainties are derived
+4. Full vs. net area — what the Fit Results panel's visible area number and its hover-tooltip breakdown mean (per-peak and region-level), and how their uncertainties are derived. (Corrected during implementation: verified against fit_mode.py that the table shows one area value per peak, not two columns — the second value is tooltip-only.)
 5. Integration vs. fitting — what `Ctrl+I` computes and when it's the right tool instead of a full fit
 6. Calibration math — linear/quadratic, and how it changes displayed units (channels → keV) for position and FWHM, illustrated by the calibration-curve figure
 
