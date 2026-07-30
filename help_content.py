@@ -220,6 +220,12 @@ current view, and <kbd>Ctrl+0</kbd> resets to the full spectrum.</p>
 
 
 def build_knowledge_database_html():
+    """The fit model, parameter meanings, and calibration math, each
+    cross-referenced to one of help_figures.py's four annotated figures
+    -- content verified against peak_fit.py/fit_mode.py's actual
+    behavior through two rounds of correction after the first draft
+    shipped wrong claims about area terminology and multiplet parameter
+    sharing (see commits f9c73cd and ce57765)."""
     anatomy_src = _embed_png(anatomy_of_a_fit_figure())
     tail_src = _embed_png(tail_effect_figure())
     multiplet_src = _embed_png(multiplet_figure())

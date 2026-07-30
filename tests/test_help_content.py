@@ -1,8 +1,10 @@
+import re
 from html.parser import HTMLParser
 
-from help_content import build_howto_html
+from help_content import build_howto_html, build_knowledge_database_html
 
 _VOID_ELEMENTS = {"meta", "br", "img", "hr", "link", "input"}
+_BASE64_IMAGE = re.compile(r"data:image/png;base64,[A-Za-z0-9+/=]+")
 
 
 class _TagBalanceChecker(HTMLParser):
@@ -22,6 +24,15 @@ class _TagBalanceChecker(HTMLParser):
         assert self.stack, f"unexpected closing </{tag}> with nothing open"
         assert self.stack[-1] == tag, f"expected </{self.stack[-1]}>, got </{tag}>"
         self.stack.pop()
+
+
+def _strip_base64_images(html):
+    """Removes embedded PNG data URIs before doing substring checks on
+    prose content -- a base64 blob is effectively random text, so a
+    short/common search term (e.g. "net") can coincidentally appear
+    inside one by chance, letting a check pass even if every real prose
+    occurrence of that term was deleted."""
+    return _BASE64_IMAGE.sub("", html)
 
 
 def test_howto_html_contains_every_shortcut():
@@ -72,11 +83,8 @@ def test_howto_html_has_balanced_tags():
     assert checker.stack == [], f"unclosed tags at EOF: {checker.stack}"
 
 
-from help_content import build_knowledge_database_html
-
-
 def test_knowledge_database_html_contains_parameter_names():
-    html = build_knowledge_database_html()
+    html = _strip_base64_images(build_knowledge_database_html())
     for term in [
         "position", "FWHM", "amplitude", "tail fraction",
         "tail beta", "background slope", "Volume", "full", "net",
@@ -99,3 +107,9 @@ def test_knowledge_database_html_is_a_complete_html_document():
     html = build_knowledge_database_html()
     assert html.strip().startswith("<!doctype html>")
     assert "<title>SpectraTools -- Knowledge Database</title>" in html
+
+
+def test_knowledge_database_html_has_balanced_tags():
+    checker = _TagBalanceChecker()
+    checker.feed(build_knowledge_database_html())
+    assert checker.stack == [], f"unclosed tags at EOF: {checker.stack}"
