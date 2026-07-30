@@ -79,7 +79,7 @@ def test_knowledge_database_html_contains_parameter_names():
     html = build_knowledge_database_html()
     for term in [
         "position", "FWHM", "amplitude", "tail fraction",
-        "tail beta", "background slope", "full", "net",
+        "tail beta", "background slope", "Volume", "full", "net",
     ]:
         assert term in html, f"missing term {term!r}"
 

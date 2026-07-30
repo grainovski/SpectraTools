@@ -289,39 +289,45 @@ the two background regions (Figure 1).</td></tr>
 <img src="{multiplet_src}" alt="Multiplet fit">
 <figcaption>Figure 3. Three peaks fit together; two of them overlap
 closely enough that fitting each independently wouldn't separate them
-reliably, so all three share one FWHM.</figcaption>
+reliably, so all three share one FWHM, tail fraction, and tail
+beta.</figcaption>
 </figure>
 <p>Mark more than one peak (<kbd>P</kbd>) within the same fit region and
 SpectraTools fits them together as a multiplet: every peak gets its own
-position, amplitude, tail fraction, and tail beta, but all of them share
-a single FWHM. This is what makes it possible to separate overlapping
-peaks that a single-peak fit couldn't resolve.</p>
+position and amplitude, but they all share one FWHM, tail fraction, and
+tail beta rather than each peak fitting its own. This is what makes it
+possible to separate overlapping peaks that a single-peak fit couldn't
+resolve.</p>
 
-<h2>Area: full vs. net</h2>
-<p>The Fit Results panel's Area column shows one number per peak: its
-<b>net</b> area (background excluded) -- the same number you'd get by
-integrating just the fitted peak shape on its own. Hover over a row for
-the full breakdown: that same peak's <b>full</b> area (net area plus the
-background level at the peak's own center, times its FWHM), plus
-region-level full/net totals for the whole fit -- the region's full
-total sums the entire fitted curve (background and every peak together)
-across the whole fit region, and its net total sums just the peaks' own
-net areas. All of these come with propagated uncertainties. Net area is
-almost always the number you actually want (for example, when computing
-activity or a branching ratio).</p>
+<h2>Volume: full vs. net</h2>
+<p>The Fit Results panel's Volume column shows one number per peak: its
+<b>net</b> volume -- the analytic integral of just that peak's Gaussian
+core (background excluded). If the fit has a tail (tail fraction r > 0),
+the tail's own contribution isn't included in this number -- a known
+simplification, flagged directly in the panel's own tooltip as "volume
+excludes tail." Hover over a row for the full breakdown: that same
+peak's <b>full</b> volume (net volume plus the background level at the
+peak's own center, times its FWHM), plus region-level full/net totals
+for the whole fit -- the region's full total is the sum of the raw,
+observed counts across the whole fit region (not the fitted model
+curve), and its net total sums just the peaks' own net volumes. All of
+these come with propagated uncertainties. Net volume is almost always
+the number you actually want (for example, when computing activity or
+a branching ratio).</p>
 
 <h2>Integration vs. fitting</h2>
 <p><kbd>Ctrl+I</kbd> (Integrate) computes a full/background/net split
 directly from the data in the marked regions -- centroid, FWHM,
-skewness, and area for each -- without fitting a peak shape at all.
-(Integration's own tooltip labels this split "Gross"/"Background"/"Net"
-rather than "full"/"net" -- the same background-included-vs-excluded
-idea as above, just worded differently between the two features.)
-Integration is faster, doesn't depend on an optimizer converging, and
-works on peaks too irregular or blended to fit cleanly. The trade-off
-is that it can't separate overlapping peaks the way a multiplet fit
-can, and it reports one combined result for the whole region rather
-than per-peak parameters.</p>
+skewness, and area for each -- without fitting a peak shape at all. It
+still reports into the same Volume column as a committed fit, but its
+own hover tooltip labels the split "Gross"/"Background"/"Net" rather
+than "full"/"net" -- the same background-included-vs-excluded idea as
+above, just worded differently between the two features. Integration is
+faster, doesn't depend on an optimizer converging, and works on peaks
+too irregular or blended to fit cleanly. The trade-off is that it can't
+separate overlapping peaks the way a multiplet fit can, and it reports
+one combined result for the whole region rather than per-peak
+parameters.</p>
 
 <h2>Calibration</h2>
 <figure>
