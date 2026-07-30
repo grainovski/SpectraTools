@@ -5,6 +5,10 @@ Database's figures (help_figures.py) are embedded as base64 data URIs, so
 a generated page has zero dependencies once written to disk."""
 
 import base64
+import tempfile
+
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
 
 from help_figures import (
     anatomy_of_a_fit_figure,
@@ -380,3 +384,18 @@ def build_about_html():
 </div>
 """
     return _page("About SpectraTools", body)
+
+
+def open_help_page(html):
+    """Writes html to a fresh temp file and opens it in the system's
+    default browser. `delete=False` is required -- the file must still
+    exist after this function returns for the browser to open it --
+    and cleanup is left to the OS temp directory rather than this code,
+    matching this feature's no-caching, no-persistence design."""
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".html", prefix="spectratools_help_",
+        encoding="utf-8", delete=False,
+    ) as f:
+        f.write(html)
+        path = f.name
+    QDesktopServices.openUrl(QUrl.fromLocalFile(path))

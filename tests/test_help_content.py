@@ -1,9 +1,17 @@
+import os
 import re
 import sys
 import types
 from html.parser import HTMLParser
 
-from help_content import build_about_html, build_howto_html, build_knowledge_database_html
+from PySide6.QtGui import QDesktopServices
+
+from help_content import (
+    build_about_html,
+    build_howto_html,
+    build_knowledge_database_html,
+    open_help_page,
+)
 
 _VOID_ELEMENTS = {"meta", "br", "img", "hr", "link", "input"}
 _BASE64_IMAGE = re.compile(r"data:image/png;base64,[A-Za-z0-9+/=]+")
@@ -150,3 +158,16 @@ def test_about_html_is_a_complete_html_document():
     html = build_about_html()
     assert html.strip().startswith("<!doctype html>")
     assert "<title>About SpectraTools</title>" in html
+
+
+def test_open_help_page_writes_a_temp_file_and_opens_it(qapp, monkeypatch):
+    opened = []
+    monkeypatch.setattr(
+        QDesktopServices, "openUrl", staticmethod(lambda url: opened.append(url))
+    )
+    open_help_page("<html><body>hello</body></html>")
+    assert len(opened) == 1
+    path = opened[0].toLocalFile()
+    assert os.path.exists(path)
+    with open(path, encoding="utf-8") as f:
+        assert f.read() == "<html><body>hello</body></html>"
