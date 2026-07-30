@@ -194,7 +194,8 @@ two most recent stick.</li>
 fit region (the span that gets fit).</li>
 <li>Hold <kbd>P</kbd> and click once per peak, at each peak's
 approximate position -- mark more than one for a multiplet (peaks that
-share one FWHM).</li>
+share one FWHM by default; see the Knowledge Database page for the
+"Independent widths" option).</li>
 <li>Press <kbd>Ctrl+F</kbd> to fit. Results appear in the Fit Results
 panel; per-parameter values (with uncertainties) appear in the Fit
 Parameters panel.</li>
