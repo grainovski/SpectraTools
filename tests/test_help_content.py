@@ -70,3 +70,32 @@ def test_howto_html_has_balanced_tags():
     checker = _TagBalanceChecker()
     checker.feed(build_howto_html())
     assert checker.stack == [], f"unclosed tags at EOF: {checker.stack}"
+
+
+from help_content import build_knowledge_database_html
+
+
+def test_knowledge_database_html_contains_parameter_names():
+    html = build_knowledge_database_html()
+    for term in [
+        "position", "FWHM", "amplitude", "tail fraction",
+        "tail beta", "background slope", "full", "net",
+    ]:
+        assert term in html, f"missing term {term!r}"
+
+
+def test_knowledge_database_html_embeds_four_figures():
+    html = build_knowledge_database_html()
+    assert html.count("data:image/png;base64,") == 4
+
+
+def test_knowledge_database_html_has_no_external_links():
+    html = build_knowledge_database_html()
+    assert "http://" not in html
+    assert "https://" not in html
+
+
+def test_knowledge_database_html_is_a_complete_html_document():
+    html = build_knowledge_database_html()
+    assert html.strip().startswith("<!doctype html>")
+    assert "<title>SpectraTools -- Knowledge Database</title>" in html

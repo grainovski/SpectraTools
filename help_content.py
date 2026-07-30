@@ -4,6 +4,21 @@ default web browser. No external files, no external links -- Knowledge
 Database's figures (help_figures.py) are embedded as base64 data URIs, so
 a generated page has zero dependencies once written to disk."""
 
+import base64
+
+from help_figures import (
+    anatomy_of_a_fit_figure,
+    calibration_curve_figure,
+    multiplet_figure,
+    tail_effect_figure,
+)
+
+
+def _embed_png(png_bytes):
+    encoded = base64.b64encode(png_bytes).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
 _PAGE_CSS = """
 body {
     font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -202,3 +217,126 @@ show or hide the Spectra, Fit Results, and Fit Parameters panels.
 current view, and <kbd>Ctrl+0</kbd> resets to the full spectrum.</p>
 """
     return _page("SpectraTools -- HowTo", body)
+
+
+def build_knowledge_database_html():
+    anatomy_src = _embed_png(anatomy_of_a_fit_figure())
+    tail_src = _embed_png(tail_effect_figure())
+    multiplet_src = _embed_png(multiplet_figure())
+    calibration_src = _embed_png(calibration_curve_figure())
+
+    body = f"""
+<h1>SpectraTools -- Knowledge Database</h1>
+<p>This page explains how SpectraTools actually performs a fit, what
+each fit parameter means, and how calibration and integration work
+underneath the HowTo page's step-by-step instructions.</p>
+
+<h2>Why a tailed Gaussian?</h2>
+<p>A germanium or scintillator detector doesn't record a perfectly sharp
+line at a gamma ray's true energy -- charge-collection losses and
+incomplete charge trapping skew a fraction of events to slightly lower
+apparent energy. The result is a peak that's very close to Gaussian
+near its center, but with a low-energy shoulder a pure Gaussian can't
+reproduce. SpectraTools fits this shape directly rather than ignoring
+the shoulder or fitting it as a separate background component.</p>
+
+<h2>The fit shape</h2>
+<figure>
+<img src="{anatomy_src}" alt="Anatomy of a fit">
+<figcaption>Figure 1. A single peak: the two background regions (B), the
+fit region (R), the peak position (P), and the resulting fitted
+curve.</figcaption>
+</figure>
+<p>Fitting proceeds in the same order you mark it in: the two background
+regions fix a straight line (slope and intercept) under the peak; the
+fit region defines the span actually fit; each peak mark seeds one
+peak's starting position. The peak shape itself, following the
+<b>Hypermet</b> function this app ports from the <code>gf3</code>
+peak-fitting tool, is:</p>
+<p style="text-align:center"><code>(1&minus;r)&middot;exp(&minus;w&sup2;) + r&middot;exp(dx/&beta;)&middot;erfc(w+y)/erfc(y)</code></p>
+<p>where <code>dx = channel &minus; position</code>,
+<code>w = dx / (&sigma;&radic;2)</code>, and
+<code>y = &sigma; / (&beta;&radic;2)</code> -- a Gaussian core
+(the <code>(1&minus;r)&middot;exp(&minus;w&sup2;)</code> term) blended
+with an exponential tail on the low-energy side (the
+<code>r&middot;...</code> term).</p>
+
+<h2>What the tail parameters mean</h2>
+<figure>
+<img src="{tail_src}" alt="The tail effect">
+<figcaption>Figure 2. The same peak with tail fraction r = 0 (pure
+Gaussian) vs. r = 0.25 (a clearly visible low-energy tail).</figcaption>
+</figure>
+<table>
+<tr><th>Parameter</th><th>Meaning</th></tr>
+<tr><td>position</td><td>The peak's centroid channel (or keV, with
+calibration active).</td></tr>
+<tr><td>FWHM (&sigma;)</td><td>The Gaussian core's width. Every peak in
+the same multiplet shares one FWHM -- see Figure 3.</td></tr>
+<tr><td>amplitude</td><td>The peak's height above background.</td></tr>
+<tr><td>tail fraction (r)</td><td>What fraction of the peak's area sits
+in the tail rather than the Gaussian core. r = 0 is a pure
+Gaussian.</td></tr>
+<tr><td>tail beta (&beta;)</td><td>How far the tail extends below the
+peak position -- a larger &beta; stretches the tail further to lower
+energy.</td></tr>
+<tr><td>background slope / intercept</td><td>The straight line fixed by
+the two background regions (Figure 1).</td></tr>
+</table>
+
+<h2>Multiplets</h2>
+<figure>
+<img src="{multiplet_src}" alt="Multiplet fit">
+<figcaption>Figure 3. Three peaks fit together; two of them overlap
+closely enough that fitting each independently wouldn't separate them
+reliably, so all three share one FWHM.</figcaption>
+</figure>
+<p>Mark more than one peak (<kbd>P</kbd>) within the same fit region and
+SpectraTools fits them together as a multiplet: every peak gets its own
+position, amplitude, tail fraction, and tail beta, but all of them share
+a single FWHM. This is what makes it possible to separate overlapping
+peaks that a single-peak fit couldn't resolve.</p>
+
+<h2>Area: full vs. net</h2>
+<p>The Fit Results panel's Area column shows one number per peak: its
+<b>net</b> area (background excluded) -- the same number you'd get by
+integrating just the fitted peak shape on its own. Hover over a row for
+the full breakdown: that same peak's <b>full</b> area (net area plus the
+background level at the peak's own center, times its FWHM), plus
+region-level full/net totals for the whole fit -- the region's full
+total sums the entire fitted curve (background and every peak together)
+across the whole fit region, and its net total sums just the peaks' own
+net areas. All of these come with propagated uncertainties. Net area is
+almost always the number you actually want (for example, when computing
+activity or a branching ratio).</p>
+
+<h2>Integration vs. fitting</h2>
+<p><kbd>Ctrl+I</kbd> (Integrate) computes a full/background/net split
+directly from the data in the marked regions -- centroid, FWHM,
+skewness, and area for each -- without fitting a peak shape at all.
+(Integration's own tooltip labels this split "Gross"/"Background"/"Net"
+rather than "full"/"net" -- the same background-included-vs-excluded
+idea as above, just worded differently between the two features.)
+Integration is faster, doesn't depend on an optimizer converging, and
+works on peaks too irregular or blended to fit cleanly. The trade-off
+is that it can't separate overlapping peaks the way a multiplet fit
+can, and it reports one combined result for the whole region rather
+than per-peak parameters.</p>
+
+<h2>Calibration</h2>
+<figure>
+<img src="{calibration_src}" alt="Calibration curve">
+<figcaption>Figure 4. Linear vs. quadratic calibration through the same
+points, with residuals -- the systematic curve in the linear residuals
+is exactly what a quadratic term corrects for.</figcaption>
+</figure>
+<p>Calibration converts channel numbers to energy: linear
+(<i>E = a + b&middot;channel</i>) or quadratic
+(<i>E = a + b&middot;channel + c&middot;channel<sup>2</sup></i>). Once
+active, every displayed position and FWHM converts through it
+automatically -- FWHM (a width, not a position) scales by the
+calibration's local derivative evaluated at the peak's own position,
+since a width has no location on the calibration curve of its own.
+Uncertainties propagate through the same derivative.</p>
+"""
+    return _page("SpectraTools -- Knowledge Database", body)
