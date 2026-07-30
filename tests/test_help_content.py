@@ -1,7 +1,9 @@
 import re
+import sys
+import types
 from html.parser import HTMLParser
 
-from help_content import build_howto_html, build_knowledge_database_html
+from help_content import build_about_html, build_howto_html, build_knowledge_database_html
 
 _VOID_ELEMENTS = {"meta", "br", "img", "hr", "link", "input"}
 _BASE64_IMAGE = re.compile(r"data:image/png;base64,[A-Za-z0-9+/=]+")
@@ -113,3 +115,38 @@ def test_knowledge_database_html_has_balanced_tags():
     checker = _TagBalanceChecker()
     checker.feed(build_knowledge_database_html())
     assert checker.stack == [], f"unclosed tags at EOF: {checker.stack}"
+
+
+def test_about_html_shows_dev_fallback_when_build_info_is_absent(monkeypatch):
+    # Setting the sys.modules entry to None forces the next `import
+    # build_info` to raise ImportError immediately, regardless of
+    # whether a real build_info.py happens to exist on disk from a
+    # prior local `packaging/windows/build.ps1` run -- this is the
+    # standard way to deterministically simulate "module not
+    # importable" without touching the filesystem.
+    monkeypatch.setitem(sys.modules, "build_info", None)
+    html = build_about_html()
+    assert "dev" in html
+    assert "development build" in html
+
+
+def test_about_html_shows_stamped_version_and_date_when_build_info_exists(monkeypatch):
+    fake_module = types.ModuleType("build_info")
+    fake_module.VERSION = "1.2.3"
+    fake_module.BUILD_DATE = "2026-08-01"
+    monkeypatch.setitem(sys.modules, "build_info", fake_module)
+    html = build_about_html()
+    assert "1.2.3" in html
+    assert "2026-08-01" in html
+
+
+def test_about_html_contains_program_name_and_copyright():
+    html = build_about_html()
+    assert "SpectraTools" in html
+    assert "Georgi Rainovski" in html
+
+
+def test_about_html_is_a_complete_html_document():
+    html = build_about_html()
+    assert html.strip().startswith("<!doctype html>")
+    assert "<title>About SpectraTools</title>" in html
