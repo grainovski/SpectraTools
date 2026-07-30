@@ -17,3 +17,4 @@ packaging/linux/tools/
 assets/
 .superpowers/
 releases/
+build_info.py
