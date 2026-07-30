@@ -69,8 +69,6 @@ program supports.</p>
 <tr><th>Shortcut</th><th>Action</th></tr>
 <tr><td><kbd>Ctrl+G</kbd></td><td>Toggle log-scale Y axis</td></tr>
 <tr><td><kbd>Ctrl+1</kbd></td><td>Toggle the Spectra panel</td></tr>
-<tr><td><kbd>Ctrl+2</kbd></td><td>Toggle the Fit Results panel</td></tr>
-<tr><td><kbd>Ctrl+3</kbd></td><td>Toggle the Fit Parameters panel</td></tr>
 <tr><td><kbd>Ctrl+D</kbd></td><td>Toggle dark theme</td></tr>
 </table>
 
@@ -95,13 +93,15 @@ program supports.</p>
 <h3>Fitting</h3>
 <table>
 <tr><th>Shortcut</th><th>Action</th></tr>
-<tr><td><kbd>B</kbd></td><td>Mark a background region (click on the plot after pressing)</td></tr>
-<tr><td><kbd>R</kbd></td><td>Mark the fit region (click on the plot after pressing)</td></tr>
-<tr><td><kbd>P</kbd></td><td>Mark a peak position (click on the plot after pressing)</td></tr>
+<tr><td><kbd>B</kbd></td><td>Hold and click twice per region (two regions needed, four clicks total) to mark the two background regions</td></tr>
+<tr><td><kbd>R</kbd></td><td>Hold and click twice (once on each end) to mark the fit region</td></tr>
+<tr><td><kbd>P</kbd></td><td>Hold and click once per peak to mark a peak position</td></tr>
 <tr><td><kbd>Ctrl+F</kbd></td><td>Fit</td></tr>
-<tr><td><kbd>Ctrl+C</kbd></td><td>Clear the active spectrum's fits</td></tr>
-<tr><td><kbd>Ctrl+Shift+C</kbd></td><td>Clear all fits (every loaded spectrum)</td></tr>
-<tr><td><kbd>Ctrl+E</kbd></td><td>Export all fits</td></tr>
+<tr><td><kbd>Ctrl+2</kbd></td><td>Toggle the Fit Results panel</td></tr>
+<tr><td><kbd>Ctrl+3</kbd></td><td>Toggle the Fit Parameters panel</td></tr>
+<tr><td><kbd>Ctrl+C</kbd></td><td>Clear the active spectrum's in-progress marks and committed fits</td></tr>
+<tr><td><kbd>Ctrl+Shift+C</kbd></td><td>Clear the active spectrum's committed fits only (in-progress marks untouched)</td></tr>
+<tr><td><kbd>Ctrl+E</kbd></td><td>Export the active spectrum's fits</td></tr>
 <tr><td><kbd>Ctrl+I</kbd></td><td>Integrate</td></tr>
 </table>
 
@@ -109,7 +109,8 @@ program supports.</p>
 
 <h3>1. Loading a spectrum</h3>
 <p><b>File &gt; Open...</b> (<kbd>Ctrl+O</kbd>) opens a file picker for the
-three supported formats: <b>.txt</b> (plain two-column text), <b>.spe</b>,
+three supported formats: <b>.txt</b> (one integer count per line, channel
+number implied by line position), <b>.spe</b>,
 and <b>.spk</b>. Recently opened files also appear under
 <b>File &gt; Recent Files</b> for one-click reopening. Every spectrum you
 open stays loaded until you close it -- opening a new one adds it
@@ -154,13 +155,14 @@ useful for visually comparing spectra taken with different live times.</p>
 <p>This is the core workflow, and it's entirely mouse-plus-keyboard on
 the plot itself:</p>
 <ol>
-<li>Press <kbd>B</kbd> and click on the plot, twice, once on each side
-of the peak(s) you're fitting -- these two clicks mark the two
+<li>Hold <kbd>B</kbd> and click twice on one side of the peak(s), then
+twice on the other side -- four clicks total, marking the two
 background regions used to compute a linear background under the
-peak.</li>
-<li>Press <kbd>R</kbd> and click once to mark the fit region (the span
-that gets fit).</li>
-<li>Press <kbd>P</kbd> and click once per peak, at each peak's
+peak. A third completed pair evicts the oldest region, so only the
+two most recent stick.</li>
+<li>Hold <kbd>R</kbd> and click twice (once on each end) to mark the
+fit region (the span that gets fit).</li>
+<li>Hold <kbd>P</kbd> and click once per peak, at each peak's
 approximate position -- mark more than one for a multiplet (peaks that
 share one FWHM).</li>
 <li>Press <kbd>Ctrl+F</kbd> to fit. Results appear in the Fit Results
@@ -169,9 +171,11 @@ Parameters panel.</li>
 </ol>
 <p>See the Knowledge Database page for exactly what's being computed
 here, and what each fit parameter means.</p>
-<p><kbd>Ctrl+C</kbd> deletes the active spectrum's committed fits.
-<kbd>Ctrl+Shift+C</kbd> does the same for every loaded spectrum at once,
-and <kbd>Ctrl+E</kbd> exports every loaded spectrum's fits together.</p>
+<p><kbd>Ctrl+C</kbd> clears the active spectrum's in-progress B/R/P
+marks as well as its already-committed fits. <kbd>Ctrl+Shift+C</kbd>
+clears only the active spectrum's committed fits, leaving any
+in-progress marks alone. <kbd>Ctrl+E</kbd> exports the active
+spectrum's committed fits.</p>
 
 <h3>7. Integration</h3>
 <p><kbd>Ctrl+I</kbd> computes gross/background/net counts across the
