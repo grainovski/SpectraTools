@@ -151,7 +151,7 @@ def calibration_curve_figure():
     x = np.linspace(0, 1300, 300)
     fig = Figure(figsize=(7.5, 5.0), dpi=110)
     ax_curve = fig.add_subplot(211)
-    ax_resid = fig.add_subplot(212)
+    ax_resid = fig.add_subplot(212, sharex=ax_curve)
 
     ax_curve.scatter(channels, true_energies, color="black", zorder=3, label="Calibration points")
     ax_curve.plot(x, linear_cal.apply(x), color=_DATA_COLOR, label="Linear fit")
