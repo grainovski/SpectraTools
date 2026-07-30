@@ -580,8 +580,14 @@ class MainWindow(QMainWindow):
             writer = save_histogram
         try:
             writer(path, spectrum.data)
-        except (OSError, ValueError) as exc:
+        except OSError as exc:
             QMessageBox.warning(self, "Save Spectrum", f"Could not save: {exc}")
+        except ValueError as exc:
+            QMessageBox.warning(
+                self, "Save Spectrum",
+                f"Could not save in this format: {exc}\n\n"
+                "Try a different format (e.g. Text), or Multiply by a smaller factor first.",
+            )
 
     def _style_nav_toolbar_palette(self, theme):
         """Sets the navigation toolbar's actual QPalette -- not just this

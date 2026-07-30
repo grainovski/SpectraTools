@@ -677,6 +677,66 @@ def test_write_spectrum_defaults_to_text_with_no_extension_or_recognized_filter(
     assert list(load_histogram(str(path))[:len(spectrum.data)]) == list(spectrum.data)
 
 
+def test_write_spectrum_spe_extension_dispatches_to_save_spe(qapp, tmp_path):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    path = tmp_path / "out.spe"
+    main_window._write_spectrum(spectrum, str(path), "SPK files (*.spk)")
+
+    from spe_io import load_spe
+    assert list(load_spe(str(path))) == list(spectrum.data)
+
+
+def test_write_spectrum_spe_filter_fallback_dispatches_to_save_spe(qapp, tmp_path):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    path = tmp_path / "out"
+    main_window._write_spectrum(spectrum, str(path), "SPE files (*.spe)")
+
+    from spe_io import load_spe
+    assert list(load_spe(str(path))) == list(spectrum.data)
+
+
+def test_write_spectrum_shows_a_warning_instead_of_crashing_on_failure(qapp, monkeypatch, tmp_path):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    warnings = []
+    monkeypatch.setattr(
+        "main_window.QMessageBox.warning",
+        lambda *a, **k: warnings.append(a) or None,
+    )
+
+    def failing_writer(path, data):
+        raise ValueError("simulated failure")
+
+    monkeypatch.setattr("main_window.save_histogram", failing_writer)
+    path = tmp_path / "out.txt"
+
+    main_window._write_spectrum(spectrum, str(path), "Text files (*.txt)")  # must not raise
+
+    assert len(warnings) == 1
+
+
+def test_write_spectrum_gives_actionable_message_when_spk_encoding_overflows(qapp, monkeypatch, tmp_path):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.data = np.array([0, 10 ** 14])
+    warnings = []
+    monkeypatch.setattr(
+        "main_window.QMessageBox.warning",
+        lambda *a, **k: warnings.append(a) or None,
+    )
+
+    path = tmp_path / "out.spk"
+    main_window._write_spectrum(spectrum, str(path), "SPK files (*.spk)")  # must not raise
+
+    assert len(warnings) == 1
+    message = warnings[0][2]
+    assert "smaller factor" in message.lower()
+
+
 def test_open_save_spectrum_dialog_writes_the_chosen_file(qapp, monkeypatch, tmp_path):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
