@@ -10,7 +10,11 @@ $versionMatch = Select-String -Path "$root/packaging/windows/installer.iss" -Pat
 if (-not $versionMatch) {
     throw "Could not find AppVersion in packaging/windows/installer.iss"
 }
-$version = $versionMatch.Matches[0].Groups[1].Value
+# Escaped before embedding below: AppVersion is developer-edited (e.g. a
+# stray quote from accidentally quoting the value) and gets embedded
+# straight into a Python string literal -- an unescaped backslash or
+# quote would produce a build_info.py with a Python syntax error.
+$version = ($versionMatch.Matches[0].Groups[1].Value -replace '\\', '\\') -replace '"', '\"'
 $buildDate = Get-Date -Format "yyyy-MM-dd"
 @"
 VERSION = "$version"

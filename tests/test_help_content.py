@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import tempfile
 import types
 from html.parser import HTMLParser
 
@@ -57,7 +58,7 @@ def test_howto_html_contains_every_shortcut():
         "Ctrl+L", "Ctrl+T", "Ctrl+M", "Ctrl+R", "Ctrl+N",
         "Ctrl+=", "Ctrl+-", "Ctrl+0",
         "Ctrl+F", "Ctrl+C", "Ctrl+Shift+C", "Ctrl+E", "Ctrl+I",
-        "B", "R", "P",
+        "B", "R", "P", "F1",
     ]:
         assert f"<kbd>{shortcut}</kbd>" in html, f"missing shortcut {shortcut!r}"
 
@@ -75,6 +76,7 @@ def test_howto_html_covers_every_operation():
         "Performing a fit",
         "Integration",
         "View options",
+        "Knowledge Database",
     ]:
         assert topic in html, f"missing topic {topic!r}"
 
@@ -148,6 +150,17 @@ def test_about_html_shows_stamped_version_and_date_when_build_info_exists(monkey
     assert "2026-08-01" in html
 
 
+def test_about_html_shows_dev_fallback_when_build_info_is_missing_attributes(monkeypatch):
+    # A module that imports fine but lacks VERSION/BUILD_DATE (e.g. a
+    # stale build_info.py from an earlier schema) must fall back the
+    # same as a missing module, not raise AttributeError.
+    fake_module = types.ModuleType("build_info")
+    monkeypatch.setitem(sys.modules, "build_info", fake_module)
+    html = build_about_html()
+    assert "dev" in html
+    assert "development build" in html
+
+
 def test_about_html_contains_program_name_and_copyright():
     html = build_about_html()
     assert "SpectraTools" in html
@@ -171,3 +184,24 @@ def test_open_help_page_writes_a_temp_file_and_opens_it(qapp, monkeypatch):
     assert os.path.exists(path)
     with open(path, encoding="utf-8") as f:
         assert f.read() == "<html><body>hello</body></html>"
+
+
+def test_open_help_page_returns_true_on_success(qapp, monkeypatch):
+    monkeypatch.setattr(QDesktopServices, "openUrl", staticmethod(lambda url: True))
+    assert open_help_page("<html></html>") is True
+
+
+def test_open_help_page_returns_false_when_no_browser_handler(qapp, monkeypatch):
+    # QDesktopServices.openUrl itself returns False (not an exception)
+    # when there's no registered handler for the URL -- e.g. no default
+    # browser configured. Must be surfaced, not silently dropped.
+    monkeypatch.setattr(QDesktopServices, "openUrl", staticmethod(lambda url: False))
+    assert open_help_page("<html></html>") is False
+
+
+def test_open_help_page_returns_false_on_write_failure(qapp, monkeypatch):
+    def _raise_oserror(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", _raise_oserror)
+    assert open_help_page("<html></html>") is False

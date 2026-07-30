@@ -393,13 +393,18 @@ class MainWindow(QMainWindow):
         self.help_menu.addAction(self.about_action)
 
     def _open_howto(self):
-        open_help_page(build_howto_html())
+        if not open_help_page(build_howto_html()):
+            self.fit_controller._show_status_message("Couldn't open the HowTo page in your browser.", 5000)
 
     def _open_knowledge_database(self):
-        open_help_page(build_knowledge_database_html())
+        if not open_help_page(build_knowledge_database_html()):
+            self.fit_controller._show_status_message(
+                "Couldn't open the Knowledge Database page in your browser.", 5000
+            )
 
     def _open_about(self):
-        open_help_page(build_about_html())
+        if not open_help_page(build_about_html()):
+            self.fit_controller._show_status_message("Couldn't open the About page in your browser.", 5000)
 
     def _apply_theme(self, theme):
         app = QApplication.instance()

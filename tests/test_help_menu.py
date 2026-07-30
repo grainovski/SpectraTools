@@ -42,12 +42,21 @@ def test_knowledge_database_and_about_actions_have_no_shortcut(qapp):
     assert main_window.about_action.shortcut().isEmpty()
 
 
+def _recording_open_help_page(calls):
+    # Returns True (matching open_help_page's real success contract) --
+    # a mock returning None/falsy would spuriously also exercise the
+    # failure-status-message path these tests aren't testing.
+    def _open(html):
+        calls.append(html)
+        return True
+
+    return _open
+
+
 def test_howto_action_opens_the_howto_page(qapp, monkeypatch):
     import main_window as main_window_module
     calls = []
-    monkeypatch.setattr(
-        main_window_module, "open_help_page", lambda html: calls.append(html)
-    )
+    monkeypatch.setattr(main_window_module, "open_help_page", _recording_open_help_page(calls))
     window = MainWindow()
     window.howto_action.trigger()
     assert len(calls) == 1
@@ -57,9 +66,7 @@ def test_howto_action_opens_the_howto_page(qapp, monkeypatch):
 def test_knowledge_database_action_opens_the_knowledge_database_page(qapp, monkeypatch):
     import main_window as main_window_module
     calls = []
-    monkeypatch.setattr(
-        main_window_module, "open_help_page", lambda html: calls.append(html)
-    )
+    monkeypatch.setattr(main_window_module, "open_help_page", _recording_open_help_page(calls))
     window = MainWindow()
     window.knowledge_database_action.trigger()
     assert len(calls) == 1
@@ -69,10 +76,50 @@ def test_knowledge_database_action_opens_the_knowledge_database_page(qapp, monke
 def test_about_action_opens_the_about_page(qapp, monkeypatch):
     import main_window as main_window_module
     calls = []
-    monkeypatch.setattr(
-        main_window_module, "open_help_page", lambda html: calls.append(html)
-    )
+    monkeypatch.setattr(main_window_module, "open_help_page", _recording_open_help_page(calls))
     window = MainWindow()
     window.about_action.trigger()
     assert len(calls) == 1
     assert "About" in calls[0]
+
+
+def test_howto_action_shows_status_message_when_open_help_page_fails(qapp, monkeypatch):
+    import main_window as main_window_module
+    monkeypatch.setattr(main_window_module, "open_help_page", lambda html: False)
+    window = MainWindow()
+    messages = []
+    monkeypatch.setattr(
+        window.fit_controller, "_show_status_message",
+        lambda message, duration_ms: messages.append(message),
+    )
+    window.howto_action.trigger()
+    assert len(messages) == 1
+    assert "HowTo" in messages[0]
+
+
+def test_knowledge_database_action_shows_status_message_when_open_help_page_fails(qapp, monkeypatch):
+    import main_window as main_window_module
+    monkeypatch.setattr(main_window_module, "open_help_page", lambda html: False)
+    window = MainWindow()
+    messages = []
+    monkeypatch.setattr(
+        window.fit_controller, "_show_status_message",
+        lambda message, duration_ms: messages.append(message),
+    )
+    window.knowledge_database_action.trigger()
+    assert len(messages) == 1
+    assert "Knowledge Database" in messages[0]
+
+
+def test_about_action_shows_status_message_when_open_help_page_fails(qapp, monkeypatch):
+    import main_window as main_window_module
+    monkeypatch.setattr(main_window_module, "open_help_page", lambda html: False)
+    window = MainWindow()
+    messages = []
+    monkeypatch.setattr(
+        window.fit_controller, "_show_status_message",
+        lambda message, duration_ms: messages.append(message),
+    )
+    window.about_action.trigger()
+    assert len(messages) == 1
+    assert "About" in messages[0]
