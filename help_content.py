@@ -33,6 +33,9 @@ figcaption { font-size: 0.9em; color: #555; margin-top: 0.4rem; }
 
 
 def _page(title, body_html):
+    """Wraps body_html in the shared doctype/head/style shell every Help
+    page uses. `title` and `body_html` are always this module's own
+    literal/generated content, never user input -- not escaped."""
     return f"""<!doctype html>
 <html>
 <head>
@@ -47,6 +50,11 @@ def _page(title, body_html):
 
 
 def build_howto_html():
+    """Every keyboard shortcut, grouped by menu, plus a short step-by-step
+    guide for every operation -- content verified against main_window.py/
+    fit_mode.py's actual behavior, not just the UI's stated labels (see
+    commits c320353/2ce5fb2 for the factual corrections that came out of
+    that verification)."""
     body = """
 <h1>SpectraTools -- HowTo</h1>
 <p>This page covers every keyboard shortcut in SpectraTools, grouped by
