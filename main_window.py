@@ -33,6 +33,12 @@ from PySide6.QtWidgets import (
 from calibration_dialog import CalibrationDialog
 from factor_dialog import FactorDialog
 from fit_mode import FitModeController
+from help_content import (
+    build_about_html,
+    build_howto_html,
+    build_knowledge_database_html,
+    open_help_page,
+)
 from histogram_io import ParseError, load_histogram, save_histogram
 from settings import Settings
 from spe_io import load_spe, save_spe
@@ -370,6 +376,30 @@ class MainWindow(QMainWindow):
         self.normalize_action.setEnabled(False)
         self.normalize_action.triggered.connect(self._normalize_spectra)
         self.operations_menu.addAction(self.normalize_action)
+
+        self.help_menu = self.menuBar().addMenu("&Help")
+
+        self.howto_action = QAction("HowTo", self)
+        self.howto_action.setShortcut("F1")
+        self.howto_action.triggered.connect(self._open_howto)
+        self.help_menu.addAction(self.howto_action)
+
+        self.knowledge_database_action = QAction("Knowledge Database", self)
+        self.knowledge_database_action.triggered.connect(self._open_knowledge_database)
+        self.help_menu.addAction(self.knowledge_database_action)
+
+        self.about_action = QAction("About", self)
+        self.about_action.triggered.connect(self._open_about)
+        self.help_menu.addAction(self.about_action)
+
+    def _open_howto(self):
+        open_help_page(build_howto_html())
+
+    def _open_knowledge_database(self):
+        open_help_page(build_knowledge_database_html())
+
+    def _open_about(self):
+        open_help_page(build_about_html())
 
     def _apply_theme(self, theme):
         app = QApplication.instance()

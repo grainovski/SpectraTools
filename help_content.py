@@ -5,6 +5,7 @@ Database's figures (help_figures.py) are embedded as base64 data URIs, so
 a generated page has zero dependencies once written to disk."""
 
 import base64
+import functools
 import tempfile
 
 from PySide6.QtCore import QUrl
@@ -223,6 +224,7 @@ current view, and <kbd>Ctrl+0</kbd> resets to the full spectrum.</p>
     return _page("SpectraTools -- HowTo", body)
 
 
+@functools.lru_cache(maxsize=1)
 def build_knowledge_database_html():
     """The fit model, parameter meanings, and calibration math, each
     cross-referenced to one of help_figures.py's four annotated figures
