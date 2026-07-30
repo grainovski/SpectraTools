@@ -1,0 +1,32 @@
+from help_figures import (
+    anatomy_of_a_fit_figure,
+    calibration_curve_figure,
+    multiplet_figure,
+    tail_effect_figure,
+)
+
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def test_anatomy_of_a_fit_figure_returns_valid_png():
+    data = anatomy_of_a_fit_figure()
+    assert data.startswith(_PNG_SIGNATURE)
+    assert len(data) > 1000
+
+
+def test_tail_effect_figure_returns_valid_png():
+    data = tail_effect_figure()
+    assert data.startswith(_PNG_SIGNATURE)
+    assert len(data) > 1000
+
+
+def test_multiplet_figure_returns_valid_png():
+    data = multiplet_figure()
+    assert data.startswith(_PNG_SIGNATURE)
+    assert len(data) > 1000
+
+
+def test_calibration_curve_figure_returns_valid_png():
+    data = calibration_curve_figure()
+    assert data.startswith(_PNG_SIGNATURE)
+    assert len(data) > 1000
