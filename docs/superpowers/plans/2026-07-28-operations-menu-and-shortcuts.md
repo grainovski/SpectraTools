@@ -1445,11 +1445,37 @@ Add the dialog wrapper and testable core, right after `_apply_multiply` (added i
     def _apply_rebin(self, spectrum, factor):
         spectrum.data = rebin(spectrum.data, factor)
         if self._calibration is not None:
+            # Calibration is a single MainWindow-level object shared by
+            # every loaded spectrum (see __init__), but rebinning changes
+            # only THIS spectrum's channel count -- rescaling it here keeps
+            # the just-rebinned spectrum's keV axis correct at the cost of
+            # desyncing it for any OTHER already-loaded spectrum, which
+            # still has its original channel scale. Rescaling is the right
+            # default (not rescaling would immediately break the spectrum
+            # that was just rebinned), so this is flagged to the user via
+            # a status message rather than blocked or silently skipped.
             self._calibration = self._calibration.rescaled(factor)
+            if len(self.spectra) > 1:
+                # fit_controller._show_status_message (not statusBar()
+                # directly) -- it arms _status_message_until, which
+                # _on_mouse_move checks before overwriting the status bar
+                # with the ordinary hover readout. Without this, the
+                # warning gets wiped by the very next mouse move over the
+                # canvas, which is nearly guaranteed to happen right after
+                # rebinning (found during code review, verified empirically).
+                self.fit_controller._show_status_message(
+                    "Rebinned. Calibration was rescaled for this spectrum -- "
+                    "it may no longer be correct for other loaded spectra.",
+                    8000,
+                )
         self.fit_controller.reset_marks()
         spectrum.fits.clear()
         self._plot_data()
 ```
+
+**Post-review addition (discovered during Task 10's code-quality review, not in the original design spec):** `self._calibration` is global (applies to every loaded spectrum, per the original calibration feature's own design), but Rebin is deliberately per-spectrum-scoped. Rescaling the shared calibration for one rebinned spectrum silently desyncs it for every other currently-loaded spectrum (their displayed keV axis, hover readout, and existing fits' keV columns become wrong with no error). Rescaling is still the right default (the alternative breaks the just-rebinned spectrum immediately), but it's now surfaced via a non-blocking status message when more than one spectrum is loaded, rather than shipped silent. Two tests pin this: `test_apply_rebin_warns_when_other_spectra_are_loaded` and `test_apply_rebin_no_warning_with_only_one_spectrum_loaded`.
+
+**Second post-review fix**: the warning must be shown via `self.fit_controller._show_status_message(...)`, not `self.statusBar().showMessage(...)` directly — the latter gets silently overwritten by `_on_mouse_move`'s ordinary hover readout on the very next mouse movement over the canvas (verified empirically: the warning was gone well before its nominal 8-second duration after a single synthetic mouse-move event). `_show_status_message` arms `_status_message_until`, which `_on_mouse_move` already checks before overwriting. `test_apply_rebin_warning_survives_a_mouse_move` pins this.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -1510,6 +1536,21 @@ def test_normalize_with_no_marks_shows_a_status_message(qapp):
     assert "mark" in main_window.statusBar().currentMessage().lower()
 
 
+def test_normalize_no_marks_message_survives_a_mouse_move(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    _make_active_spectrum(main_window)
+
+    main_window._normalize_spectra()
+
+    ax = main_window.axes
+    px, py = ax.transData.transform((10.0, 10.0))
+    event = MouseEvent("motion_notify_event", main_window.canvas, px, py)
+    main_window.canvas.callbacks.process("motion_notify_event", event)
+
+    assert "mark" in main_window.statusBar().currentMessage().lower()
+
+
 def test_normalize_single_marker_scales_by_bin_count(qapp):
     main_window = MainWindow()
     spectrum_a = _make_active_spectrum(main_window)
@@ -1553,22 +1594,59 @@ def test_normalize_skips_a_zero_reference_spectrum_with_a_message(qapp):
     assert os.path.basename(spectrum_b.path) in message
 
 
+def test_normalize_skipped_message_survives_a_mouse_move(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.data = np.array([10, 20], dtype=np.int64)
+    spectrum_b.data = np.array([0, 0], dtype=np.int64)
+    main_window.fit_controller.state.pending_fit_click = 1
+
+    main_window._normalize_spectra()
+
+    ax = main_window.axes
+    px, py = ax.transData.transform((10.0, 10.0))
+    event = MouseEvent("motion_notify_event", main_window.canvas, px, py)
+    main_window.canvas.callbacks.process("motion_notify_event", event)
+
+    message = main_window.statusBar().currentMessage()
+    assert os.path.basename(spectrum_b.path) in message
+
+
+class _FakeFit:
+    """Stand-in for a FitResult/IntegrationResult, used where a test only
+    cares whether normalize's fit-clearing touches a given spectrum's
+    .fits list -- not what a real fit looks like. Every real fit result
+    always has `.visible` (peak_fit.FitResult/IntegrationResult both
+    default it to True), and draw_committed_fits (fit_mode.py) reads
+    that attribute first, before anything else, for every spectrum
+    _plot_data redraws -- including spectra a given operation didn't
+    touch. `visible = False` here makes that redraw skip this fake
+    entry immediately, instead of crashing on the fit-region/background
+    fields a bare placeholder (e.g. a plain string) doesn't have."""
+    visible = False
+
+
 def test_normalize_clears_fits_only_on_rescaled_spectra(qapp):
     main_window = MainWindow()
     spectrum_a = _make_active_spectrum(main_window)
     spectrum_b = _make_active_spectrum(main_window)
     spectrum_a.data = np.array([10, 20], dtype=np.int64)
     spectrum_b.data = np.array([5, 40], dtype=np.int64)
-    spectrum_a.fits.append("fake-fit-a")
-    spectrum_b.fits.append("fake-fit-b")
+    fake_fit_b = _FakeFit()
+    spectrum_a.fits.append(_FakeFit())
+    spectrum_b.fits.append(fake_fit_b)
     main_window.fit_controller.state.pending_fit_click = 1
 
     main_window._normalize_spectra()
 
     assert spectrum_a.fits == []
-    assert spectrum_b.fits == ["fake-fit-b"]
+    assert spectrum_b.fits == [fake_fit_b]
+```
 
+**Post-review fix**: the original draft of this test used bare strings (`"fake-fit-a"`/`"fake-fit-b"`) as fake fit placeholders. That crashes: `_normalize_spectra`'s closing `_plot_data(preserve_view=True)` call redraws every visible spectrum's fits via `draw_committed_fits`, which reads `.visible` on every entry first, before anything else -- including `spectrum_b`'s un-rescaled (and therefore un-cleared) fake fit. A bare string has no `.visible` attribute. The `_FakeFit` class above (added during Task 11's implementation) fixes this without weakening the test -- it still verifies exactly the same thing (selective clearing based on rescale factor), just with a placeholder shaped enough not to crash the unrelated redraw side-effect.
 
+```python
 def test_normalize_resets_in_progress_marks(qapp):
     main_window = MainWindow()
     _make_active_spectrum(main_window)
@@ -1651,6 +1729,15 @@ Add the handler, right after `_apply_rebin` (added in Task 10):
 
 ```python
     def _normalize_spectra(self):
+        # Both status messages below use fit_controller._show_status_message
+        # (not statusBar() directly) -- it arms _status_message_until, which
+        # _on_mouse_move checks before overwriting the status bar with the
+        # ordinary hover readout. Without this, either message gets wiped by
+        # the very next mouse move over the canvas -- and for the first
+        # message in particular, moving the mouse onto the canvas to make a
+        # mark is the literal next thing the message tells the user to do.
+        # (Same class of bug found and fixed for Rebin's warning in Task 10;
+        # applied here proactively rather than waiting to rediscover it.)
         visible = [s for s in self.spectra if s.visible]
         if len(visible) < 2:
             return
@@ -1660,12 +1747,20 @@ Add the handler, right after `_apply_rebin` (added in Task 10):
         elif state.pending_fit_click is not None:
             region, channel = None, state.pending_fit_click
         else:
-            self.statusBar().showMessage(
+            self.fit_controller._show_status_message(
                 "Mark a channel or region (hold r, click) to normalize against.", 5000
             )
             return
 
         values = [reference_value(s.data, channel=channel, region=region) for s in visible]
+        if all(v == 0 for v in values):
+            self.fit_controller._show_status_message(
+                "Nothing to normalize -- every visible spectrum reads zero at the marked channel/region.",
+                5000,
+            )
+            self.fit_controller.reset_marks()
+            self._plot_data(preserve_view=True)
+            return
         factors = normalize_factors(values)
 
         skipped = []
@@ -1682,7 +1777,7 @@ Add the handler, right after `_apply_rebin` (added in Task 10):
         self._plot_data(preserve_view=True)
 
         if skipped:
-            self.statusBar().showMessage(
+            self.fit_controller._show_status_message(
                 f"Skipped (zero reference value): {', '.join(skipped)}", 5000
             )
 ```
@@ -1951,6 +2046,21 @@ def _put_tag_n(tag_base: int, value: int) -> bytes:
     return bytes([tag_base + 60 + extra]) + bytes(extension)
 ```
 
+**Post-review fix (discovered during Task 15's code-quality review):** the C reference relies on 32-bit `int` wraparound to implicitly bound how large a value `put_tag_n` ever has to encode; Python ints don't wrap, so nothing bounded `extra` here. Past `extra == 3` (5 total extension bytes), the tag byte `tag_base + 60 + extra` walks outside the format's valid `[60, 63]` low-6-bits range, corrupting the output silently (or crashing confusingly). Fixed with a guard that raises `ValueError` before the invalid 5th extension byte would ever be appended:
+
+```python
+    while t:
+        if extra == 3:
+            raise ValueError(
+                f"value {value} is too large to encode in LC2's tag format "
+                "(supports at most 4 extension bytes)"
+            )
+        t -= 1
+        extension.append(t & 0xFF)
+        extra += 1
+        t >>= 8
+```
+
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_spk_io.py -k "zigzag_encode or put_tag_n" -v`
@@ -1999,14 +2109,40 @@ def test_lc2_compress_same_run_tag():
     assert _lc2_compress([1, 0, 0, 0, 0, 0, 0]) == bytes([0xC7])
 
 
+def test_lc2_compress_same_run_boundary_exactly_4_uses_run_tag():
+    assert _lc2_compress([0, 0, 0, 0]) == bytes([0xC0])
+
+
+def test_lc2_compress_same_run_boundary_exactly_3_falls_through_to_pack():
+    assert _lc2_compress([0, 0, 0]) == bytes([0x00])
+
+
 def test_lc2_compress_extended_single_value_tag():
     assert _lc2_compress([158]) == bytes([0xBD, 0x00, 0x00])
 
 
 def test_lc2_compress_empty_input():
     assert _lc2_compress([]) == b""
+```
+
+**Post-review additions (discovered during Task 15's code-quality review):** the `same == 3` boundary (the exact line between "falls through to normal value-packing" and "uses the same-run tag") had zero test coverage, and a plausible one-character regression there (`if same > 3:` instead of `if same >= 3:`) was proven to silently corrupt output that still round-trips correctly through the unmodified decoder — undetected by every other test, since `demo.spk`'s real data happens not to exercise `same == 3` at all. The two boundary tests above close that gap. Separately, `_put_tag_n`'s new overflow guard (see Task 14's "Post-review fix" note) needs its own boundary tests too:
+
+```python
+def test_lc2_compress_raises_on_a_value_too_large_to_encode():
+    with pytest.raises(ValueError):
+        _lc2_compress([2 ** 40])
 
 
+def test_lc2_compress_recovers_wrong_data_no_longer_corrupts_silently():
+    # Exact repro from the review: previously compressed and decompressed
+    # without error but produced silently wrong decoded values.
+    with pytest.raises(ValueError):
+        _lc2_compress([2200000000, 5, 6, 7, 8, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 20, 30])
+```
+
+(`pytest` must already be imported at the top of `tests/test_spk_io.py` for the existing `pytest.raises` usages in that file's oldmat/LC1 rejection tests -- confirm before adding, add `import pytest` if genuinely missing.)
+
+```python
 def test_lc2_compress_round_trips_through_uncompress_for_varied_data():
     samples = [
         [0] * 20,
@@ -2207,6 +2343,11 @@ def test_save_spk_round_trips_negative_values(tmp_path):
     result = load_spk(str(path))
 
     assert list(result) == list(data)
+
+
+def test_save_spk_rejects_a_channel_count_too_large_for_the_format():
+    with pytest.raises(ValueError):
+        save_spk("unused.spk", [0] * (MAT_COLMAX + 1))
 ```
 
 Update the import line to add `save_spk`:
@@ -2239,6 +2380,10 @@ def save_spk(path: str, data) -> None:
     after it, then the LC2-compressed payload."""
     values = [int(v) for v in data]
     columns = len(values)
+    if not (1 <= columns <= MAT_COLMAX):
+        raise ValueError(
+            f"Channel count {columns} is out of range for a .spk file (must be 1-{MAT_COLMAX})"
+        )
     compressed = _lc2_compress(values)
 
     poslentablepos = LC_HEADER_SIZE
@@ -2255,6 +2400,8 @@ def save_spk(path: str, data) -> None:
         f.write(poslen)
         f.write(compressed)
 ```
+
+**Post-review addition (discovered during Task 16's code-quality review):** without this check, `save_spk` could write a file with `columns > MAT_COLMAX` (confirmed empirically: writes cleanly, no error) that this app's own `load_spk` would then permanently refuse to open (`_load_lc` already enforces the same `1..MAT_COLMAX` range on read). `_lc2_compress`'s own overflow guard (Task 15) protects against a different failure mode (individual delta magnitudes), not channel count -- this is a separate bound. `test_save_spk_rejects_a_channel_count_too_large_for_the_format` pins it.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -2496,7 +2643,17 @@ Add the dialog wrapper and testable core, right after `_normalize_spectra` (adde
             writer(path, spectrum.data)
         except OSError as exc:
             QMessageBox.warning(self, "Save Spectrum", f"Could not save: {exc}")
+        except ValueError as exc:
+            QMessageBox.warning(
+                self, "Save Spectrum",
+                f"Could not save in this format: {exc}\n\n"
+                "Try a different format (e.g. Text), or Multiply by a smaller factor first.",
+            )
 ```
+
+**Post-review addition (discovered during Task 16's code-quality review, applied here proactively before this task was ever dispatched):** `save_spk` (via `_lc2_compress`, Task 15's overflow guard) can raise `ValueError` for channel-to-channel deltas outside LC2's encodable range, and `save_spk` itself now also raises `ValueError` for an out-of-range channel count (Task 16's post-review fix). Catching only `OSError` would let either of those escape as an unhandled exception inside a Qt slot instead of a clean warning dialog.
+
+**Second post-review addition (discovered during Task 17's own code-quality review):** a single combined `except (OSError, ValueError)` catches both failure modes, but `_lc2_compress`'s raw message ("value N is too large to encode in LC2's tag format (supports at most 4 extension bytes)") is internal compression-scheme jargon, confusing to an end user, and realistically reachable -- `FactorDialog`'s Multiply validator only checks `v > 0` (no upper bound), so an extreme-but-"valid" Multiply factor can genuinely drive channel deltas past this limit before a Save attempt. Split into two `except` clauses so `ValueError` (a data/input problem) gets an actionable suggestion, while `OSError` (a filesystem problem) keeps its original message. Three tests cover this area, all added post-review: `test_write_spectrum_spe_extension_dispatches_to_save_spe` and `test_write_spectrum_spe_filter_fallback_dispatches_to_save_spe` (the `.spe` dispatch branches had no coverage at all before this), `test_write_spectrum_shows_a_warning_instead_of_crashing_on_failure` (the except branch itself had no coverage), and one pinning the friendlier `ValueError` wording specifically.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
