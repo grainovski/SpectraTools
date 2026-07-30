@@ -271,8 +271,9 @@ Gaussian) vs. r = 0.25 (a clearly visible low-energy tail).</figcaption>
 <tr><th>Parameter</th><th>Meaning</th></tr>
 <tr><td>position</td><td>The peak's centroid channel (or keV, with
 calibration active).</td></tr>
-<tr><td>FWHM (&sigma;)</td><td>The Gaussian core's width. Every peak in
-the same multiplet shares one FWHM -- see Figure 3.</td></tr>
+<tr><td>FWHM (&sigma;)</td><td>The Gaussian core's width. Peaks in the
+same multiplet share one FWHM by default -- see Figure 3 -- unless you
+turn on the Fit Parameters panel's "Independent widths" option.</td></tr>
 <tr><td>amplitude</td><td>The peak's height above background.</td></tr>
 <tr><td>tail fraction (r)</td><td>What fraction of the peak's area sits
 in the tail rather than the Gaussian core. r = 0 is a pure
@@ -289,14 +290,17 @@ the two background regions (Figure 1).</td></tr>
 <img src="{multiplet_src}" alt="Multiplet fit">
 <figcaption>Figure 3. Three peaks fit together; two of them overlap
 closely enough that fitting each independently wouldn't separate them
-reliably, so all three share one FWHM, tail fraction, and tail
-beta.</figcaption>
+reliably, so all three share one FWHM (the default) as well as one
+tail fraction and tail beta (never optional).</figcaption>
 </figure>
 <p>Mark more than one peak (<kbd>P</kbd>) within the same fit region and
 SpectraTools fits them together as a multiplet: every peak gets its own
-position and amplitude, but they all share one FWHM, tail fraction, and
-tail beta rather than each peak fitting its own. This is what makes it
-possible to separate overlapping peaks that a single-peak fit couldn't
+position and amplitude, and by default they all share one FWHM too --
+turn on the Fit Parameters panel's "Independent widths" option to fit
+each peak's width separately instead. Tail fraction and tail beta are
+always shared across the multiplet; there's no equivalent option for
+those. Sharing width (by default) is what makes it possible to separate
+overlapping peaks that a single-peak fit couldn't
 resolve.</p>
 
 <h2>Volume: full vs. net</h2>
