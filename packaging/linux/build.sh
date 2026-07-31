@@ -9,9 +9,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="$HOME/.spectratools-build"
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
-cp "$ROOT_DIR"/main.py "$ROOT_DIR"/main_window.py "$ROOT_DIR"/histogram_io.py \
-   "$ROOT_DIR"/settings.py "$ROOT_DIR"/spectrum.py "$ROOT_DIR"/requirements.txt \
-   "$ROOT_DIR"/requirements-dev.txt "$BUILD_DIR/"
+# Glob rather than a hand-maintained file list: an explicit list here previously
+# went stale (still only 5 of the app's ~17 modules) as the app grew, breaking
+# the build with ModuleNotFoundError deep in PyInstaller's analysis. A glob
+# can't go stale the same way.
+cp "$ROOT_DIR"/*.py "$ROOT_DIR"/requirements.txt "$ROOT_DIR"/requirements-dev.txt "$BUILD_DIR/"
 cd "$BUILD_DIR"
 
 # --without-pip --system-site-packages works around this WSL image's python3-pip
@@ -24,6 +26,24 @@ python3 -m venv --without-pip --system-site-packages .venv
 if [ ! -f "$ROOT_DIR/assets/icon.png" ]; then
     .venv/bin/python3 "$ROOT_DIR/packaging/make_icon.py"
 fi
+
+# Single shared source of truth for the version across both platforms is
+# installer.iss (Windows-specific file, but the value itself isn't) -- mirrors
+# packaging/windows/build.ps1's own stamping step. Escaped the same way that
+# script escapes it: AppVersion is developer-edited, and a stray backslash or
+# quote would otherwise produce a build_info.py with a Python syntax error.
+VERSION="$(grep '^AppVersion=' "$ROOT_DIR/packaging/windows/installer.iss" | head -1 | sed 's/^AppVersion=//' | tr -d '\r')"
+if [ -z "$VERSION" ]; then
+    echo "Could not find AppVersion in packaging/windows/installer.iss" >&2
+    exit 1
+fi
+VERSION_ESCAPED="$(printf '%s' "$VERSION" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+BUILD_DATE="$(date +%Y-%m-%d)"
+cat > "$BUILD_DIR/build_info.py" <<EOF
+VERSION = "$VERSION_ESCAPED"
+BUILD_DATE = "$BUILD_DATE"
+EOF
+echo "Stamped build_info.py: VERSION=$VERSION BUILD_DATE=$BUILD_DATE"
 
 .venv/bin/python3 -m PyInstaller --noconfirm --onedir --windowed --name SpectraTools main.py
 

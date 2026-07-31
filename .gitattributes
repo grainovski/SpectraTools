@@ -1,0 +1,6 @@
+# Files consumed by Linux tooling that rejects CRLF outright (e.g.
+# appimagetool's strict desktop-entry validator) -- force LF regardless of
+# a Windows checkout's core.autocrlf setting, which would otherwise
+# silently reintroduce CRLF the next time the file is touched.
+*.sh text eol=lf
+*.desktop text eol=lf
