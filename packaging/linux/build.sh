@@ -16,27 +16,65 @@ mkdir -p "$BUILD_DIR"
 cp "$ROOT_DIR"/*.py "$ROOT_DIR"/requirements.txt "$ROOT_DIR"/requirements-dev.txt "$BUILD_DIR/"
 cd "$BUILD_DIR"
 
-# --without-pip --system-site-packages works around this WSL image's python3-pip
-# package being in a broken (dpkg "failed-config") state, which makes venv's normal
-# ensurepip bootstrap segfault. The system pip (already installed) works fine, so
-# the venv borrows it via --system-site-packages instead of bootstrapping its own.
-python3 -m venv --without-pip --system-site-packages .venv
+# Build-host prerequisites, installed unconditionally every run (dnf install
+# on an already-installed package is a fast no-op, verified) so this script
+# is self-sufficient regardless of what state the host is already in --
+# python39 for the build itself; binutils because PyInstaller's own
+# dependency scanner (needs objdump) fails *silently*, producing a build
+# that looks fine but is subtly broken, if binutils is missing -- it does
+# not error loudly the way a missing python3.9 would; epel-release plus the
+# runtime libs because PyInstaller's own analysis needs to actually resolve
+# these libraries at build time too, not just at install time on the target
+# machine (xcb-util-cursor specifically needs EPEL on EL8 -- see the design
+# spec's "EPEL" note).
+dnf install -y epel-release >/dev/null
+dnf install -y python39 python39-devel python39-pip binutils \
+    mesa-libGL mesa-libEGL fontconfig xcb-util-image xcb-util-cursor \
+    libxkbcommon-x11 xcb-util-wm xcb-util-keysyms xcb-util-renderutil libatomic \
+    >/dev/null
+
+# Built on AlmaLinux 8 (RHEL 8-compatible, glibc 2.28) rather than whatever
+# python3 happens to resolve to, so the shipped binary runs on both old AND
+# current RHEL-family releases (glibc is forward-compatible, never backward --
+# see docs/superpowers/specs/2026-08-03-linux-native-packages-design.md).
+# python39 (the AppStream module package) provides /usr/bin/python3.9, and its
+# venv bootstraps its own pip cleanly on this base (verified) -- no
+# --without-pip workaround needed here, unlike the old Ubuntu-based build.
+python3.9 -m venv .venv
+# AlmaLinux 8's python39-pip RPM is frozen at 20.2.4 (RHEL module streams
+# don't rebase pip mid-lifecycle -- confirmed via its rpm changelog, last
+# touched 2024 for an unrelated patch) and python39's ensurepip ships no
+# bundled wheel of its own, so venv creation always inherits that exact
+# 20.2.4. That version predates PEP 600 (pip 20.3+) and so cannot see the
+# manylinux_2_28-tagged wheels PySide6 has shipped since 6.3 -- it silently
+# falls back to the last manylinux1 release it CAN see (6.2.4) and then
+# fails the >=6.6 requirement outright. Upgrading pip first (a universal,
+# tag-less wheel itself, so any pip version can install it) fixes this
+# before it ever touches PySide6.
+.venv/bin/python3 -m pip install --quiet --upgrade pip
 .venv/bin/python3 -m pip install --quiet -r requirements-dev.txt
 
 if [ ! -f "$ROOT_DIR/assets/icon.png" ]; then
     .venv/bin/python3 "$ROOT_DIR/packaging/make_icon.py"
 fi
 
-# Single shared source of truth for the version across both platforms is
-# installer.iss (Windows-specific file, but the value itself isn't) -- mirrors
-# packaging/windows/build.ps1's own stamping step. Escaped the same way that
-# script escapes it: AppVersion is developer-edited, and a stray backslash or
-# quote would otherwise produce a build_info.py with a Python syntax error.
+# Single shared source of truth for the version across every platform and
+# package format is installer.iss (Windows-specific file, but the value
+# itself isn't) -- mirrors packaging/windows/build.ps1's own stamping step.
 VERSION="$(grep '^AppVersion=' "$ROOT_DIR/packaging/windows/installer.iss" | head -1 | sed 's/^AppVersion=//' | tr -d '\r')"
 if [ -z "$VERSION" ]; then
     echo "Could not find AppVersion in packaging/windows/installer.iss" >&2
     exit 1
 fi
+# RPM's Version: field rejects hyphens outright (hyphens are reserved as the
+# name-version-release separator) -- fail loudly here rather than let
+# rpmbuild produce a confusing parse error during the packaging stage.
+case "$VERSION" in
+    *-*)
+        echo "AppVersion '$VERSION' contains a hyphen, which RPM's Version: field cannot contain. Use a plain X.Y.Z version for Linux package builds." >&2
+        exit 1
+        ;;
+esac
 VERSION_ESCAPED="$(printf '%s' "$VERSION" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 BUILD_DATE="$(date +%Y-%m-%d)"
 cat > "$BUILD_DIR/build_info.py" <<EOF
@@ -47,30 +85,13 @@ echo "Stamped build_info.py: VERSION=$VERSION BUILD_DATE=$BUILD_DATE"
 
 .venv/bin/python3 -m PyInstaller --noconfirm --onedir --windowed --name SpectraTools main.py
 
-APPDIR="$BUILD_DIR/SpectraTools.AppDir"
-rm -rf "$APPDIR"
-mkdir -p "$APPDIR/usr/bin"
-cp -r dist/SpectraTools/* "$APPDIR/usr/bin/"
+# Hand-off point for build_deb.sh (run separately, on the Ubuntu-24.04 WSL
+# host): copy the PyInstaller output to the repo's own (gitignored) output
+# dir, which every WSL distro sees identically via its own /mnt/c mount of
+# this same Windows path -- no WSL-to-WSL bridging needed.
+DIST_OUT="$ROOT_DIR/packaging/linux/output/dist-onedir"
+rm -rf "$DIST_OUT"
+mkdir -p "$DIST_OUT"
+cp -a dist/SpectraTools "$DIST_OUT/"
 
-cat > "$APPDIR/AppRun" <<'EOF'
-#!/bin/sh
-HERE="$(dirname "$(readlink -f "$0")")"
-exec "$HERE/usr/bin/SpectraTools" "$@"
-EOF
-chmod +x "$APPDIR/AppRun"
-
-cp "$ROOT_DIR/packaging/linux/spectratools.desktop" "$APPDIR/spectratools.desktop"
-cp "$ROOT_DIR/assets/icon.png" "$APPDIR/spectratools.png"
-
-APPIMAGETOOL="$ROOT_DIR/packaging/linux/tools/appimagetool"
-if [ ! -x "$APPIMAGETOOL" ]; then
-    mkdir -p "$ROOT_DIR/packaging/linux/tools"
-    curl -L -o "$APPIMAGETOOL" \
-        https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
-    chmod +x "$APPIMAGETOOL"
-fi
-
-mkdir -p "$ROOT_DIR/packaging/linux/output"
-"$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" "$ROOT_DIR/packaging/linux/output/SpectraTools-x86_64.AppImage"
-
-echo "AppImage built at packaging/linux/output/SpectraTools-x86_64.AppImage"
+echo "PyInstaller onedir build ready at packaging/linux/output/dist-onedir/SpectraTools/"
