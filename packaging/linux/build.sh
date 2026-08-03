@@ -61,7 +61,7 @@ fi
 # Single shared source of truth for the version across every platform and
 # package format is installer.iss (Windows-specific file, but the value
 # itself isn't) -- mirrors packaging/windows/build.ps1's own stamping step.
-VERSION="$(grep '^AppVersion=' "$ROOT_DIR/packaging/windows/installer.iss" | head -1 | sed 's/^AppVersion=//' | tr -d '\r')"
+VERSION="$(grep '^AppVersion=' "$ROOT_DIR/packaging/windows/installer.iss" | head -1 | sed 's/^AppVersion=//' | tr -d '\r')" || true
 if [ -z "$VERSION" ]; then
     echo "Could not find AppVersion in packaging/windows/installer.iss" >&2
     exit 1
@@ -95,3 +95,72 @@ mkdir -p "$DIST_OUT"
 cp -a dist/SpectraTools "$DIST_OUT/"
 
 echo "PyInstaller onedir build ready at packaging/linux/output/dist-onedir/SpectraTools/"
+
+# --- RPM packaging (same host, same PyInstaller output — no rebuild) ---
+
+dnf install -y rpm-build >/dev/null
+
+RPM_ROOT="$BUILD_DIR/rpmbuild"
+rm -rf "$RPM_ROOT"
+mkdir -p "$RPM_ROOT"/{SPECS,SOURCES,BUILD,RPMS,SRPMS,BUILDROOT}
+
+SPEC_FILE="$RPM_ROOT/SPECS/spectratools.spec"
+cat > "$SPEC_FILE" <<EOF
+Name: spectratools
+Version: $VERSION
+Release: 1
+Summary: Spectrum viewer and peak-fitting tool
+License: Proprietary
+BuildArch: x86_64
+# Without this, rpmbuild's automatic dependency scanner walks every file
+# under %files, including PyInstaller's hundreds of bundled _internal/*.so
+# files, and can auto-generate spurious extra Requires/Provides from the
+# app's own vendored libraries -- a well-known friction point when
+# RPM-packaging PyInstaller onedir bundles. The Requires: lines below are
+# the complete, deliberately-curated list; manually-declared Requires
+# still work normally with AutoReqProv: no (verified).
+AutoReqProv: no
+Requires: mesa-libGL
+Requires: mesa-libEGL
+Requires: fontconfig
+Requires: xcb-util-image
+Requires: xcb-util-cursor
+Requires: libxkbcommon-x11
+Requires: xcb-util-wm
+Requires: xcb-util-keysyms
+Requires: xcb-util-renderutil
+Requires: libatomic
+Requires: libcrypt.so.1()(64bit)
+
+%description
+A cross-platform desktop app for opening histogram files, plotting
+them, and fitting peaks.
+
+%install
+rm -rf %{buildroot}
+mkdir -p %{buildroot}/opt/spectratools
+cp -a $BUILD_DIR/dist/SpectraTools/. %{buildroot}/opt/spectratools/
+mkdir -p %{buildroot}/usr/bin
+ln -s /opt/spectratools/SpectraTools %{buildroot}/usr/bin/spectratools
+mkdir -p %{buildroot}/usr/share/applications
+cp $ROOT_DIR/packaging/linux/spectratools.desktop %{buildroot}/usr/share/applications/spectratools.desktop
+mkdir -p %{buildroot}/usr/share/pixmaps
+cp $ROOT_DIR/assets/icon.png %{buildroot}/usr/share/pixmaps/spectratools.png
+
+%files
+/opt/spectratools
+/usr/bin/spectratools
+/usr/share/applications/spectratools.desktop
+/usr/share/pixmaps/spectratools.png
+
+%changelog
+* $(date +"%a %b %d %Y") SpectraTools <grainovski@googlemail.com> - $VERSION-1
+- $VERSION release
+EOF
+
+rpmbuild --define "_topdir $RPM_ROOT" -bb "$SPEC_FILE"
+
+mkdir -p "$ROOT_DIR/packaging/linux/output"
+cp "$RPM_ROOT/RPMS/x86_64/spectratools-$VERSION-1.x86_64.rpm" "$ROOT_DIR/packaging/linux/output/"
+
+echo "RPM built at packaging/linux/output/spectratools-$VERSION-1.x86_64.rpm"
