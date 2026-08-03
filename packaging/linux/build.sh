@@ -112,6 +112,8 @@ Release: 1
 Summary: Spectrum viewer and peak-fitting tool
 License: Proprietary
 BuildArch: x86_64
+%global _build_id_links none
+%global debug_package %{nil}
 # Without this, rpmbuild's automatic dependency scanner walks every file
 # under %files, including PyInstaller's hundreds of bundled _internal/*.so
 # files, and can auto-generate spurious extra Requires/Provides from the
