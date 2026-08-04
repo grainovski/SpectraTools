@@ -61,6 +61,9 @@ fi
 # Single shared source of truth for the version across every platform and
 # package format is installer.iss (Windows-specific file, but the value
 # itself isn't) -- mirrors packaging/windows/build.ps1's own stamping step.
+# || true: without it, a failed/empty grep here triggers errexit under
+# pipefail before the -z check below ever runs (verified) -- this lets
+# that check do its job as intended.
 VERSION="$(grep '^AppVersion=' "$ROOT_DIR/packaging/windows/installer.iss" | head -1 | sed 's/^AppVersion=//' | tr -d '\r')" || true
 if [ -z "$VERSION" ]; then
     echo "Could not find AppVersion in packaging/windows/installer.iss" >&2
@@ -75,6 +78,11 @@ case "$VERSION" in
         exit 1
         ;;
 esac
+# RPM package release number (the "-1" in name-version-release). One
+# variable, referenced from the spec's Release: field, its %changelog
+# entry, and the final .rpm filename below, so those three spots can't
+# drift out of sync.
+RELEASE="1"
 VERSION_ESCAPED="$(printf '%s' "$VERSION" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 BUILD_DATE="$(date +%Y-%m-%d)"
 cat > "$BUILD_DIR/build_info.py" <<EOF
@@ -108,10 +116,20 @@ SPEC_FILE="$RPM_ROOT/SPECS/spectratools.spec"
 cat > "$SPEC_FILE" <<EOF
 Name: spectratools
 Version: $VERSION
-Release: 1
+Release: $RELEASE
 Summary: Spectrum viewer and peak-fitting tool
 License: Proprietary
 BuildArch: x86_64
+# rpmbuild's default post-install processing auto-generates a
+# /usr/lib/.build-id/xx/yyyy... symlink for every ELF file under the
+# buildroot -- with PyInstaller's onedir bundle containing hundreds of
+# .so files, this silently shipped 538 undeclared files never listed in
+# %files (found via rpm -qpl during review, not anticipated up front).
+# debug_package %%{nil} alone does NOT suppress this (verified) -- both
+# macros together are required. (%% here escapes the literal % so rpm's
+# macro processor doesn't expand the real, built-in "nil" macro even
+# inside this comment -- confirmed rpmbuild emits a "Macro expanded in
+# comment" warning without the extra %.)
 %global _build_id_links none
 %global debug_package %{nil}
 # Without this, rpmbuild's automatic dependency scanner walks every file
@@ -139,15 +157,15 @@ A cross-platform desktop app for opening histogram files, plotting
 them, and fitting peaks.
 
 %install
-rm -rf %{buildroot}
-mkdir -p %{buildroot}/opt/spectratools
-cp -a $BUILD_DIR/dist/SpectraTools/. %{buildroot}/opt/spectratools/
-mkdir -p %{buildroot}/usr/bin
-ln -s /opt/spectratools/SpectraTools %{buildroot}/usr/bin/spectratools
-mkdir -p %{buildroot}/usr/share/applications
-cp $ROOT_DIR/packaging/linux/spectratools.desktop %{buildroot}/usr/share/applications/spectratools.desktop
-mkdir -p %{buildroot}/usr/share/pixmaps
-cp $ROOT_DIR/assets/icon.png %{buildroot}/usr/share/pixmaps/spectratools.png
+rm -rf "%{buildroot}"
+mkdir -p "%{buildroot}/opt/spectratools"
+cp -a "$BUILD_DIR/dist/SpectraTools/." "%{buildroot}/opt/spectratools/"
+mkdir -p "%{buildroot}/usr/bin"
+ln -s "/opt/spectratools/SpectraTools" "%{buildroot}/usr/bin/spectratools"
+mkdir -p "%{buildroot}/usr/share/applications"
+cp "$ROOT_DIR/packaging/linux/spectratools.desktop" "%{buildroot}/usr/share/applications/spectratools.desktop"
+mkdir -p "%{buildroot}/usr/share/pixmaps"
+cp "$ROOT_DIR/assets/icon.png" "%{buildroot}/usr/share/pixmaps/spectratools.png"
 
 %files
 /opt/spectratools
@@ -156,13 +174,13 @@ cp $ROOT_DIR/assets/icon.png %{buildroot}/usr/share/pixmaps/spectratools.png
 /usr/share/pixmaps/spectratools.png
 
 %changelog
-* $(date +"%a %b %d %Y") SpectraTools <grainovski@googlemail.com> - $VERSION-1
+* $(date +"%a %b %d %Y") SpectraTools <grainovski@googlemail.com> - $VERSION-$RELEASE
 - $VERSION release
 EOF
 
 rpmbuild --define "_topdir $RPM_ROOT" -bb "$SPEC_FILE"
 
 mkdir -p "$ROOT_DIR/packaging/linux/output"
-cp "$RPM_ROOT/RPMS/x86_64/spectratools-$VERSION-1.x86_64.rpm" "$ROOT_DIR/packaging/linux/output/"
+cp "$RPM_ROOT/RPMS/x86_64/spectratools-$VERSION-$RELEASE.x86_64.rpm" "$ROOT_DIR/packaging/linux/output/"
 
-echo "RPM built at packaging/linux/output/spectratools-$VERSION-1.x86_64.rpm"
+echo "RPM built at packaging/linux/output/spectratools-$VERSION-$RELEASE.x86_64.rpm"
