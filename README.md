@@ -37,9 +37,12 @@ histogram `.txt` files and plotting them — the foundation of the
 
   See `packaging/linux/INSTALL.md` for end-user install instructions.
 
-Both build scripts generate `assets/icon.png`/`assets/icon.ico` on first
-run if not already present (via `packaging/make_icon.py`), using the same
-drawing code as the app's own window icon.
+`build.ps1` and `build.sh` each generate `assets/icon.png`/`assets/icon.ico`
+on first run if not already present (via `packaging/make_icon.py`), using
+the same drawing code as the app's own window icon. `build_deb.sh` doesn't
+generate it — it expects `build.sh` to have already run first (the normal
+pipeline order, since it reuses `build.sh`'s onedir output anyway) and
+just copies the existing `assets/icon.png` into the `.deb`.
 
 ## File format
 
