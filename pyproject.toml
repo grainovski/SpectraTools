@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+# Scoped explicitly to tests/ rather than the repo root: pytest's default
+# collection walks the whole tree, and packaging/*/output/ (gitignored
+# Linux/Windows build artifacts) can contain files a Windows checkout
+# can't stat (e.g. Linux .so symlinks), breaking collection entirely once
+# a local Linux build has actually been run.
+testpaths = ["tests"]

@@ -1,10 +1,46 @@
 # SpectraTools
 
 A cross-platform desktop app (Windows + Linux) for opening ASCII
-histogram `.txt` files and plotting them — the foundation of the
-"PeakFinderFitting" project.
+histogram `.txt` files, plotting them, and fitting peaks — the
+foundation of the "PeakFinderFitting" project.
 
-## Setup
+## Installing
+
+Pre-built releases are under `releases/vX.Y.Z/` (the latest is
+`releases/v2.0.0/`). Pick your platform:
+
+### Windows
+
+Requires **Windows 10 or later** (Qt6, which this app is built on,
+doesn't support Windows 7/8). Run `SpectraTools-v2.0.0-Setup.exe` and
+follow the installer. No other prerequisites — everything the app needs
+is bundled.
+
+### Linux
+
+Requires **RHEL/CentOS/AlmaLinux/Rocky 8 or later** (RPM) or a **current
+Debian/Ubuntu release** (DEB). Older RHEL/CentOS (7 and before) isn't
+supported — PySide6, the Qt6 binding this app uses, stopped publishing
+wheels compatible with that old a glibc after version 6.2.4 (2021), and
+that's an upstream constraint no packaging choice here can work around.
+
+```
+sudo apt install ./spectratools_2.0.0_amd64.deb      # Debian/Ubuntu
+sudo dnf install ./spectratools-2.0.0-1.x86_64.rpm    # RHEL/CentOS/AlmaLinux/Rocky
+```
+
+Both automatically install any missing runtime libraries as part of the
+same command. See `packaging/linux/INSTALL.md` for the full instructions
+(including a one-time EPEL prerequisite on RHEL-family **8** specifically)
+and uninstall steps.
+
+**Running under WSL:** if the app's window doesn't appear (a taskbar
+icon shows up but clicking or Alt+Tab-selecting it does nothing), that's
+a WSLg display bug, not an app problem — run `wsl --shutdown` from a
+Windows terminal (not from inside WSL) to restart WSL's display
+subsystem, then reopen your WSL terminal and try again.
+
+## Setup (for building from source)
 
     python -m venv .venv
     .venv/Scripts/python.exe -m pip install -r requirements-dev.txt   # Windows
