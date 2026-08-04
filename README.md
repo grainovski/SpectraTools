@@ -4,6 +4,8 @@ A cross-platform desktop app (Windows + Linux) for opening ASCII
 histogram `.txt` files, plotting them, and fitting peaks — the
 foundation of the "PeakFinderFitting" project.
 
+See `CHANGELOG.md` for what's new in each release.
+
 ## Installing
 
 Pre-built releases are under `releases/vX.Y.Z/` (the latest is
