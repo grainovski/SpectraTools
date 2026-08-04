@@ -63,3 +63,18 @@ def normalize_factors(values):
         else:
             factors.append(peak / value)
     return factors
+
+
+def add(data_a, data_b, factor):
+    """result[i] = A[i] + factor * B[i], rounded to nearest integer
+    (matches multiply()'s rounding convention). A and B are assumed
+    already validated as equal length by the caller. Unlike multiply()/
+    rebin(), negative results are NOT clamped -- matches TV's own
+    SpcAdd, which never clamps (tv-1.9.13/lib/tv/vsSpectra.c)."""
+    return np.round(data_a + factor * data_b).astype(np.int64)
+
+
+def subtract(data_a, data_b, factor):
+    """result[i] = A[i] - factor * B[i], rounded to nearest integer.
+    Same assumptions and TV-parity notes as add() above."""
+    return np.round(data_a - factor * data_b).astype(np.int64)

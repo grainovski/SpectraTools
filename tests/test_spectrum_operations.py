@@ -1,6 +1,6 @@
 import numpy as np
 
-from spectrum_operations import multiply, normalize_factors, rebin, reference_value
+from spectrum_operations import add, multiply, normalize_factors, rebin, reference_value, subtract
 
 
 def test_multiply_scales_and_rounds():
@@ -111,3 +111,55 @@ def test_normalize_factors_skips_zero_values():
 def test_normalize_factors_all_zero_is_a_no_op():
     factors = normalize_factors([0, 0, 0])
     assert factors == [1.0, 1.0, 1.0]
+
+
+def test_add_sums_with_second_spectrum_scaled_by_factor():
+    a = np.array([10, 20, 30], dtype=np.int64)
+    b = np.array([1, 2, 3], dtype=np.int64)
+    result = add(a, b, 2.0)
+    assert list(result) == [12, 24, 36]
+    assert result.dtype == np.int64
+
+
+def test_add_rounds_fractional_results_to_nearest_integer():
+    a = np.array([10, 10], dtype=np.int64)
+    b = np.array([1, 3], dtype=np.int64)
+    result = add(a, b, 0.5)
+    # 10+0.5=10.5 -> 10 (round-half-to-even), 10+1.5=11.5 -> 12 (round-half-to-even)
+    assert list(result) == [10, 12]
+
+
+def test_add_does_not_clamp_negative_results():
+    # add() itself never produces negatives from positive inputs and a
+    # positive factor, but it must not clamp regardless -- this pins
+    # down that no clamping code exists, using a factor large enough
+    # that the caller could reasonably combine it with subtract() and
+    # expect negatives to survive unchanged through add() too if ever
+    # composed. Direct negative-result coverage is on subtract() below,
+    # which is the realistic way this app produces negative results.
+    a = np.array([0, 0], dtype=np.int64)
+    b = np.array([5, -5], dtype=np.int64)
+    result = add(a, b, 1.0)
+    assert list(result) == [5, -5]
+
+
+def test_subtract_scales_second_spectrum_before_subtracting():
+    a = np.array([10, 20, 30], dtype=np.int64)
+    b = np.array([1, 2, 3], dtype=np.int64)
+    result = subtract(a, b, 2.0)
+    assert list(result) == [8, 16, 24]
+    assert result.dtype == np.int64
+
+
+def test_subtract_allows_negative_results():
+    a = np.array([5, 10], dtype=np.int64)
+    b = np.array([10, 5], dtype=np.int64)
+    result = subtract(a, b, 1.0)
+    assert list(result) == [-5, 5]
+
+
+def test_subtract_by_factor_one_is_plain_subtraction():
+    a = np.array([10, 20], dtype=np.int64)
+    b = np.array([3, 4], dtype=np.int64)
+    result = subtract(a, b, 1.0)
+    assert list(result) == [7, 16]
