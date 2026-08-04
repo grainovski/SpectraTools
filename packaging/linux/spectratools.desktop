@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
 Name=SpectraTools
-Exec=SpectraTools
+Exec=/opt/spectratools/SpectraTools
 Icon=spectratools
 Categories=Science;
