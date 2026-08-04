@@ -1,7 +1,7 @@
 """Build helper: render the app's icon (assets/icon.png, assets/icon.ico)
 from the exact same drawing code used for the app's own runtime window icon
 (main_window._app_icon_pixmap), so all three (window icon, .exe icon,
-Linux AppImage icon) are guaranteed to look identical.
+Linux .rpm/.deb icon) are guaranteed to look identical.
 
 assets/icon.ico is a minimal hand-rolled ICO container wrapping PNG-format
 entries -- supported natively since Windows Vista -- rather than depending

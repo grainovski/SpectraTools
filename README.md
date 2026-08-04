@@ -25,11 +25,17 @@ histogram `.txt` files and plotting them — the foundation of the
 - Windows: `powershell -File packaging\windows\build.ps1` (requires Inno
   Setup — see `packaging/windows/build.ps1` for the check/install step).
   Produces `packaging/windows/output/SpectraToolsSetup.exe`.
-- Linux: `bash packaging/linux/build.sh`, built and tested via WSL Ubuntu
-  in this repo's history. Produces
-  `packaging/linux/output/SpectraTools-x86_64.AppImage`. Downloads
-  `appimagetool` on first run if it isn't already present under
-  `packaging/linux/tools/` (requires internet access).
+- Linux: two scripts on two separate build hosts (RPM and DEB packaging
+  tools don't coexist on one distro; built and tested via WSL in this
+  repo's history):
+  - `bash packaging/linux/build.sh` on AlmaLinux 8 (glibc 2.28, for
+    broad RHEL-family compatibility) — PyInstaller onedir build, then
+    produces `packaging/linux/output/spectratools-<version>-1.x86_64.rpm`.
+  - `bash packaging/linux/build_deb.sh` on Ubuntu 24.04, run *after*
+    build.sh (it reuses build.sh's onedir output rather than rebuilding)
+    — produces `packaging/linux/output/spectratools_<version>_amd64.deb`.
+
+  See `packaging/linux/INSTALL.md` for end-user install instructions.
 
 Both build scripts generate `assets/icon.png`/`assets/icon.ico` on first
 run if not already present (via `packaging/make_icon.py`), using the same
