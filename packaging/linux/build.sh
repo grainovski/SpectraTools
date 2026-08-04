@@ -132,6 +132,23 @@ BuildArch: x86_64
 # comment" warning without the extra %.)
 %global _build_id_links none
 %global debug_package %{nil}
+# rpmbuild's default __os_install_post macro chain also runs brp-strip
+# ("strip -g") unconditionally on every ELF file under the buildroot that
+# isn't already stripped -- including PyInstaller's bundled _internal/*.so
+# files. For numpy's vendored libscipy_openblas64_*.so specifically, that
+# in-place strip corrupts the file's ELF segment alignment, breaking it at
+# dynamic-link time (ImportError: ... ELF load command address/offset not
+# properly aligned) -- found via Task 5's real installed-binary launch,
+# not a metadata-only check. This is a SEPARATE mechanism from the
+# build-id symlinks handled above: __os_install_post %%{nil} alone does
+# NOT suppress those (538 build-id links still appeared when tested
+# alone, verified) -- so this line is additive to, not a replacement
+# for, the two macros above; all three are required together. None of
+# __os_install_post's other normal side effects (doc compression, .py
+# bytecompile, shebang mangling, ldconfig cache refresh) apply to a
+# self-contained PyInstaller bundle, so disabling the whole chain costs
+# nothing here.
+%global __os_install_post %{nil}
 # Without this, rpmbuild's automatic dependency scanner walks every file
 # under %files, including PyInstaller's hundreds of bundled _internal/*.so
 # files, and can auto-generate spurious extra Requires/Provides from the
