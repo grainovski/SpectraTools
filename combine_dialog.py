@@ -71,7 +71,7 @@ class CombineDialog(QDialog):
         except ValueError:
             QMessageBox.warning(self, self.windowTitle(), "Please enter a valid number.")
             return
-        if factor <= 0:
+        if not (factor > 0):
             QMessageBox.warning(self, self.windowTitle(), "Factor must be greater than zero.")
             return
         spectrum_a = self._spectra[self._combo_a.currentIndex()]
