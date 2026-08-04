@@ -1,4 +1,9 @@
 # 6.11.x fails with "DLL load failed while importing QtWidgets" on Windows
+# Also: every PySide6 wheel from 6.3.0 onward requires glibc >=2.28 (the
+# last version with an older/manylinux1 wheel was 6.2.4, from 2021) --
+# this is why SpectraTools doesn't run on RHEL/CentOS 7 (glibc 2.17), and
+# no Linux build-baseline choice can work around it. See
+# packaging/linux/INSTALL.md and docs/superpowers/specs/2026-08-03-linux-native-packages-design.md.
 PySide6>=6.6,<6.9
 matplotlib>=3.8
 numpy>=1.26

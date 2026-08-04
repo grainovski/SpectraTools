@@ -4,6 +4,16 @@ SpectraTools ships as native `.deb` and `.rpm` packages. Both automatically
 install any missing runtime libraries as part of the same install command —
 no separate dependency-hunting required.
 
+**Minimum supported OS: RHEL/CentOS/AlmaLinux/Rocky 8 or later, or any
+current Debian/Ubuntu release.** SpectraTools does **not** run on RHEL/CentOS
+7 or older — this isn't a packaging limitation that could be fixed with a
+different build, it's because PySide6 (the Qt6 binding this app uses) and
+current numpy/scipy no longer publish wheels compatible with RHEL 7's glibc
+(2.17) at all; the last PySide6 release that did was 6.2.4 in 2021. If
+you're on RHEL/CentOS 7, the practical fix is upgrading that machine to a
+current release (RHEL/CentOS/AlmaLinux/Rocky 8+) rather than downgrading
+SpectraTools to match — RHEL 7 reached end-of-life in June 2024.
+
 ## Debian / Ubuntu
 
 ```
