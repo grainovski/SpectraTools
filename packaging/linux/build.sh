@@ -168,6 +168,7 @@ Requires: xcb-util-keysyms
 Requires: xcb-util-renderutil
 Requires: libatomic
 Requires: libcrypt.so.1()(64bit)
+Requires: xdg-utils
 
 %description
 A cross-platform desktop app for opening histogram files, plotting

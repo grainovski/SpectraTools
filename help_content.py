@@ -6,6 +6,9 @@ a generated page has zero dependencies once written to disk."""
 
 import base64
 import functools
+import os
+import shutil
+import subprocess
 import tempfile
 
 from PySide6.QtCore import QUrl
@@ -418,6 +421,46 @@ def build_about_html():
     return _page("About SpectraTools", body)
 
 
+# Tried in order when QDesktopServices.openUrl() fails on Linux -- xdg-open
+# first since it's the "correct" freedesktop-standard opener, then the most
+# common browsers directly by binary name. QDesktopServices relies on the OS
+# having a registered default handler for HTML content (xdg-open plus a
+# populated ~/.config/mimeapps.list or /etc/xdg/mimeapps.list); minimal
+# installs -- including every Linux environment this project has been built
+# and tested on -- commonly have neither configured even when a browser
+# binary is genuinely present, so it returns False with nothing to show for
+# it. Launching a binary directly bypasses that lookup entirely, the same as
+# a user running e.g. `firefox path.html` themselves.
+_FALLBACK_BROWSERS = (
+    "xdg-open",
+    "firefox",
+    "firefox-esr",
+    "google-chrome",
+    "google-chrome-stable",
+    "chromium",
+    "chromium-browser",
+    "epiphany",
+)
+
+
+def _fallback_subprocess_env():
+    """A copy of the environment with LD_LIBRARY_PATH restored to its
+    pre-bundle value (or removed if there wasn't one). PyInstaller's Linux
+    bootloader points LD_LIBRARY_PATH at the bundled library directory so
+    this frozen app's own dependencies resolve correctly, saving whatever
+    the real original value was (if any) under LD_LIBRARY_PATH_ORIG for
+    exactly this situation -- a child process like a system browser
+    inheriting the bundle's path unmodified can end up loading mismatched
+    bundled libraries instead of its own and misbehave or fail outright."""
+    env = os.environ.copy()
+    orig = env.pop("LD_LIBRARY_PATH_ORIG", None)
+    if orig is not None:
+        env["LD_LIBRARY_PATH"] = orig
+    else:
+        env.pop("LD_LIBRARY_PATH", None)
+    return env
+
+
 def open_help_page(html):
     """Writes html to a fresh temp file and opens it in the system's
     default browser, returning whether that succeeded. `delete=False`
@@ -430,7 +473,9 @@ def open_help_page(html):
     failure to the user instead of silently doing nothing (see e.g.
     main_window.py's _write_spectrum, _normalize_spectra), so this
     returns a bool for the caller to do the same rather than raising or
-    swallowing it."""
+    swallowing it. If QDesktopServices can't find a registered handler,
+    falls back to _FALLBACK_BROWSERS before giving up -- see that
+    tuple's comment for why this is necessary, not just defensive."""
     try:
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".html", prefix="spectratools_help_",
@@ -440,4 +485,16 @@ def open_help_page(html):
             path = f.name
     except OSError:
         return False
-    return QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+    if QDesktopServices.openUrl(QUrl.fromLocalFile(path)):
+        return True
+    env = _fallback_subprocess_env()
+    for candidate in _FALLBACK_BROWSERS:
+        binary = shutil.which(candidate)
+        if binary is None:
+            continue
+        try:
+            subprocess.Popen([binary, path], env=env)
+        except OSError:
+            continue
+        return True
+    return False

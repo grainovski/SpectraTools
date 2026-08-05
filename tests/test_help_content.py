@@ -1,5 +1,7 @@
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import types
@@ -7,6 +9,7 @@ from html.parser import HTMLParser
 
 from PySide6.QtGui import QDesktopServices
 
+import help_content
 from help_content import (
     build_about_html,
     build_howto_html,
@@ -175,10 +178,17 @@ def test_about_html_is_a_complete_html_document():
 
 
 def test_open_help_page_writes_a_temp_file_and_opens_it(qapp, monkeypatch):
+    # Must return True, not just record the call -- a falsy return (e.g.
+    # bare list.append()'s implicit None) would make open_help_page fall
+    # through into the real, unmocked subprocess fallback below and spawn
+    # an actual browser as a side effect of running this test.
     opened = []
-    monkeypatch.setattr(
-        QDesktopServices, "openUrl", staticmethod(lambda url: opened.append(url))
-    )
+
+    def _open_url(url):
+        opened.append(url)
+        return True
+
+    monkeypatch.setattr(QDesktopServices, "openUrl", staticmethod(_open_url))
     open_help_page("<html><body>hello</body></html>")
     assert len(opened) == 1
     path = opened[0].toLocalFile()
@@ -189,14 +199,24 @@ def test_open_help_page_writes_a_temp_file_and_opens_it(qapp, monkeypatch):
 
 def test_open_help_page_returns_true_on_success(qapp, monkeypatch):
     monkeypatch.setattr(QDesktopServices, "openUrl", staticmethod(lambda url: True))
+
+    def _unexpected_popen(*args, **kwargs):
+        raise AssertionError("fallback must not run when QDesktopServices already succeeded")
+
+    monkeypatch.setattr(help_content.subprocess, "Popen", _unexpected_popen)
     assert open_help_page("<html></html>") is True
 
 
 def test_open_help_page_returns_false_when_no_browser_handler(qapp, monkeypatch):
     # QDesktopServices.openUrl itself returns False (not an exception)
     # when there's no registered handler for the URL -- e.g. no default
-    # browser configured. Must be surfaced, not silently dropped.
+    # browser configured. Must be surfaced, not silently dropped -- and
+    # the fallback candidates below must ALSO all come up empty for the
+    # overall result to be False, since a missing OS-level handler
+    # doesn't necessarily mean no browser binary exists at all (see the
+    # fallback tests below).
     monkeypatch.setattr(QDesktopServices, "openUrl", staticmethod(lambda url: False))
+    monkeypatch.setattr(help_content.shutil, "which", lambda name: None)
     assert open_help_page("<html></html>") is False
 
 
@@ -206,3 +226,103 @@ def test_open_help_page_returns_false_on_write_failure(qapp, monkeypatch):
 
     monkeypatch.setattr(tempfile, "NamedTemporaryFile", _raise_oserror)
     assert open_help_page("<html></html>") is False
+
+
+def test_open_help_page_falls_back_to_a_browser_binary_when_qdesktopservices_fails(qapp, monkeypatch):
+    # Many Linux installs (including this project's own Linux test
+    # environments) have no xdg-open and no default-browser
+    # association configured at all, even when a real browser binary
+    # is present -- QDesktopServices.openUrl() can't find a "launcher"
+    # there and returns False. The fallback bypasses that OS-level
+    # lookup entirely by launching a known browser binary directly.
+    monkeypatch.setattr(QDesktopServices, "openUrl", staticmethod(lambda url: False))
+    monkeypatch.setattr(
+        help_content.shutil, "which",
+        lambda name: "/usr/bin/firefox" if name == "firefox" else None,
+    )
+    popen_calls = []
+    monkeypatch.setattr(
+        help_content.subprocess, "Popen",
+        lambda args, **kwargs: popen_calls.append((args, kwargs)),
+    )
+    assert open_help_page("<html></html>") is True
+    assert len(popen_calls) == 1
+    args, kwargs = popen_calls[0]
+    assert args[0] == "/usr/bin/firefox"
+    assert os.path.exists(args[1])
+
+
+def test_open_help_page_skips_missing_candidates_and_uses_first_found(qapp, monkeypatch):
+    # "xdg-open" is checked first (see _FALLBACK_BROWSERS) but is
+    # commonly absent on minimal installs -- confirm the loop moves on
+    # to the next candidate instead of giving up.
+    monkeypatch.setattr(QDesktopServices, "openUrl", staticmethod(lambda url: False))
+    monkeypatch.setattr(
+        help_content.shutil, "which",
+        lambda name: "/usr/bin/chromium" if name == "chromium" else None,
+    )
+    popen_calls = []
+    monkeypatch.setattr(
+        help_content.subprocess, "Popen",
+        lambda args, **kwargs: popen_calls.append((args, kwargs)),
+    )
+    assert open_help_page("<html></html>") is True
+    assert popen_calls[0][0][0] == "/usr/bin/chromium"
+
+
+def test_open_help_page_fallback_tries_the_next_candidate_if_popen_raises(qapp, monkeypatch):
+    monkeypatch.setattr(QDesktopServices, "openUrl", staticmethod(lambda url: False))
+    monkeypatch.setattr(
+        help_content.shutil, "which",
+        lambda name: {"xdg-open": "/usr/bin/xdg-open", "firefox": "/usr/bin/firefox"}.get(name),
+    )
+    popen_calls = []
+
+    def _popen(args, **kwargs):
+        popen_calls.append(args)
+        if args[0] == "/usr/bin/xdg-open":
+            raise OSError("exec format error")
+
+    monkeypatch.setattr(help_content.subprocess, "Popen", _popen)
+    assert open_help_page("<html></html>") is True
+    assert [c[0] for c in popen_calls] == ["/usr/bin/xdg-open", "/usr/bin/firefox"]
+
+
+def test_open_help_page_fallback_restores_saved_ld_library_path(qapp, monkeypatch):
+    # PyInstaller's Linux bootloader points LD_LIBRARY_PATH at the
+    # bundled library directory so the frozen app's own dependencies
+    # resolve correctly, saving whatever the real original value was
+    # (if any) under LD_LIBRARY_PATH_ORIG. A child process like a
+    # system browser inheriting the bundle's path unmodified can end
+    # up loading mismatched bundled libraries instead of its own.
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/_MEIxxxxxx")
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/usr/lib/original")
+    monkeypatch.setattr(QDesktopServices, "openUrl", staticmethod(lambda url: False))
+    monkeypatch.setattr(
+        help_content.shutil, "which",
+        lambda name: "/usr/bin/firefox" if name == "firefox" else None,
+    )
+    popen_calls = []
+    monkeypatch.setattr(
+        help_content.subprocess, "Popen",
+        lambda args, **kwargs: popen_calls.append(kwargs),
+    )
+    open_help_page("<html></html>")
+    assert popen_calls[0]["env"]["LD_LIBRARY_PATH"] == "/usr/lib/original"
+
+
+def test_open_help_page_fallback_strips_ld_library_path_when_no_orig_saved(qapp, monkeypatch):
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/_MEIxxxxxx")
+    monkeypatch.delenv("LD_LIBRARY_PATH_ORIG", raising=False)
+    monkeypatch.setattr(QDesktopServices, "openUrl", staticmethod(lambda url: False))
+    monkeypatch.setattr(
+        help_content.shutil, "which",
+        lambda name: "/usr/bin/firefox" if name == "firefox" else None,
+    )
+    popen_calls = []
+    monkeypatch.setattr(
+        help_content.subprocess, "Popen",
+        lambda args, **kwargs: popen_calls.append(kwargs),
+    )
+    open_help_page("<html></html>")
+    assert "LD_LIBRARY_PATH" not in popen_calls[0]["env"]
