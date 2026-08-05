@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from calibration_dialog import CalibrationDialog
+from combine_dialog import CombineDialog
 from factor_dialog import FactorDialog
 from fit_mode import FitModeController
 from help_content import (
@@ -43,7 +44,7 @@ from histogram_io import ParseError, load_histogram, save_histogram
 from settings import Settings
 from spe_io import load_spe, save_spe
 from spectrum import LoadedSpectrum, next_color
-from spectrum_operations import multiply, normalize_factors, rebin, reference_value
+from spectrum_operations import add, multiply, normalize_factors, rebin, reference_value, subtract
 from spk_io import load_spk, save_spk
 from theme import qt_stylesheet, style_axes
 
@@ -377,6 +378,18 @@ class MainWindow(QMainWindow):
         self.normalize_action.triggered.connect(self._normalize_spectra)
         self.operations_menu.addAction(self.normalize_action)
 
+        self.add_action = QAction("Add Spectra...", self)
+        self.add_action.setShortcut("Ctrl+A")
+        self.add_action.setEnabled(False)
+        self.add_action.triggered.connect(self._open_add_dialog)
+        self.operations_menu.addAction(self.add_action)
+
+        self.subtract_action = QAction("Subtract Spectra...", self)
+        self.subtract_action.setShortcut("Ctrl+Shift+A")
+        self.subtract_action.setEnabled(False)
+        self.subtract_action.triggered.connect(self._open_subtract_dialog)
+        self.operations_menu.addAction(self.subtract_action)
+
         self.help_menu = self.menuBar().addMenu("&Help")
 
         self.howto_action = QAction("HowTo", self)
@@ -592,6 +605,55 @@ class MainWindow(QMainWindow):
             self.fit_controller._show_status_message(
                 f"Skipped (zero reference value): {', '.join(skipped)}", 5000
             )
+
+    def _open_add_dialog(self):
+        if len(self.spectra) < 2:
+            return
+        active = next((s for s in self.spectra if s.active), None)
+        dialog = CombineDialog(self, "Add Spectra", self.spectra, active)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._apply_add(dialog.result_spectrum_a, dialog.result_spectrum_b, dialog.result_factor)
+
+    def _apply_add(self, spectrum_a, spectrum_b, factor):
+        data = add(spectrum_a.data, spectrum_b.data, factor)
+        name_a = os.path.basename(spectrum_a.path)
+        name_b = os.path.basename(spectrum_b.path)
+        path = f"{name_a} + {name_b}" if factor == 1 else f"{name_a} + {factor}x{name_b}"
+        self._add_combined_spectrum(path, data)
+
+    def _open_subtract_dialog(self):
+        if len(self.spectra) < 2:
+            return
+        active = next((s for s in self.spectra if s.active), None)
+        dialog = CombineDialog(self, "Subtract Spectra", self.spectra, active)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._apply_subtract(dialog.result_spectrum_a, dialog.result_spectrum_b, dialog.result_factor)
+
+    def _apply_subtract(self, spectrum_a, spectrum_b, factor):
+        data = subtract(spectrum_a.data, spectrum_b.data, factor)
+        name_a = os.path.basename(spectrum_a.path)
+        name_b = os.path.basename(spectrum_b.path)
+        path = f"{name_a} - {name_b}" if factor == 1 else f"{name_a} - {factor}x{name_b}"
+        self._add_combined_spectrum(path, data)
+
+    def _add_combined_spectrum(self, path, data):
+        # Shared by _apply_add/_apply_subtract -- inserting a newly
+        # computed spectrum into the loaded list and refreshing every
+        # UI surface that depends on it is identical bookkeeping either
+        # way; only the operation and naming above differ.
+        color_index = self._next_color_index
+        self._next_color_index += 1
+        spectrum = LoadedSpectrum(path, data, next_color(color_index, self._theme))
+        spectrum.color_index = color_index
+        for s in self.spectra:
+            s.active = False
+        spectrum.active = True
+        self.spectra.append(spectrum)
+        self._update_spectrum_list()
+        self._update_fit_mode_availability()
+        self._update_operations_availability()
+        self.fit_controller.update_results_list()
+        self._plot_data()
 
     def _open_save_spectrum_dialog(self):
         active = next((s for s in self.spectra if s.active), None)
@@ -1015,6 +1077,8 @@ class MainWindow(QMainWindow):
         self.close_spectrum_action.setEnabled(active is not None)
         visible_count = sum(1 for s in self.spectra if s.visible)
         self.normalize_action.setEnabled(visible_count >= 2)
+        self.add_action.setEnabled(len(self.spectra) >= 2)
+        self.subtract_action.setEnabled(len(self.spectra) >= 2)
 
     def _on_scroll(self, event):
         if event.inaxes != self.axes or event.xdata is None:
