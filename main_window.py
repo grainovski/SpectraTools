@@ -641,6 +641,12 @@ class MainWindow(QMainWindow):
         # computed spectrum into the loaded list and refreshing every
         # UI surface that depends on it is identical bookkeeping either
         # way; only the operation and naming above differ.
+        existing_paths = {s.path for s in self.spectra}
+        if path in existing_paths:
+            suffix = 2
+            while f"{path} ({suffix})" in existing_paths:
+                suffix += 1
+            path = f"{path} ({suffix})"
         color_index = self._next_color_index
         self._next_color_index += 1
         spectrum = LoadedSpectrum(path, data, next_color(color_index, self._theme))
@@ -650,9 +656,6 @@ class MainWindow(QMainWindow):
         spectrum.active = True
         self.spectra.append(spectrum)
         self._update_spectrum_list()
-        self._update_fit_mode_availability()
-        self._update_operations_availability()
-        self.fit_controller.update_results_list()
         self._plot_data()
 
     def _open_save_spectrum_dialog(self):

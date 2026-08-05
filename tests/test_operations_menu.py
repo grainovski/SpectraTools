@@ -619,6 +619,257 @@ def test_normalize_ignores_hidden_spectra(qapp):
     assert list(spectrum_c.data) == [1, 1000]
 
 
+def test_apply_add_produces_summed_data(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.data = np.array([10, 20, 30], dtype=np.int64)
+    spectrum_b.data = np.array([1, 2, 3], dtype=np.int64)
+
+    main_window._apply_add(spectrum_a, spectrum_b, 2.0)
+
+    assert list(main_window.spectra[-1].data) == [12, 24, 36]
+
+
+def test_apply_add_makes_the_result_active_and_deactivates_the_rest(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.active = True
+    spectrum_b.active = False
+
+    main_window._apply_add(spectrum_a, spectrum_b, 1.0)
+
+    result = main_window.spectra[-1]
+    assert result.active is True
+    assert spectrum_a.active is False
+    assert spectrum_b.active is False
+
+
+def test_apply_add_names_result_with_basenames_when_factor_is_one(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window, path="/fake/dir/a.spe")
+    spectrum_b = _make_active_spectrum(main_window, path="/fake/other/b.spe")
+
+    main_window._apply_add(spectrum_a, spectrum_b, 1.0)
+
+    assert main_window.spectra[-1].path == "a.spe + b.spe"
+
+
+def test_apply_add_names_result_with_factor_when_not_one(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window, path="/fake/dir/a.spe")
+    spectrum_b = _make_active_spectrum(main_window, path="/fake/other/b.spe")
+
+    main_window._apply_add(spectrum_a, spectrum_b, 2.5)
+
+    assert main_window.spectra[-1].path == "a.spe + 2.5xb.spe"
+
+
+def test_apply_subtract_produces_subtracted_data(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.data = np.array([10, 20, 30], dtype=np.int64)
+    spectrum_b.data = np.array([1, 2, 3], dtype=np.int64)
+
+    main_window._apply_subtract(spectrum_a, spectrum_b, 2.0)
+
+    assert list(main_window.spectra[-1].data) == [8, 16, 24]
+
+
+def test_apply_subtract_makes_the_result_active_and_deactivates_the_rest(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.active = True
+    spectrum_b.active = False
+
+    main_window._apply_subtract(spectrum_a, spectrum_b, 1.0)
+
+    result = main_window.spectra[-1]
+    assert result.active is True
+    assert spectrum_a.active is False
+    assert spectrum_b.active is False
+
+
+def test_apply_subtract_names_result_with_basenames_when_factor_is_one(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window, path="/fake/dir/a.spe")
+    spectrum_b = _make_active_spectrum(main_window, path="/fake/other/b.spe")
+
+    main_window._apply_subtract(spectrum_a, spectrum_b, 1.0)
+
+    assert main_window.spectra[-1].path == "a.spe - b.spe"
+
+
+def test_apply_subtract_names_result_with_factor_when_not_one(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window, path="/fake/dir/a.spe")
+    spectrum_b = _make_active_spectrum(main_window, path="/fake/other/b.spe")
+
+    main_window._apply_subtract(spectrum_a, spectrum_b, 2.5)
+
+    assert main_window.spectra[-1].path == "a.spe - 2.5xb.spe"
+
+
+def test_add_combined_spectrum_disambiguates_a_colliding_path(qapp):
+    # Regression test: _add_combined_spectrum is the one call site that
+    # inserts into self.spectra without a uniqueness guard on .path (unlike
+    # _load_files' `if any(s.path == path ...): continue`). A collision used
+    # to leave two spectra sharing one .path, which made _remove_spectrum
+    # (matches by `s.path != path`, no break) delete both at once and
+    # _on_active_toggled mark both active simultaneously. Repeating the same
+    # Add with the same inputs/factor is the ordinary way a user hits this.
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window, path="/fake/dir/a.spe")
+    spectrum_b = _make_active_spectrum(main_window, path="/fake/other/b.spe")
+
+    main_window._apply_add(spectrum_a, spectrum_b, 1.0)
+    main_window._apply_add(spectrum_a, spectrum_b, 1.0)
+
+    first_result, second_result = main_window.spectra[-2], main_window.spectra[-1]
+    assert first_result.path != second_result.path
+
+
+def test_add_action_disabled_with_fewer_than_two_spectra(qapp):
+    main_window = MainWindow()
+    assert main_window.add_action.isEnabled() is False
+    _make_active_spectrum(main_window)
+    assert main_window.add_action.isEnabled() is False
+
+
+def test_add_action_enabled_with_two_spectra(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    _make_active_spectrum(main_window)
+    assert main_window.add_action.isEnabled() is True
+
+
+def test_add_action_has_shortcut(qapp):
+    main_window = MainWindow()
+    assert main_window.add_action.shortcut() == QKeySequence("Ctrl+A")
+
+
+def test_add_action_in_operations_menu(qapp):
+    main_window = MainWindow()
+    assert main_window.add_action in main_window.operations_menu.actions()
+
+
+def test_subtract_action_disabled_with_fewer_than_two_spectra(qapp):
+    main_window = MainWindow()
+    assert main_window.subtract_action.isEnabled() is False
+    _make_active_spectrum(main_window)
+    assert main_window.subtract_action.isEnabled() is False
+
+
+def test_subtract_action_enabled_with_two_spectra(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    _make_active_spectrum(main_window)
+    assert main_window.subtract_action.isEnabled() is True
+
+
+def test_subtract_action_has_shortcut(qapp):
+    main_window = MainWindow()
+    assert main_window.subtract_action.shortcut() == QKeySequence("Ctrl+Shift+A")
+
+
+def test_subtract_action_in_operations_menu(qapp):
+    main_window = MainWindow()
+    assert main_window.subtract_action in main_window.operations_menu.actions()
+
+
+def test_open_add_dialog_applies_the_chosen_spectra_and_factor(qapp, monkeypatch):
+    from combine_dialog import CombineDialog
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.data = np.array([10, 20], dtype=np.int64)
+    spectrum_b.data = np.array([1, 2], dtype=np.int64)
+
+    def fake_exec(self):
+        self.result_spectrum_a = spectrum_a
+        self.result_spectrum_b = spectrum_b
+        self.result_factor = 3.0
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(CombineDialog, "exec", fake_exec)
+    main_window._open_add_dialog()
+
+    assert list(main_window.spectra[-1].data) == [13, 26]
+
+
+def test_open_add_dialog_does_nothing_when_cancelled(qapp, monkeypatch):
+    from combine_dialog import CombineDialog
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    _make_active_spectrum(main_window)
+
+    def fake_exec(self):
+        self.result_spectrum_a = None
+        self.result_spectrum_b = None
+        self.result_factor = None
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(CombineDialog, "exec", fake_exec)
+    main_window._open_add_dialog()
+
+    assert len(main_window.spectra) == 2
+
+
+def test_open_add_dialog_does_nothing_with_fewer_than_two_spectra(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window._open_add_dialog()  # must not raise
+    assert len(main_window.spectra) == 1
+
+
+def test_open_subtract_dialog_applies_the_chosen_spectra_and_factor(qapp, monkeypatch):
+    from combine_dialog import CombineDialog
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.data = np.array([10, 20], dtype=np.int64)
+    spectrum_b.data = np.array([1, 2], dtype=np.int64)
+
+    def fake_exec(self):
+        self.result_spectrum_a = spectrum_a
+        self.result_spectrum_b = spectrum_b
+        self.result_factor = 3.0
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(CombineDialog, "exec", fake_exec)
+    main_window._open_subtract_dialog()
+
+    assert list(main_window.spectra[-1].data) == [7, 14]
+
+
+def test_open_subtract_dialog_does_nothing_when_cancelled(qapp, monkeypatch):
+    from combine_dialog import CombineDialog
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    _make_active_spectrum(main_window)
+
+    def fake_exec(self):
+        self.result_spectrum_a = None
+        self.result_spectrum_b = None
+        self.result_factor = None
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(CombineDialog, "exec", fake_exec)
+    main_window._open_subtract_dialog()
+
+    assert len(main_window.spectra) == 2
+
+
+def test_open_subtract_dialog_does_nothing_with_fewer_than_two_spectra(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window._open_subtract_dialog()  # must not raise
+    assert len(main_window.spectra) == 1
+
+
 def test_save_spectrum_action_disabled_with_no_active_spectrum(qapp):
     main_window = MainWindow()
     assert main_window.save_spectrum_action.isEnabled() is False
