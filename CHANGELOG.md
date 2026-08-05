@@ -4,6 +4,45 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [2.1.0] - 2026-08-05
+
+### Added
+
+- **Add Spectra... / Subtract Spectra...** (`Ctrl+A` / `Ctrl+Shift+A`):
+  combine two loaded spectra of equal length into a new spectrum, with
+  the second scaled by a user-provided factor (defaulting to 1) first.
+  The originals are left untouched. Subtracting can produce negative
+  channel counts in the result, which is expected and not an error.
+  Picking spectra of different lengths shows an error naming both
+  channel counts instead of proceeding.
+- Documented in the HowTo page alongside every other Operations-menu
+  command.
+- The About page now credits Claude Code alongside the copyright line.
+
+### Fixed
+
+- A new spectrum from Add/Subtract could collide in name with an
+  existing one if the same operation was repeated with the same
+  inputs — since spectra are otherwise identified by that name
+  internally, this could cause removing one to silently remove the
+  other too. Fixed by auto-disambiguating with a `(2)`, `(3)`, ...
+  suffix on collision.
+- A `NaN` factor typed into the Add/Subtract dialog was not rejected
+  by the "must be greater than zero" check the way it should have
+  been, due to a comparison that doesn't behave as expected for `NaN`
+  under IEEE-754 rules.
+
+### Known issues
+
+- On WSLg (WSL's GUI subsystem) specifically, a secondary window (a
+  dialog such as Multiply by Factor or the file-open dialog) can
+  briefly flicker — disappear and reappear — right after opening. This
+  is the same underlying WSLg compositor behavior already noted below
+  for the main window, just triggered by dialog creation instead of
+  app launch. Purely cosmetic and self-resolving; not observed on a
+  native Linux desktop, and no application-side fix exists. See
+  `packaging/linux/INSTALL.md` for details.
+
 ## [2.0.0] - 2026-08-04
 
 ### Added
