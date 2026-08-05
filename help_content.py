@@ -108,6 +108,8 @@ program supports.</p>
 <tr><td><kbd>Ctrl+M</kbd></td><td>Multiply by Factor...</td></tr>
 <tr><td><kbd>Ctrl+R</kbd></td><td>Rebin by Factor...</td></tr>
 <tr><td><kbd>Ctrl+N</kbd></td><td>Normalize Spectra</td></tr>
+<tr><td><kbd>Ctrl+A</kbd></td><td>Add Spectra...</td></tr>
+<tr><td><kbd>Ctrl+Shift+A</kbd></td><td>Subtract Spectra...</td></tr>
 </table>
 
 <h3>Plot toolbar</h3>
@@ -189,7 +191,18 @@ region -- then scales every <i>visible</i> spectrum (at least two must
 be visible) so they all read the same value there, useful for visually
 comparing spectra taken with different live times.</p>
 
-<h3>6. Performing a fit</h3>
+<h3>6. Add and Subtract Spectra</h3>
+<p><b>Add Spectra...</b> (<kbd>Ctrl+A</kbd>) and <b>Subtract
+Spectra...</b> (<kbd>Ctrl+Shift+A</kbd>) each open a dialog to pick two
+loaded spectra, Spectrum A and Spectrum B, plus a factor (defaulting to
+1). The result is a new spectrum -- Spectrum A, plus or minus Spectrum B
+scaled by the factor -- added alongside the originals, which are left
+untouched. Both spectra must have the same number of channels; picking a
+mismatched pair shows an error naming both channel counts instead of
+proceeding. Subtracting can produce negative channel counts in the
+result -- this is expected, not an error.</p>
+
+<h3>7. Performing a fit</h3>
 <p>This is the core workflow, and it's entirely mouse-plus-keyboard on
 the plot itself:</p>
 <ol>
@@ -216,14 +229,14 @@ clears only the active spectrum's committed fits, leaving any
 in-progress marks alone. <kbd>Ctrl+E</kbd> exports the active
 spectrum's committed fits.</p>
 
-<h3>7. Integration</h3>
+<h3>8. Integration</h3>
 <p><kbd>Ctrl+I</kbd> computes gross/background/net counts across the
 marked regions directly (background centroid, FWHM, skewness, and area,
 all with uncertainties) <i>without</i> fitting a peak shape -- faster,
 and useful when a peak is too irregular to fit well, or when you only
 need a total count rather than individual peak parameters.</p>
 
-<h3>8. View options</h3>
+<h3>9. View options</h3>
 <p><kbd>Ctrl+G</kbd> toggles a logarithmic Y axis. <kbd>Ctrl+D</kbd>
 toggles dark theme. <kbd>Ctrl+1</kbd>/<kbd>Ctrl+2</kbd>/<kbd>Ctrl+3</kbd>
 show or hide the Spectra, Fit Results, and Fit Parameters panels.

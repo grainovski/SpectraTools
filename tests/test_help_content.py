@@ -55,7 +55,7 @@ def test_howto_html_contains_every_shortcut():
     for shortcut in [
         "Ctrl+O", "Ctrl+S", "Ctrl+W", "Ctrl+Q",
         "Ctrl+G", "Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+D",
-        "Ctrl+L", "Ctrl+T", "Ctrl+M", "Ctrl+R", "Ctrl+N",
+        "Ctrl+L", "Ctrl+T", "Ctrl+M", "Ctrl+R", "Ctrl+N", "Ctrl+A", "Ctrl+Shift+A",
         "Ctrl+=", "Ctrl+-", "Ctrl+0",
         "Ctrl+F", "Ctrl+C", "Ctrl+Shift+C", "Ctrl+E", "Ctrl+I",
         "B", "R", "P", "F1",
@@ -73,6 +73,7 @@ def test_howto_html_covers_every_operation():
         "Multiply",
         "Rebin",
         "Normalize",
+        "Add and Subtract Spectra",
         "Performing a fit",
         "Integration",
         "View options",
