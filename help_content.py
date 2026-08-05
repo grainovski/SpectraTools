@@ -9,6 +9,7 @@ import functools
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from PySide6.QtCore import QUrl
@@ -421,16 +422,13 @@ def build_about_html():
     return _page("About SpectraTools", body)
 
 
-# Tried in order when QDesktopServices.openUrl() fails on Linux -- xdg-open
-# first since it's the "correct" freedesktop-standard opener, then the most
-# common browsers directly by binary name. QDesktopServices relies on the OS
-# having a registered default handler for HTML content (xdg-open plus a
-# populated ~/.config/mimeapps.list or /etc/xdg/mimeapps.list); minimal
-# installs -- including every Linux environment this project has been built
-# and tested on -- commonly have neither configured even when a browser
-# binary is genuinely present, so it returns False with nothing to show for
-# it. Launching a binary directly bypasses that lookup entirely, the same as
-# a user running e.g. `firefox path.html` themselves.
+# Tried in order on Linux -- xdg-open first since it's the "correct"
+# freedesktop-standard opener (and correctly respects a real default-browser
+# association when one exists), then the most common browsers directly by
+# binary name as a fallback for systems with no such association configured
+# at all (confirmed common, not hypothetical -- see open_help_page's
+# docstring). Not used on Windows/macOS, where QDesktopServices.openUrl()
+# already works correctly and natively.
 _FALLBACK_BROWSERS = (
     "xdg-open",
     "firefox",
@@ -443,7 +441,7 @@ _FALLBACK_BROWSERS = (
 )
 
 
-def _fallback_subprocess_env():
+def _sanitized_subprocess_env():
     """A copy of the environment with LD_LIBRARY_PATH restored to its
     pre-bundle value (or removed if there wasn't one). PyInstaller's Linux
     bootloader points LD_LIBRARY_PATH at the bundled library directory so
@@ -451,7 +449,12 @@ def _fallback_subprocess_env():
     the real original value was (if any) under LD_LIBRARY_PATH_ORIG for
     exactly this situation -- a child process like a system browser
     inheriting the bundle's path unmodified can end up loading mismatched
-    bundled libraries instead of its own and misbehave or fail outright."""
+    bundled libraries instead of its own and crashing outright. Confirmed
+    concretely, not just in theory: with LD_LIBRARY_PATH left pointing at
+    the bundle, a spawned Epiphany fails immediately with `libstdc++.so.6:
+    version 'GLIBCXX_3.4.30' not found`, since the bundled libstdc++ is
+    older than what a real system WebKitGTK build needs; with it removed,
+    the exact same launch works cleanly."""
     env = os.environ.copy()
     orig = env.pop("LD_LIBRARY_PATH_ORIG", None)
     if orig is not None:
@@ -467,15 +470,34 @@ def open_help_page(html):
     is required -- the file must still exist after this function
     returns for the browser to open it -- and cleanup is left to the OS
     temp directory rather than this code, matching this feature's
-    no-caching, no-persistence design. Both the write (a locked-down
-    TEMP directory) and the open (no registered .html handler) can fail
-    -- every other I/O boundary in this codebase surfaces that kind of
-    failure to the user instead of silently doing nothing (see e.g.
-    main_window.py's _write_spectrum, _normalize_spectra), so this
-    returns a bool for the caller to do the same rather than raising or
-    swallowing it. If QDesktopServices can't find a registered handler,
-    falls back to _FALLBACK_BROWSERS before giving up -- see that
-    tuple's comment for why this is necessary, not just defensive."""
+    no-caching, no-persistence design. The write (a locked-down TEMP
+    directory) can fail -- every other I/O boundary in this codebase
+    surfaces that kind of failure to the user instead of silently doing
+    nothing (see e.g. main_window.py's _write_spectrum,
+    _normalize_spectra), so this returns a bool for the caller to do
+    the same rather than raising or swallowing it.
+
+    On Windows/macOS, opens via QDesktopServices.openUrl(), which
+    already works correctly there. On Linux, that same call is
+    deliberately NOT used at all -- confirmed two independent, both
+    real ways for it to fail silently or worse:
+    (1) many real Linux installs have no xdg-open and no
+        ~/.config/mimeapps.list / /etc/xdg/mimeapps.list configured at
+        all, so it just returns False with nothing to show for it; and
+    (2) even when xdg-open IS present and DOES find a browser, Qt's own
+        internal invocation of it inherits this frozen process's own
+        (PyInstaller-set) environment unmodified, including
+        LD_LIBRARY_PATH -- which crashes the spawned browser (see
+        _sanitized_subprocess_env's docstring for the exact confirmed
+        failure). There is no way to pass Qt's internal call a
+        sanitized environment, since QDesktopServices.openUrl() takes
+        no such parameter -- the only fix is to never let it make that
+        call in the first place and always launch the browser
+        ourselves, with an environment we control, via
+        _FALLBACK_BROWSERS (which still tries xdg-open first, so a
+        properly configured system's real default browser choice is
+        still respected -- just invoked by us, sanitized, instead of
+        by Qt)."""
     try:
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".html", prefix="spectratools_help_",
@@ -485,9 +507,9 @@ def open_help_page(html):
             path = f.name
     except OSError:
         return False
-    if QDesktopServices.openUrl(QUrl.fromLocalFile(path)):
-        return True
-    env = _fallback_subprocess_env()
+    if not sys.platform.startswith("linux"):
+        return QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+    env = _sanitized_subprocess_env()
     for candidate in _FALLBACK_BROWSERS:
         binary = shutil.which(candidate)
         if binary is None:
