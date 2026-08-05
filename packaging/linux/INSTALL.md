@@ -60,3 +60,25 @@ sudo dnf remove spectratools
 
 SpectraTools appears in your desktop's application menu (under Science), or
 run `spectratools` from a terminal.
+
+## Known issues on WSLg (Windows Subsystem for Linux)
+
+If you're running SpectraTools inside WSL rather than on a native Linux
+desktop, WSLg's compositor has a couple of cosmetic quirks that aren't bugs
+in SpectraTools itself:
+
+- **Main window doesn't appear after launch (only a taskbar icon).** This is
+  a known WSLg compositor issue, not specific to SpectraTools. Fix: from a
+  Windows terminal (not from inside WSL), run `wsl --shutdown`, wait a few
+  seconds, then relaunch.
+- **A secondary window (a dialog, e.g. Multiply by Factor or the file-open
+  dialog) briefly disappears right after opening, then reappears on its
+  own.** Same underlying WSLg compositor behavior as above, just triggered
+  by dialog creation instead of the main window. It's purely visual and
+  self-resolves within a moment — the dialog works normally once it
+  reappears. No action needed; if it becomes persistently annoying, the same
+  `wsl --shutdown` fix applies.
+
+Neither of these has been observed on a native Linux desktop (only through
+WSLg), and neither has an application-side fix — both are WSLg's own
+Wayland/XWayland compositor timing behavior.

@@ -411,7 +411,8 @@ def build_about_html():
 <h1>SpectraTools</h1>
 <p>Version {version}</p>
 <p>Built: {build_date}</p>
-<p style="margin-top:2rem;">Copyright &copy; Georgi Rainovski</p>
+<p style="margin-top:2rem;">This application is created using AI Claude Code.</p>
+<p>Copyright &copy; Georgi Rainovski</p>
 </div>
 """
     return _page("About SpectraTools", body)
