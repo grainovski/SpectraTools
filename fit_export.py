@@ -92,16 +92,17 @@ def integration_result_to_json_record(result, spectrum_path, calibration=None):
         "type": "integration",
         "timestamp": result.timestamp,
         "spectrum_path": spectrum_path,
-        "fit_region": list(result.fit_region),
-        "gross": _integration_layer_record(result, "gross", calibration),
     }
-    if not result.has_background:
-        return record
-    record["left_bg_region"] = list(result.left_bg_region)
-    record["right_bg_region"] = list(result.right_bg_region)
-    record["background_density"] = result.background_density
-    record["background"] = _integration_layer_record(result, "background", calibration)
-    record["net"] = _integration_layer_record(result, "net", calibration)
+    if result.has_background:
+        record["left_bg_region"] = list(result.left_bg_region)
+        record["right_bg_region"] = list(result.right_bg_region)
+    record["fit_region"] = list(result.fit_region)
+    if result.has_background:
+        record["background_density"] = result.background_density
+    record["gross"] = _integration_layer_record(result, "gross", calibration)
+    if result.has_background:
+        record["background"] = _integration_layer_record(result, "background", calibration)
+        record["net"] = _integration_layer_record(result, "net", calibration)
     return record
 
 
