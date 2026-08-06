@@ -4,6 +4,20 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [2.1.1] - 2026-08-05
+
+### Fixed
+
+- **Help pages (HowTo, Knowledge Database, About) failed to open on Linux**,
+  showing either no browser at all or a crash in the launched browser,
+  depending on what was installed on the system. Root cause: the app
+  relied entirely on the OS to know how to open an HTML file, which many
+  real Linux installs don't have configured, and even when they do, the
+  frozen app's own bundled libraries could interfere with the browser it
+  launched. The Help menu now always launches a browser directly itself
+  on Linux, sidestepping both problems. Confirmed working by the user on
+  a real Linux machine after two fix iterations.
+
 ## [2.1.0] - 2026-08-05
 
 ### Added
