@@ -2318,6 +2318,27 @@ def test_run_integration_appends_an_integration_result(qapp):
     assert result.timestamp is not None
 
 
+def test_ready_to_integrate_allows_zero_background_regions(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    state = main_window.fit_controller.state
+
+    assert state.ready_to_integrate() is False
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    assert state.ready_to_integrate() is True  # no background marks needed
+
+
+def test_integrate_button_enables_with_zero_background_regions(qapp):
+    main_window = MainWindow()
+    assert main_window.integrate_button.isEnabled() is False
+
+    _make_active_spectrum(main_window)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    assert main_window.integrate_button.isEnabled() is True  # no background marks needed
+
+
 def test_results_table_shows_a_region_row_for_an_integration_result(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)

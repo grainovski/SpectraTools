@@ -171,6 +171,27 @@ def test_ordered_bg_regions_regardless_of_marking_order():
     assert right == (115, 130)
 
 
+def test_ready_to_integrate_true_with_zero_bg_regions_and_a_fit_region():
+    state = FitModeState()
+    state.add_fit_click(85)
+    state.add_fit_click(115)
+    assert state.ready_to_integrate() is True
+
+
+def test_ready_to_integrate_false_with_exactly_one_bg_region():
+    state = FitModeState()
+    state.add_bg_click(70)
+    state.add_bg_click(85)
+    state.add_fit_click(85)
+    state.add_fit_click(115)
+    assert state.ready_to_integrate() is False
+
+
+def test_ordered_bg_regions_returns_none_pair_when_no_regions_marked():
+    state = FitModeState()
+    assert state.ordered_bg_regions() == (None, None)
+
+
 def test_bg_region_cap_is_two():
     assert BG_REGION_CAP == 2
 

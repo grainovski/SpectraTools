@@ -101,12 +101,18 @@ class FitModeState:
         )
 
     def ready_to_integrate(self):
-        return len(self.bg_regions) == BG_REGION_CAP and self.fit_region is not None
+        return self.fit_region is not None and len(self.bg_regions) in (0, BG_REGION_CAP)
 
     def ordered_bg_regions(self):
         """Returns (left, right) background regions ordered by mean
-        x-coordinate, regardless of which was marked first. Only valid
-        once both regions exist."""
+        x-coordinate, regardless of which was marked first. Returns
+        (None, None) when no background regions are marked -- a valid,
+        deliberate state now that Integration allows a zero-background
+        run. Only meaningful when len(bg_regions) is 0 or BG_REGION_CAP;
+        any other count (e.g. exactly 1) is not a state
+        ready_to_integrate() would ever let a caller reach."""
+        if not self.bg_regions:
+            return (None, None)
         a, b = self.bg_regions
         a_mid = (a[0] + a[1]) / 2
         b_mid = (b[0] + b[1]) / 2
