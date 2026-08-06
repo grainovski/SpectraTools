@@ -272,24 +272,9 @@ def test_integrate_button_enables_with_zero_background_regions(qapp):
     _held_key_click(main_window, "r", 85)
     _held_key_click(main_window, "r", 115)
     assert main_window.integrate_button.isEnabled() is True  # no background marks needed
-
-
-def test_run_integration_with_no_background_produces_a_backgroundless_result(qapp):
-    main_window = MainWindow()
-    spectrum = _make_active_spectrum(main_window)
-
-    _held_key_click(main_window, "r", 85)
-    _held_key_click(main_window, "r", 115)
-    main_window.fit_controller.run_integration()
-
-    assert len(spectrum.fits) == 1
-    result = spectrum.fits[0]
-    assert isinstance(result, IntegrationResult)
-    assert result.has_background is False
-    assert result.left_bg_region is None
-    assert result.right_bg_region is None
-    assert result.net_area == result.gross_area
 ```
+
+**Note (found during Task 2's actual execution, not anticipated when this plan was first written):** an earlier draft of this task also added `test_run_integration_with_no_background_produces_a_backgroundless_result` here. That test calls the *full* `run_integration()`, which — after building the result — unconditionally calls `fit_export.append_auto_log()` (crashes on `None` bg regions until Task 4 lands) and then `main_window._plot_data()` → `draw_committed_fits()` (crashes on `None` bg regions until Task 3 lands). It cannot pass until Tasks 2, 3, *and* 4 are all done, so it does not belong in Task 2. It has been moved to Task 4 (the last of the three prerequisite tasks in this plan's ordering) — see Task 4's Step 1 below. Task 2's own scope is fully covered by the 5 tests above, which only exercise `ready_to_integrate()`/`ordered_bg_regions()`/button-enablement and need nothing from Tasks 3-4.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -297,9 +282,9 @@ Run: `.venv/Scripts/python.exe -m pytest tests/test_fit_mode.py -k "ready_to_int
 
 Expected: `test_ready_to_integrate_true_with_zero_bg_regions_and_a_fit_region` FAILS (`ready_to_integrate()` currently requires exactly 2 regions, so it returns `False`, but the test asserts `True`). `test_ordered_bg_regions_returns_none_pair_when_no_regions_marked` FAILS with `ValueError: not enough values to unpack (expected 2, got 0)`. (`test_ready_to_integrate_false_with_exactly_one_bg_region` already passes today — 1 region was never valid — this is a regression guard, not new behavior; keep it.)
 
-Run: `.venv/Scripts/python.exe -m pytest tests/test_fit_mode_ui.py -k "allows_zero_background_regions or enables_with_zero_background or with_no_background_produces" -v`
+Run: `.venv/Scripts/python.exe -m pytest tests/test_fit_mode_ui.py -k "allows_zero_background_regions or enables_with_zero_background" -v`
 
-Expected: all 3 FAIL — `ready_to_integrate()` returns `False` with 0 background regions today, so `main_window.integrate_button.isEnabled()` stays `False` too (the button's `setEnabled(...)` call delegates entirely to `ready_to_integrate()`), and `run_integration()` early-returns, leaving `spectrum.fits` empty (`assert len(spectrum.fits) == 1` fails).
+Expected: both FAIL — `ready_to_integrate()` returns `False` with 0 background regions today, so `main_window.integrate_button.isEnabled()` stays `False` too (the button's `setEnabled(...)` call delegates entirely to `ready_to_integrate()`).
 
 - [ ] **Step 3: Implement**
 
@@ -345,7 +330,7 @@ with:
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_fit_mode.py tests/test_fit_mode_ui.py -v`
 
-Expected: all tests pass, including the 6 new ones and every pre-existing test in both files (in particular `test_ready_to_integrate_needs_bg_regions_and_fit_region_but_not_peaks` and `test_integrate_button_has_ctrl_i_shortcut_and_is_gated`, which exercise the still-required exactly-2-regions path — unaffected since `BG_REGION_CAP` stays in the allowed set).
+Expected: all tests pass, including the 5 new ones and every pre-existing test in both files (in particular `test_ready_to_integrate_needs_bg_regions_and_fit_region_but_not_peaks` and `test_integrate_button_has_ctrl_i_shortcut_and_is_gated`, which exercise the still-required exactly-2-regions path — unaffected since `BG_REGION_CAP` stays in the allowed set).
 
 - [ ] **Step 5: Commit**
 
@@ -835,10 +820,38 @@ Run: `.venv/Scripts/python.exe -m pytest tests/test_fit_export.py -v`
 
 Expected: all tests pass, including the 3 new ones and every pre-existing test — in particular `test_integration_result_to_json_record_includes_gross_background_net` and `test_integration_result_to_text_report_includes_all_three_layers` (with-background case, unchanged), and the two `fwhm_keV`-derivative regression guards.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Add the end-to-end regression test relocated from Task 2**
+
+Task 2 originally included a full `run_integration()` end-to-end test, but it couldn't pass there: `run_integration()` also calls `fit_export.append_auto_log()` (crashes on `None` bg regions until this task's Steps 3-4) and `draw_committed_fits()` via `_plot_data()` (crashed until Task 3). By this point in the plan, Tasks 1-3 and this task's own Steps 3-4 are all done, so all three prerequisites are finally satisfied — this is the right place for it.
+
+Add to `tests/test_fit_mode_ui.py` (after `test_run_integration_appends_an_integration_result`, around line 2319 — the same anchor point Task 2 used for its own tests, so this lands right after them):
+
+```python
+def test_run_integration_with_no_background_produces_a_backgroundless_result(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    main_window.fit_controller.run_integration()
+
+    assert len(spectrum.fits) == 1
+    result = spectrum.fits[0]
+    assert isinstance(result, IntegrationResult)
+    assert result.has_background is False
+    assert result.left_bg_region is None
+    assert result.right_bg_region is None
+    assert result.net_area == result.gross_area
+```
+
+Run: `.venv/Scripts/python.exe -m pytest tests/test_fit_mode_ui.py -k with_no_background_produces -v`
+
+Expected: PASSES immediately — Tasks 1-3 plus this task's own Steps 3-4 already provide everything this test needs, so there is no separate implementation step here, just adding and confirming.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add fit_export.py tests/test_fit_export.py
+git add fit_export.py tests/test_fit_export.py tests/test_fit_mode_ui.py
 git commit -m "feat: omit background/net fields from Integration export without background"
 ```
 
