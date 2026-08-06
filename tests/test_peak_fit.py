@@ -990,6 +990,46 @@ def test_integration_result_holds_expected_fields():
     assert result.visible is True
 
 
+def test_integration_result_has_background_true_when_bg_regions_set():
+    result = IntegrationResult(
+        left_bg_region=(10.0, 20.0), right_bg_region=(180.0, 190.0),
+        fit_region=(90.0, 110.0), background_density=5.0,
+        gross_area=100.0, gross_area_err=10.0,
+        gross_centroid=100.0, gross_centroid_err=1.0,
+        gross_fwhm=5.0, gross_fwhm_err=0.5,
+        gross_skewness=0.1, gross_skewness_err=0.05,
+        background_area=20.0, background_area_err=4.0,
+        background_centroid=100.0, background_centroid_err=2.0,
+        background_fwhm=3.0, background_fwhm_err=0.3,
+        background_skewness=0.0, background_skewness_err=0.02,
+        net_area=80.0, net_area_err=11.0,
+        net_centroid=100.0, net_centroid_err=1.2,
+        net_fwhm=5.0, net_fwhm_err=0.6,
+        net_skewness=0.1, net_skewness_err=0.06,
+    )
+    assert result.has_background is True
+
+
+def test_integration_result_has_background_false_when_bg_regions_none():
+    result = IntegrationResult(
+        left_bg_region=None, right_bg_region=None,
+        fit_region=(90.0, 110.0), background_density=0.0,
+        gross_area=100.0, gross_area_err=10.0,
+        gross_centroid=100.0, gross_centroid_err=1.0,
+        gross_fwhm=5.0, gross_fwhm_err=0.5,
+        gross_skewness=0.1, gross_skewness_err=0.05,
+        background_area=0.0, background_area_err=0.0,
+        background_centroid=0.0, background_centroid_err=0.0,
+        background_fwhm=0.0, background_fwhm_err=0.0,
+        background_skewness=0.0, background_skewness_err=0.0,
+        net_area=100.0, net_area_err=10.0,
+        net_centroid=100.0, net_centroid_err=1.0,
+        net_fwhm=5.0, net_fwhm_err=0.5,
+        net_skewness=0.1, net_skewness_err=0.05,
+    )
+    assert result.has_background is False
+
+
 def test_integrate_region_flat_background_gives_near_zero_net_area():
     x = np.arange(200, dtype=float)
     y = np.full(200, 20.0)
@@ -1030,6 +1070,36 @@ def test_integrate_region_matches_hand_computed_moments():
     # Both bg regions are exactly 0, so net == gross exactly.
     assert result.net_area == 40.0
     assert result.net_centroid == pytest.approx(3.0)
+
+
+def test_integrate_region_without_background_omits_bg_regions_and_zeroes_density():
+    x, y = _make_spectrum(
+        channels=200, peaks=[(5000.0, 100.0, 4.0)], slope=0.0, intercept=50.0,
+    )
+    result = integrate_region(
+        x, y, left_bg_region=None, right_bg_region=None,
+        fit_region=(85.0, 115.0),
+    )
+    assert result.left_bg_region is None
+    assert result.right_bg_region is None
+    assert result.background_density == 0.0
+    assert result.background_area == 0.0
+    assert result.has_background is False
+
+
+def test_integrate_region_without_background_makes_net_equal_gross():
+    x, y = _make_spectrum(
+        channels=200, peaks=[(5000.0, 100.0, 4.0)], slope=0.0, intercept=50.0,
+    )
+    result = integrate_region(
+        x, y, left_bg_region=None, right_bg_region=None,
+        fit_region=(85.0, 115.0),
+    )
+    # No background to subtract -- net reduces to gross exactly (both the
+    # sum and, for this fixture's positive gross sum, every moment too).
+    assert result.net_area == result.gross_area
+    assert result.net_centroid == result.gross_centroid
+    assert result.net_fwhm == result.gross_fwhm
 
 
 def test_integrate_region_all_zero_does_not_raise():
