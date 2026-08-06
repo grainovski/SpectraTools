@@ -131,6 +131,10 @@ class IntegrationResult:
     timestamp: str = None
     visible: bool = True
 
+    @property
+    def has_background(self):
+        return self.left_bg_region is not None
+
 
 def _region_centroid(x, y, region):
     lo, hi = region
@@ -534,16 +538,20 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
         g_DM3 = math.sqrt(dMom3) / abs(gross_sum)
 
     # ---- background: pooled flat density across BOTH bg regions ----
+    # TV's own branch has no trailing `else` (vsFitInt.c:85,194) -- when
+    # no background regions are marked, this block is skipped outright,
+    # not "looped over zero regions that happens to sum to zero".
     bg_chn = 0
     bg_count = 0.0
     bg_dcount = 0.0
-    for region in (left_bg_region, right_bg_region):
-        blo, bhi = region
-        bmask = (x >= blo) & (x <= bhi)
-        bg_chn += int(np.sum(bmask))
-        bg_y = y[bmask]
-        bg_count += float(np.sum(bg_y))
-        bg_dcount += float(np.sum(bg_y))
+    if left_bg_region is not None and right_bg_region is not None:
+        for region in (left_bg_region, right_bg_region):
+            blo, bhi = region
+            bmask = (x >= blo) & (x <= bhi)
+            bg_chn += int(np.sum(bmask))
+            bg_y = y[bmask]
+            bg_count += float(np.sum(bg_y))
+            bg_dcount += float(np.sum(bg_y))
 
     if bg_chn > 0:
         bg_density = bg_count / bg_chn
@@ -633,7 +641,8 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
     )
 
     return IntegrationResult(
-        left_bg_region=tuple(left_bg_region), right_bg_region=tuple(right_bg_region),
+        left_bg_region=tuple(left_bg_region) if left_bg_region is not None else None,
+        right_bg_region=tuple(right_bg_region) if right_bg_region is not None else None,
         fit_region=tuple(fit_region), background_density=float(bg_density),
         gross_area=float(gross_area), gross_area_err=float(gross_area_err),
         gross_centroid=float(g_centroid), gross_centroid_err=float(g_centroid_err),
