@@ -1223,6 +1223,40 @@ def test_draw_committed_fits_draws_region_shading_and_annotation_for_integration
     assert len(main_window.axes.texts) == texts_before + 1
 
 
+def test_draw_committed_fits_draws_only_fit_region_and_annotation_without_background(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        IntegrationResult(
+            left_bg_region=None, right_bg_region=None,
+            fit_region=(85.0, 115.0), background_density=0.0,
+            gross_area=1000.0, gross_area_err=30.0,
+            gross_centroid=100.0, gross_centroid_err=0.5,
+            gross_fwhm=8.0, gross_fwhm_err=0.4,
+            gross_skewness=0.0, gross_skewness_err=0.1,
+            background_area=0.0, background_area_err=0.0,
+            background_centroid=0.0, background_centroid_err=0.0,
+            background_fwhm=0.0, background_fwhm_err=0.0,
+            background_skewness=0.0, background_skewness_err=0.0,
+            net_area=1000.0, net_area_err=30.0,
+            net_centroid=100.0, net_centroid_err=0.5,
+            net_fwhm=8.0, net_fwhm_err=0.4,
+            net_skewness=0.0, net_skewness_err=0.1,
+        )
+    )
+
+    patches_before = len(main_window.axes.patches)
+    lines_before = len(main_window.axes.lines)
+    texts_before = len(main_window.axes.texts)
+    main_window.fit_controller.draw_committed_fits(spectrum)
+
+    # 1 region span (fit region only, no bg spans), 0 background lines,
+    # 1 annotation.
+    assert len(main_window.axes.patches) == patches_before + 1
+    assert len(main_window.axes.lines) == lines_before + 0
+    assert len(main_window.axes.texts) == texts_before + 1
+
+
 def test_draw_committed_fits_skips_a_hidden_integration_result(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
@@ -2393,6 +2427,38 @@ def test_tooltip_shows_dual_units_for_centroid_and_fwhm_when_active(qapp):
 
     tooltip = main_window.fit_controller.results_table.item(0, 0).toolTip()
     assert "keV" in tooltip
+
+
+def test_integration_tooltip_is_a_single_line_without_background(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        IntegrationResult(
+            left_bg_region=None, right_bg_region=None,
+            fit_region=(85.0, 115.0), background_density=0.0,
+            gross_area=1000.0, gross_area_err=30.0,
+            gross_centroid=100.0, gross_centroid_err=0.5,
+            gross_fwhm=8.0, gross_fwhm_err=0.4,
+            gross_skewness=0.0, gross_skewness_err=0.1,
+            background_area=0.0, background_area_err=0.0,
+            background_centroid=0.0, background_centroid_err=0.0,
+            background_fwhm=0.0, background_fwhm_err=0.0,
+            background_skewness=0.0, background_skewness_err=0.0,
+            net_area=1000.0, net_area_err=30.0,
+            net_centroid=100.0, net_centroid_err=0.5,
+            net_fwhm=8.0, net_fwhm_err=0.4,
+            net_skewness=0.0, net_skewness_err=0.1,
+        )
+    )
+
+    main_window.fit_controller.update_results_list()
+
+    tooltip = main_window.fit_controller.results_table.item(0, 0).toolTip()
+    assert "\n" not in tooltip
+    assert "Gross" not in tooltip
+    assert "Background" not in tooltip
+    assert "Net" not in tooltip
+    assert "Area=1000.0" in tooltip
 
 
 def test_results_table_dims_hidden_integration_rows(qapp):

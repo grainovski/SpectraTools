@@ -243,7 +243,19 @@ def _integration_tooltip(main_window, result):
     Results row tooltip -- mirrors the level of detail the existing
     left-tail-info tooltip gives for a Gaussian fit. Centroid/FWHM show
     dual units when calibration is active; area has no energy-axis
-    equivalent and stays channel-only, matching the results table."""
+    equivalent and stays channel-only, matching the results table. With
+    no background marked, gross/background/net collapse to one number
+    each (net == gross exactly), so a single unlabeled line is shown
+    instead of a three-way breakdown -- reading from gross_* directly
+    rather than relying on that equality, matching TV's own choice to
+    report the total/gross row in this case."""
+    if not result.has_background:
+        return (
+            f"Area={result.gross_area:.1f}±{result.gross_area_err:.1f}, "
+            f"centroid={_dual_unit_value(main_window, result.gross_centroid, result.gross_centroid_err, is_width=False)}, "
+            f"FWHM={_dual_unit_value(main_window, result.gross_fwhm, result.gross_fwhm_err, is_width=True, reference_position=result.gross_centroid)}, "
+            f"skewness={result.gross_skewness:.3g}±{result.gross_skewness_err:.3g}"
+        )
     lines = []
     for label, prefix in (("Gross", "gross"), ("Background", "background"), ("Net", "net")):
         area = getattr(result, f"{prefix}_area")
@@ -548,35 +560,47 @@ class FitModeController(QObject):
         for result in spectrum.fits:
             if not result.visible:
                 continue
-            left_lo, left_hi = result.left_bg_region
-            axes.axvspan(
-                to_display(left_lo), to_display(left_hi), color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA
-            )
-            right_lo, right_hi = result.right_bg_region
-            axes.axvspan(
-                to_display(right_lo), to_display(right_hi), color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA
-            )
+            if result.left_bg_region is not None:
+                left_lo, left_hi = result.left_bg_region
+                axes.axvspan(
+                    to_display(left_lo), to_display(left_hi), color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA
+                )
+                right_lo, right_hi = result.right_bg_region
+                axes.axvspan(
+                    to_display(right_lo), to_display(right_hi), color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA
+                )
             fit_lo, fit_hi = result.fit_region
             axes.axvspan(
                 to_display(fit_lo), to_display(fit_hi), color=FIT_REGION_COLOR, alpha=FIT_REGION_ALPHA
             )
 
             if isinstance(result, IntegrationResult):
-                lo, hi = result.fit_region
-                axes.plot(
-                    [to_display(lo), to_display(hi)],
-                    [result.background_density, result.background_density],
-                    color=bg_line_color, linestyle="--", linewidth=1,
-                )
-                axes.annotate(
-                    f"centroid={result.net_centroid:.1f}\n"
-                    f"FWHM={result.net_fwhm:.1f}\n"
-                    f"full={result.gross_area:.0f}\nnet={result.net_area:.0f}",
-                    xy=(to_display(result.net_centroid), 0.95),
-                    xycoords=label_transform,
-                    ha="center", va="top",
-                    fontsize=7, color=fit_color,
-                )
+                if result.has_background:
+                    lo, hi = result.fit_region
+                    axes.plot(
+                        [to_display(lo), to_display(hi)],
+                        [result.background_density, result.background_density],
+                        color=bg_line_color, linestyle="--", linewidth=1,
+                    )
+                    axes.annotate(
+                        f"centroid={result.net_centroid:.1f}\n"
+                        f"FWHM={result.net_fwhm:.1f}\n"
+                        f"full={result.gross_area:.0f}\nnet={result.net_area:.0f}",
+                        xy=(to_display(result.net_centroid), 0.95),
+                        xycoords=label_transform,
+                        ha="center", va="top",
+                        fontsize=7, color=fit_color,
+                    )
+                else:
+                    axes.annotate(
+                        f"centroid={result.gross_centroid:.1f}\n"
+                        f"FWHM={result.gross_fwhm:.1f}\n"
+                        f"area={result.gross_area:.0f}",
+                        xy=(to_display(result.gross_centroid), 0.95),
+                        xycoords=label_transform,
+                        ha="center", va="top",
+                        fontsize=7, color=fit_color,
+                    )
                 continue
 
             lo, hi = result.fit_region
