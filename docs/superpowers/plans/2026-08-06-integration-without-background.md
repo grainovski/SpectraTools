@@ -857,6 +857,109 @@ git commit -m "feat: omit background/net fields from Integration export without 
 
 ---
 
+## Task 4b: `fit_mode.py` — fix `_on_result_double_clicked()` for zero-background results
+
+**Found during Task 3's code-quality review, not anticipated when this plan was first written.** `_on_result_double_clicked()` restores a previously-computed result's marks for editing via `self.state.bg_regions = [result.left_bg_region, result.right_bg_region]` (`fit_mode.py:1042`), unconditionally. For a zero-background `IntegrationResult`, this produces `bg_regions = [None, None]` — a 2-element list of `None`s, not the empty list `[]` that `FitModeState` treats as "no background" everywhere else (`ordered_bg_regions()`, `ready_to_fit()`, `ready_to_integrate()`). Immediately after, `_redraw_progress()` (`fit_mode.py:455`) does `for lo, hi in state.bg_regions:`, which raises `TypeError: cannot unpack non-iterable NoneType object` when unpacking the first `None`. This is reachable through a completely ordinary workflow — double-clicking a Fit Results row to re-edit it, already exercised for the with-background case by `test_double_click_reloads_a_committed_fit_for_editing`. This task is placed *after* Task 4 rather than alongside Task 3 because its own test needs `run_integration()` to succeed without crashing first (i.e. it needs Task 4's export fix as a prerequisite, the same reason Task 4's Step 6 test was relocated from Task 2).
+
+**Files:**
+- Modify: `fit_mode.py:1042`
+- Test: `tests/test_fit_mode_ui.py`
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `tests/test_fit_mode_ui.py` (after `test_double_click_reloads_a_committed_fit_for_editing`, around line 1013):
+
+```python
+def test_double_click_reloads_a_zero_background_integration_result_without_crashing(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    main_window.fit_controller.run_integration()
+
+    main_window.fit_controller.reset_marks()
+    assert main_window.fit_controller.state.bg_regions == []
+
+    item = main_window.fit_controller.results_table.item(0, 0)
+    main_window.fit_controller._on_result_double_clicked(item)
+
+    assert main_window.fit_controller.state.bg_regions == []
+    assert main_window.fit_controller.state.fit_region == pytest.approx((85.0, 115.0))
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `.venv/Scripts/python.exe -m pytest tests/test_fit_mode_ui.py -k zero_background_integration_result_without_crashing -v`
+
+Expected: FAILS with `TypeError: cannot unpack non-iterable NoneType object` (from `_redraw_progress()`'s `for lo, hi in state.bg_regions:`, triggered via `_on_result_double_clicked()` setting `bg_regions = [None, None]`).
+
+- [ ] **Step 3: Implement**
+
+Replace (currently `fit_mode.py:1029-1043`):
+
+```python
+    def _on_result_double_clicked(self, item):
+        active = next((s for s in self.main_window.spectra if s.active), None)
+        if active is None:
+            return
+        fit_index = self._results_row_fit_index[item.row()]
+        result = active.fits[fit_index]
+
+        self._clear_progress()
+
+        # Bypasses the click-pairing API (add_bg_click/add_fit_click)
+        # deliberately -- this restores a previously-computed,
+        # already-valid state wholesale, not a fresh in-progress click
+        # sequence.
+        self.state.bg_regions = [result.left_bg_region, result.right_bg_region]
+        self.state.fit_region = result.fit_region
+```
+
+with:
+
+```python
+    def _on_result_double_clicked(self, item):
+        active = next((s for s in self.main_window.spectra if s.active), None)
+        if active is None:
+            return
+        fit_index = self._results_row_fit_index[item.row()]
+        result = active.fits[fit_index]
+
+        self._clear_progress()
+
+        # Bypasses the click-pairing API (add_bg_click/add_fit_click)
+        # deliberately -- this restores a previously-computed,
+        # already-valid state wholesale, not a fresh in-progress click
+        # sequence. An empty list (not [None, None]) is bg_regions'
+        # own canonical "no background" representation everywhere else
+        # in FitModeState (see ordered_bg_regions()) -- restoring a
+        # zero-background result must produce [], or _redraw_progress()'s
+        # `for lo, hi in state.bg_regions:` unpack crashes on None.
+        self.state.bg_regions = (
+            [] if result.left_bg_region is None
+            else [result.left_bg_region, result.right_bg_region]
+        )
+        self.state.fit_region = result.fit_region
+```
+
+(The rest of the method — the `isinstance(result, IntegrationResult)` branch and everything below it — is unchanged.)
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `.venv/Scripts/python.exe -m pytest tests/test_fit_mode_ui.py -v`
+
+Expected: all tests pass, including the new one and every pre-existing test — in particular `test_double_click_reloads_a_committed_fit_for_editing` (with-background double-click restore, unchanged).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add fit_mode.py tests/test_fit_mode_ui.py
+git commit -m "fix: restore empty bg_regions, not [None, None], when double-clicking a zero-background Integration result"
+```
+
+---
+
 ## Task 5: `help_content.py` — document the optional background in the HowTo page
 
 **Files:**
@@ -929,7 +1032,7 @@ git commit -m "docs: document background-optional Integration in the HowTo page"
 - [ ] **Step 1: Run the full test suite**
 
 Run: `.venv/Scripts/python.exe -m pytest -q`
-Expected: all tests pass, including everything added in Tasks 1-5.
+Expected: all tests pass, including everything added in Tasks 1-5 and Task 4b.
 
 - [ ] **Step 2: Rebuild and manually exercise the app**
 
@@ -943,8 +1046,10 @@ Then run `dist\SpectraTools.exe` directly (matching this project's existing smok
 - Hover the row's first cell — confirm the tooltip is a single unlabeled line (`Area=...`, `centroid=...`, `FWHM=...`, `skewness=...`), not a 3-line Gross/Background/Net breakdown.
 - Check the plot annotation near the result — confirm it reads `centroid=...\nFWHM=...\narea=...` (one area number), with no dashed background-density line drawn and no green background-region shading (only the blue fit-region span).
 - Export this result (`Ctrl+E` or the equivalent single-fit export) and open the resulting `.txt`/check the auto-log `.jsonl` next to the spectrum file — confirm the text report has no "Background:"/"Net:" section or background-region lines, and the JSON record has no `"background"`/`"net"`/`"left_bg_region"`/`"right_bg_region"`/`"background_density"` keys.
+- Double-click the zero-background result's row in Fit Results to reload it for editing — confirm this restores the fit region mark with no crash (this exact workflow crashed until Task 4b; deliberately verify it, don't skip it).
 - Now mark exactly one background region (`B`, click twice) plus the fit region, and confirm `Ctrl+I` is **disabled** (1 region is still not a valid count).
 - Mark a second background region (2 total) plus the fit region and run Integration again — confirm the existing with-background behavior is completely unchanged: 3-line Gross/Background/Net tooltip, dashed background line + green shading on the plot, and full breakdown in the export.
+- Double-click that with-background result's row too — confirm it still restores both background regions correctly (regression check for Task 4b's change).
 - Open the HowTo page (F1) and confirm the "8. Integration" section now mentions optional background marks, reads correctly, and the rest of the page still renders with no broken HTML.
 
 - [ ] **Step 3: No commit** (verification-only task; fix and re-verify if anything above fails).
