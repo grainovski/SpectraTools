@@ -1038,8 +1038,15 @@ class FitModeController(QObject):
         # Bypasses the click-pairing API (add_bg_click/add_fit_click)
         # deliberately -- this restores a previously-computed,
         # already-valid state wholesale, not a fresh in-progress click
-        # sequence.
-        self.state.bg_regions = [result.left_bg_region, result.right_bg_region]
+        # sequence. An empty list (not [None, None]) is bg_regions'
+        # own canonical "no background" representation everywhere else
+        # in FitModeState (see ordered_bg_regions()) -- restoring a
+        # zero-background result must produce [], or _redraw_progress()'s
+        # `for lo, hi in state.bg_regions:` unpack crashes on None.
+        self.state.bg_regions = (
+            [] if result.left_bg_region is None
+            else [result.left_bg_region, result.right_bg_region]
+        )
         self.state.fit_region = result.fit_region
 
         if isinstance(result, IntegrationResult):

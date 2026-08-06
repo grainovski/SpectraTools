@@ -1013,6 +1013,24 @@ def test_double_click_reloads_a_committed_fit_for_editing(qapp):
     assert reloaded_table.cellWidget(0, 2).isChecked() is False  # amplitude was free
 
 
+def test_double_click_reloads_a_zero_background_integration_result_without_crashing(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    main_window.fit_controller.run_integration()
+
+    main_window.fit_controller.reset_marks()
+    assert main_window.fit_controller.state.bg_regions == []
+
+    item = main_window.fit_controller.results_table.item(0, 0)
+    main_window.fit_controller._on_result_double_clicked(item)
+
+    assert main_window.fit_controller.state.bg_regions == []
+    assert main_window.fit_controller.state.fit_region == pytest.approx((85.0, 115.0))
+
+
 def test_refitting_same_marks_hides_the_earlier_result(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
