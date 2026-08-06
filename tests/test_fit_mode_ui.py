@@ -2373,6 +2373,23 @@ def test_integrate_button_enables_with_zero_background_regions(qapp):
     assert main_window.integrate_button.isEnabled() is True  # no background marks needed
 
 
+def test_run_integration_with_no_background_produces_a_backgroundless_result(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    main_window.fit_controller.run_integration()
+
+    assert len(spectrum.fits) == 1
+    result = spectrum.fits[0]
+    assert isinstance(result, IntegrationResult)
+    assert result.has_background is False
+    assert result.left_bg_region is None
+    assert result.right_bg_region is None
+    assert result.net_area == result.gross_area
+
+
 def test_results_table_shows_a_region_row_for_an_integration_result(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)

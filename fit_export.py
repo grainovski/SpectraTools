@@ -83,19 +83,26 @@ def fit_result_to_json_record(result, spectrum_path, calibration=None):
 def integration_result_to_json_record(result, spectrum_path, calibration=None):
     """Converts one IntegrationResult into a plain dict covering the
     full gross/background/net breakdown, ready for json.dumps() -- the
-    Integration-mode analog of fit_result_to_json_record."""
-    return {
+    Integration-mode analog of fit_result_to_json_record. When
+    `result.has_background` is False, the background-region/density and
+    "background"/"net" keys are omitted entirely rather than written as
+    null or zero -- matching TV's own choice to suppress, not zero, a
+    background breakdown that doesn't exist."""
+    record = {
         "type": "integration",
         "timestamp": result.timestamp,
         "spectrum_path": spectrum_path,
-        "left_bg_region": list(result.left_bg_region),
-        "right_bg_region": list(result.right_bg_region),
         "fit_region": list(result.fit_region),
-        "background_density": result.background_density,
         "gross": _integration_layer_record(result, "gross", calibration),
-        "background": _integration_layer_record(result, "background", calibration),
-        "net": _integration_layer_record(result, "net", calibration),
     }
+    if not result.has_background:
+        return record
+    record["left_bg_region"] = list(result.left_bg_region)
+    record["right_bg_region"] = list(result.right_bg_region)
+    record["background_density"] = result.background_density
+    record["background"] = _integration_layer_record(result, "background", calibration)
+    record["net"] = _integration_layer_record(result, "net", calibration)
+    return record
 
 
 def _to_json_record(result, spectrum_path, calibration=None):
@@ -188,17 +195,31 @@ def fit_result_to_text_report(result, spectrum_path, fit_number=1, calibration=N
 
 def integration_result_to_text_report(result, spectrum_path, fit_number=1, calibration=None):
     """Human-readable report for one Integration result -- the
-    Integration-mode analog of fit_result_to_text_report."""
+    Integration-mode analog of fit_result_to_text_report. When
+    `result.has_background` is False, the background-region/density
+    lines and the Gross/Background/Net breakdown collapse to a single
+    unlabeled Area/Centroid/FWHM/Skewness block, matching TV's own
+    suppress-the-row choice."""
     lines = [
         f"Fit {fit_number} (Integration)",
         f"Spectrum: {spectrum_path}",
         f"Timestamp: {result.timestamp}",
         f"Fit region: [{result.fit_region[0]:.2f}, {result.fit_region[1]:.2f}]",
-        f"Left background region: [{result.left_bg_region[0]:.2f}, {result.left_bg_region[1]:.2f}]",
-        f"Right background region: [{result.right_bg_region[0]:.2f}, {result.right_bg_region[1]:.2f}]",
-        f"Background density: {result.background_density:.6g}",
-        "",
     ]
+    if result.has_background:
+        lines.append(f"Left background region: [{result.left_bg_region[0]:.2f}, {result.left_bg_region[1]:.2f}]")
+        lines.append(f"Right background region: [{result.right_bg_region[0]:.2f}, {result.right_bg_region[1]:.2f}]")
+        lines.append(f"Background density: {result.background_density:.6g}")
+    lines.append("")
+    if not result.has_background:
+        centroid = result.gross_centroid
+        lines.append(f"  Area:      {_format_err(result.gross_area, result.gross_area_err)}")
+        lines.append(f"  Centroid:  {_format_dual(centroid, result.gross_centroid_err, calibration, is_width=False)}")
+        lines.append(
+            f"  FWHM:      {_format_dual(result.gross_fwhm, result.gross_fwhm_err, calibration, is_width=True, reference_position=centroid)}"
+        )
+        lines.append(f"  Skewness:  {_format_err(result.gross_skewness, result.gross_skewness_err)}")
+        return "\n".join(lines)
     for label, prefix in (("Gross", "gross"), ("Background", "background"), ("Net", "net")):
         centroid = getattr(result, f"{prefix}_centroid")
         lines.append(f"  {label}:")

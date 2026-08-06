@@ -148,6 +148,62 @@ def _make_integration_result(timestamp="2026-07-16T12:00:00"):
     )
 
 
+def _make_integration_result_no_bg(timestamp="2026-07-16T12:00:00"):
+    return IntegrationResult(
+        left_bg_region=None, right_bg_region=None,
+        fit_region=(85.0, 115.0), background_density=0.0,
+        gross_area=1000.0, gross_area_err=30.0,
+        gross_centroid=100.0, gross_centroid_err=0.5,
+        gross_fwhm=8.0, gross_fwhm_err=0.4,
+        gross_skewness=0.0, gross_skewness_err=0.1,
+        background_area=0.0, background_area_err=0.0,
+        background_centroid=0.0, background_centroid_err=0.0,
+        background_fwhm=0.0, background_fwhm_err=0.0,
+        background_skewness=0.0, background_skewness_err=0.0,
+        net_area=1000.0, net_area_err=30.0,
+        net_centroid=100.0, net_centroid_err=0.5,
+        net_fwhm=8.0, net_fwhm_err=0.4,
+        net_skewness=0.0, net_skewness_err=0.1,
+        timestamp=timestamp,
+    )
+
+
+def test_integration_result_to_json_record_omits_background_and_net_without_background():
+    result = _make_integration_result_no_bg()
+    record = integration_result_to_json_record(result, "eu.spe")
+    assert record["type"] == "integration"
+    assert record["gross"]["area"] == 1000.0
+    assert "left_bg_region" not in record
+    assert "right_bg_region" not in record
+    assert "background_density" not in record
+    assert "background" not in record
+    assert "net" not in record
+
+
+def test_integration_result_to_text_report_collapses_to_a_single_area_block_without_background():
+    result = _make_integration_result_no_bg()
+    report = integration_result_to_text_report(result, "eu.spe", fit_number=1)
+    assert "Integration" in report
+    assert "Gross:" not in report
+    assert "Background:" not in report
+    assert "Net:" not in report
+    assert "Area:" in report
+    assert "1000" in report
+
+
+def test_append_auto_log_handles_an_integration_result_without_background(tmp_path):
+    spectrum_path = str(tmp_path / "eu.spe")
+    append_auto_log(spectrum_path, _make_integration_result_no_bg())
+
+    log_path = auto_log_path(spectrum_path)
+    with open(log_path, encoding="utf-8") as f:
+        lines = f.readlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["type"] == "integration"
+    assert "background" not in record
+
+
 def test_integration_result_to_json_record_includes_gross_background_net():
     result = _make_integration_result()
     record = integration_result_to_json_record(result, "eu.spe")
