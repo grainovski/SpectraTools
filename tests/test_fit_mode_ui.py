@@ -3550,3 +3550,71 @@ def test_export_all_fits_shortcut_does_nothing_with_no_fits(qapp, monkeypatch):
     main_window.fit_controller.export_all_fits_action.trigger()
 
     assert save_dialog_calls == []
+
+
+def test_run_fit_shows_a_status_message_when_marks_are_incomplete(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    # No B marks, no P marks -- bg_regions is the first thing missing
+    # after fit_region, per fit_blocked_reason()'s check order.
+
+    main_window.fit_controller.run_fit()
+
+    assert len(spectrum.fits) == 0
+    assert (
+        main_window.statusBar().currentMessage()
+        == "Mark two background regions (hold B and click twice per region) before fitting"
+    )
+
+
+def test_run_fit_shows_no_message_and_commits_when_marks_are_complete(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+
+    assert len(spectrum.fits) == 1
+    assert main_window.statusBar().currentMessage() == ""
+
+
+def test_run_integration_shows_a_status_message_when_marks_are_incomplete(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    # Exactly 1 bg region -- not 0, not 2.
+
+    main_window.fit_controller.run_integration()
+
+    assert len(spectrum.fits) == 0
+    assert (
+        main_window.statusBar().currentMessage()
+        == "Mark zero or two background regions (not one) before integrating"
+    )
+
+
+def test_run_integration_shows_no_message_and_commits_when_marks_are_complete(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+
+    main_window.fit_controller.run_integration()
+
+    assert len(spectrum.fits) == 1
+    assert main_window.statusBar().currentMessage() == ""

@@ -207,3 +207,73 @@ def test_pending_clicks_are_independent_across_bg_fit_and_peak():
     assert state.bg_regions == [(70, 85)]
     assert state.fit_region == (85, 115)
     assert state.peak_positions == [100.0]
+
+
+def test_fit_blocked_reason_when_no_fit_region():
+    state = FitModeState()
+    assert state.fit_blocked_reason() == "Mark the fit region (hold R and click twice) before fitting"
+
+
+def test_fit_blocked_reason_when_bg_regions_incomplete():
+    state = FitModeState()
+    state.add_fit_click(85)
+    state.add_fit_click(115)
+    assert state.fit_blocked_reason() == "Mark two background regions (hold B and click twice per region) before fitting"
+
+
+def test_fit_blocked_reason_when_no_peaks():
+    state = FitModeState()
+    state.add_bg_click(70)
+    state.add_bg_click(85)
+    state.add_bg_click(115)
+    state.add_bg_click(130)
+    state.add_fit_click(85)
+    state.add_fit_click(115)
+    assert state.fit_blocked_reason() == "Mark at least one peak (hold P and click) before fitting"
+
+
+def test_fit_blocked_reason_is_none_when_ready():
+    state = FitModeState()
+    state.add_bg_click(70)
+    state.add_bg_click(85)
+    state.add_bg_click(115)
+    state.add_bg_click(130)
+    state.add_fit_click(85)
+    state.add_fit_click(115)
+    state.toggle_peak(100.0, proximity=1.0)
+    assert state.ready_to_fit() is True
+    assert state.fit_blocked_reason() is None
+
+
+def test_integrate_blocked_reason_when_no_fit_region():
+    state = FitModeState()
+    assert state.integrate_blocked_reason() == "Mark the fit region (hold R and click twice) before integrating"
+
+
+def test_integrate_blocked_reason_when_exactly_one_bg_region():
+    state = FitModeState()
+    state.add_bg_click(70)
+    state.add_bg_click(85)
+    state.add_fit_click(85)
+    state.add_fit_click(115)
+    assert state.integrate_blocked_reason() == "Mark zero or two background regions (not one) before integrating"
+
+
+def test_integrate_blocked_reason_is_none_with_zero_bg_regions():
+    state = FitModeState()
+    state.add_fit_click(85)
+    state.add_fit_click(115)
+    assert state.ready_to_integrate() is True
+    assert state.integrate_blocked_reason() is None
+
+
+def test_integrate_blocked_reason_is_none_with_two_bg_regions():
+    state = FitModeState()
+    state.add_bg_click(70)
+    state.add_bg_click(85)
+    state.add_bg_click(115)
+    state.add_bg_click(130)
+    state.add_fit_click(85)
+    state.add_fit_click(115)
+    assert state.ready_to_integrate() is True
+    assert state.integrate_blocked_reason() is None

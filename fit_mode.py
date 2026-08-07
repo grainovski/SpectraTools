@@ -103,6 +103,35 @@ class FitModeState:
     def ready_to_integrate(self):
         return self.fit_region is not None and len(self.bg_regions) in (0, BG_REGION_CAP)
 
+    def fit_blocked_reason(self):
+        """Human-readable explanation of what's still missing before
+        ready_to_fit() would return True, or None if it's already
+        ready. Checked in the order a user would naturally complete
+        marks in -- toggle_peak() itself refuses to add a peak before
+        fit_region exists, so checking fit_region first always points
+        at genuinely the next missing thing, never a redundant one.
+        Returns None under exactly the condition ready_to_fit()
+        returns True (the same three checks, so a caller that already
+        confirmed ready_to_fit() is False can call this directly with
+        no further guard)."""
+        if self.fit_region is None:
+            return "Mark the fit region (hold R and click twice) before fitting"
+        if len(self.bg_regions) != BG_REGION_CAP:
+            return "Mark two background regions (hold B and click twice per region) before fitting"
+        if len(self.peak_positions) == 0:
+            return "Mark at least one peak (hold P and click) before fitting"
+        return None
+
+    def integrate_blocked_reason(self):
+        """Same as fit_blocked_reason(), but for ready_to_integrate()
+        -- Integration accepts zero or two background regions, never
+        exactly one."""
+        if self.fit_region is None:
+            return "Mark the fit region (hold R and click twice) before integrating"
+        if len(self.bg_regions) not in (0, BG_REGION_CAP):
+            return "Mark zero or two background regions (not one) before integrating"
+        return None
+
     def ordered_bg_regions(self):
         """Returns (left, right) background regions ordered by mean
         x-coordinate, regardless of which was marked first. Returns
@@ -1075,6 +1104,7 @@ class FitModeController(QObject):
 
     def run_fit(self):
         if not self.state.ready_to_fit():
+            self._show_status_message(self.state.fit_blocked_reason(), 5000)
             return
         active = next((s for s in self.main_window.spectra if s.active), None)
         if active is None:
@@ -1137,6 +1167,7 @@ class FitModeController(QObject):
 
     def run_integration(self):
         if not self.state.ready_to_integrate():
+            self._show_status_message(self.state.integrate_blocked_reason(), 5000)
             return
         active = next((s for s in self.main_window.spectra if s.active), None)
         if active is None:
