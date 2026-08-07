@@ -94,14 +94,10 @@ class FitModeState:
         return ("added", x)
 
     def ready_to_fit(self):
-        return (
-            len(self.bg_regions) == BG_REGION_CAP
-            and self.fit_region is not None
-            and len(self.peak_positions) > 0
-        )
+        return self.fit_blocked_reason() is None
 
     def ready_to_integrate(self):
-        return self.fit_region is not None and len(self.bg_regions) in (0, BG_REGION_CAP)
+        return self.integrate_blocked_reason() is None
 
     def fit_blocked_reason(self):
         """Human-readable explanation of what's still missing before
