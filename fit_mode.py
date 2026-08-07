@@ -395,7 +395,8 @@ class FitModeController(QObject):
         self.reset_marks()
         active = next((s for s in self.main_window.spectra if s.active), None)
         if active is not None:
-            active.fits.clear()
+            for result in active.fits:
+                result.visible = False
         self.main_window._plot_data(preserve_view=True)
 
     def reset_marks(self):

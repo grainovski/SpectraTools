@@ -1610,7 +1610,7 @@ def test_clear_discards_in_progress_marks_without_committing(qapp):
     assert len(spectrum.fits) == 0
 
 
-def test_clear_deletes_every_fit_for_the_active_spectrum(qapp):
+def test_clear_hides_rather_than_deletes_a_fit_made_through_the_real_marking_flow(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
 
@@ -1626,7 +1626,8 @@ def test_clear_deletes_every_fit_for_the_active_spectrum(qapp):
 
     main_window.fit_controller.clear()
 
-    assert spectrum.fits == []
+    assert len(spectrum.fits) == 1  # still present
+    assert spectrum.fits[0].visible is False
 
 
 def test_reset_marks_clears_progress_without_touching_fits_or_replotting(qapp, monkeypatch):
@@ -1834,6 +1835,29 @@ def _fit_result_with_one_peak():
             )
         ],
     )
+
+
+def test_clear_hides_committed_fits_instead_of_deleting_them(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(_fit_result_with_one_peak())
+
+    main_window.fit_controller.clear()
+
+    assert len(spectrum.fits) == 1  # still present, not deleted
+    assert spectrum.fits[0].visible is False
+
+    table = main_window.fit_controller.results_table
+    assert table.rowCount() == 1  # still listed
+    default_color = QTableWidgetItem().foreground()
+    assert table.item(0, 0).foreground() != default_color  # dimmed, same convention as an existing superseded fit
+
+    # The plot itself shows nothing for a hidden fit -- draw_committed_fits()
+    # skips it entirely, same as test_clear_forces_a_replot_so_the_canvas_
+    # actually_goes_blank already expects for the (still-true) "canvas goes
+    # blank" behavior.
+    assert len(main_window.axes.lines) == 1  # only the spectrum's own step line
+    assert len(main_window.axes.patches) == 0  # no region shading
 
 
 def test_results_panel_lists_committed_fit(qapp):
