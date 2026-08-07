@@ -238,7 +238,11 @@ spectrum's committed fits.</p>
 marked regions directly (background centroid, FWHM, skewness, and area,
 all with uncertainties) <i>without</i> fitting a peak shape -- faster,
 and useful when a peak is too irregular to fit well, or when you only
-need a total count rather than individual peak parameters.</p>
+need a total count rather than individual peak parameters.
+Background regions are optional: marking only a fit region and
+pressing <kbd>Ctrl+I</kbd> reports the raw area and centroid (plus
+FWHM and skewness) with no background subtraction; marking two
+background regions first still works exactly as before.</p>
 
 <h3>9. View options</h3>
 <p><kbd>Ctrl+G</kbd> toggles a logarithmic Y axis. <kbd>Ctrl+D</kbd>

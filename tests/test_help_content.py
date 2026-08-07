@@ -85,6 +85,11 @@ def test_howto_html_covers_every_operation():
         assert topic in html, f"missing topic {topic!r}"
 
 
+def test_howto_integration_section_mentions_optional_background():
+    html = build_howto_html()
+    assert "Background regions are optional" in html
+
+
 def test_howto_html_is_a_complete_html_document():
     html = build_howto_html()
     assert html.strip().startswith("<!doctype html>")
