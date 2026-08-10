@@ -133,8 +133,8 @@ program supports.</p>
 <tr><td><kbd>Ctrl+F</kbd></td><td>Fit</td></tr>
 <tr><td><kbd>Ctrl+2</kbd></td><td>Toggle the Fit Results panel</td></tr>
 <tr><td><kbd>Ctrl+3</kbd></td><td>Toggle the Fit Parameters panel</td></tr>
-<tr><td><kbd>Ctrl+C</kbd></td><td>Clear the active spectrum's in-progress marks and committed fits</td></tr>
-<tr><td><kbd>Ctrl+Shift+C</kbd></td><td>Clear the active spectrum's committed fits only (in-progress marks untouched)</td></tr>
+<tr><td><kbd>Ctrl+C</kbd></td><td>Clear in-progress marks and hide committed fits (not delete)</td></tr>
+<tr><td><kbd>Ctrl+Shift+C</kbd></td><td>Permanently delete the active spectrum's committed fits (in-progress marks untouched)</td></tr>
 <tr><td><kbd>Ctrl+E</kbd></td><td>Export the active spectrum's fits</td></tr>
 <tr><td><kbd>Ctrl+I</kbd></td><td>Integrate</td></tr>
 </table>
@@ -228,10 +228,11 @@ Parameters panel.</li>
 <p>See the Knowledge Database page for exactly what's being computed
 here, and what each fit parameter means.</p>
 <p><kbd>Ctrl+C</kbd> clears the active spectrum's in-progress B/R/P
-marks as well as its already-committed fits. <kbd>Ctrl+Shift+C</kbd>
-clears only the active spectrum's committed fits, leaving any
-in-progress marks alone. <kbd>Ctrl+E</kbd> exports the active
-spectrum's committed fits.</p>
+marks and hides its already-committed fits (grayed out in Fit
+Results, removed from the plot, but not deleted).
+<kbd>Ctrl+Shift+C</kbd> permanently deletes the active spectrum's
+committed fits, leaving any in-progress marks alone. <kbd>Ctrl+E</kbd>
+exports the active spectrum's committed fits.</p>
 
 <h3>8. Integration</h3>
 <p><kbd>Ctrl+I</kbd> computes gross/background/net counts across the

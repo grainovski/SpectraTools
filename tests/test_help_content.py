@@ -90,6 +90,12 @@ def test_howto_integration_section_mentions_optional_background():
     assert "Background regions are optional" in html
 
 
+def test_howto_ctrl_c_description_says_hide_not_delete():
+    html = build_howto_html()
+    assert "hides" in html.lower()
+    assert "permanently delete" in html.lower()
+
+
 def test_howto_html_is_a_complete_html_document():
     html = build_howto_html()
     assert html.strip().startswith("<!doctype html>")
