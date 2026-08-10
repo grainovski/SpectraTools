@@ -92,8 +92,14 @@ def test_howto_integration_section_mentions_optional_background():
 
 def test_howto_ctrl_c_description_says_hide_not_delete():
     html = build_howto_html()
-    assert "hides" in html.lower()
-    assert "permanently delete" in html.lower()
+    # Shortcuts table: each shortcut's own exact row text, so a partial
+    # revert of just one row can't hide behind the other's wording.
+    assert "Clear in-progress marks and hide committed fits (not delete)" in html
+    assert "Permanently delete the active spectrum's committed fits (in-progress marks untouched)" in html
+    # Prose paragraph: the same two claims, worded differently there --
+    # both locations must independently say the right thing.
+    assert "hides its already-committed fits" in html
+    assert "Ctrl+Shift+C</kbd> permanently deletes the active spectrum's" in html
 
 
 def test_howto_html_is_a_complete_html_document():
