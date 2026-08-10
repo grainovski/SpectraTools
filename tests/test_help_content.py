@@ -402,3 +402,12 @@ def test_knowledge_database_html_explains_integration_moments():
     html = _strip_base64_images(build_knowledge_database_html())
     assert "How integration computes gross, background, and net" in html
     assert "centroid = &Sigma;(x&middot;y) / &Sigma;y" in html
+
+
+def test_knowledge_database_html_figure_numbers_and_cross_references():
+    html = _strip_base64_images(build_knowledge_database_html())
+    assert "see Figure 4 -- unless you" in html
+    assert "Figure 4. Three peaks fit together" in html
+    assert "Figure 6. Linear vs. quadratic calibration" in html
+    assert "area = &Sigma;y" in html
+    assert "&sigma;&sup2; = &Sigma;((x&minus;centroid)" in html

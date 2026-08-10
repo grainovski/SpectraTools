@@ -260,7 +260,7 @@ current view, and <kbd>Ctrl+0</kbd> resets to the full spectrum.</p>
 @functools.lru_cache(maxsize=1)
 def build_knowledge_database_html():
     """The fit model, parameter meanings, and calibration math, each
-    cross-referenced to one of help_figures.py's four annotated figures
+    cross-referenced to one of help_figures.py's six annotated figures
     -- content verified against peak_fit.py/fit_mode.py's actual
     behavior through two rounds of correction after the first draft
     shipped wrong claims about area terminology and multiplet parameter
