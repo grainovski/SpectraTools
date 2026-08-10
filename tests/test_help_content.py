@@ -125,9 +125,9 @@ def test_knowledge_database_html_contains_parameter_names():
         assert term in html, f"missing term {term!r}"
 
 
-def test_knowledge_database_html_embeds_four_figures():
+def test_knowledge_database_html_embeds_six_figures():
     html = build_knowledge_database_html()
-    assert html.count("data:image/png;base64,") == 4
+    assert html.count("data:image/png;base64,") == 6
 
 
 def test_knowledge_database_html_has_no_external_links():
@@ -383,3 +383,22 @@ def test_open_help_page_fallback_strips_ld_library_path_when_no_orig_saved(qapp,
     )
     open_help_page("<html></html>")
     assert "LD_LIBRARY_PATH" not in popen_calls[0]["env"]
+
+
+def test_knowledge_database_html_explains_sigma_and_fwhm():
+    html = _strip_base64_images(build_knowledge_database_html())
+    assert "2.3548" in html
+    assert "FWHM_err = 2.3548" in html
+
+
+def test_knowledge_database_html_explains_position_volume_and_uncertainties():
+    html = _strip_base64_images(build_knowledge_database_html())
+    assert "area = amplitude &middot; &sigma; &middot; &radic;(2&pi;)" in html
+    assert "area_err = |area|" in html
+    assert "full_area = area + (background_slope" in html
+
+
+def test_knowledge_database_html_explains_integration_moments():
+    html = _strip_base64_images(build_knowledge_database_html())
+    assert "How integration computes gross, background, and net" in html
+    assert "centroid = &Sigma;(x&middot;y) / &Sigma;y" in html
