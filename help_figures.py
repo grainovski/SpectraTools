@@ -105,6 +105,45 @@ def tail_effect_figure():
     return _figure_to_png_bytes(fig)
 
 
+def sigma_fwhm_figure():
+    """A single Gaussian core with sigma and the FWHM (full width at
+    half maximum) both marked -- the reference figure for the "Sigma
+    and FWHM" section, which every width this program reports (fitted
+    or integrated) converts through."""
+    x = np.linspace(70.0, 130.0, 400)
+    position, sigma = 100.0, 8.0
+    y = np.exp(-((x - position) ** 2) / (2 * sigma ** 2))
+    fwhm = sigma * FWHM_FACTOR
+
+    fig = Figure(figsize=(7.0, 4.5), dpi=110)
+    ax = fig.add_subplot(111)
+    ax.plot(x, y, color=_DATA_COLOR, linewidth=1.8)
+
+    ax.axhline(0.5, color="gray", linestyle=":", linewidth=0.8)
+    ax.annotate(
+        "", xy=(position - fwhm / 2, 0.5), xytext=(position + fwhm / 2, 0.5),
+        arrowprops=dict(arrowstyle="<->", color=_FIT_COLOR),
+    )
+    ax.text(position, 0.54, "FWHM", color=_FIT_COLOR, ha="center", fontsize=9)
+
+    ax.annotate(
+        "", xy=(position, 0.03), xytext=(position + sigma, 0.03),
+        arrowprops=dict(arrowstyle="<->", color=_BG_COLOR),
+    )
+    ax.text(position + sigma / 2, 0.07, "sigma", color=_BG_COLOR, ha="center", fontsize=10)
+
+    ax.text(
+        0.5, -0.16,
+        "FWHM = 2 * sqrt(2 * ln2) * sigma  ~=  2.3548 * sigma",
+        transform=ax.transAxes, ha="center", va="top", fontsize=10,
+    )
+    ax.set_xlabel("Channel")
+    ax.set_ylabel("Normalized amplitude")
+    ax.set_title("Sigma and FWHM")
+    fig.tight_layout(rect=(0, 0.09, 1, 1))
+    return _figure_to_png_bytes(fig)
+
+
 def multiplet_figure():
     """Three peaks fit together with one shared FWHM -- two of them
     close enough to overlap, illustrating why multiplets link width
@@ -130,6 +169,59 @@ def multiplet_figure():
     ax.set_title("Multiplet: peaks sharing one FWHM")
     ax.legend(loc="upper right", fontsize=8)
     fig.tight_layout()
+    return _figure_to_png_bytes(fig)
+
+
+def integration_background_figure():
+    """The same simulated peak integrated two ways side by side: with
+    two background regions marked (background line drawn, net shaded
+    separately from gross) and with none (gross only, no subtraction)
+    -- the reference figure for "How integration computes gross,
+    background, and net"."""
+    x = np.linspace(60.0, 140.0, 400)
+    position, sigma, amplitude = 100.0, 4.0, 400.0
+    bg_slope, bg_intercept = 0.05, 15.0
+    background = bg_intercept + bg_slope * x
+    gross = background + amplitude * np.exp(-((x - position) ** 2) / (2 * sigma ** 2))
+
+    rng = np.random.default_rng(1)
+    gross_noisy = rng.poisson(np.clip(gross, 1, None)).astype(float)
+
+    fit_region = (80.0, 120.0)
+    left_bg = (65.0, 75.0)
+    right_bg = (125.0, 135.0)
+    mask = (x >= fit_region[0]) & (x <= fit_region[1])
+
+    fig = Figure(figsize=(9.5, 4.5), dpi=110)
+
+    ax1 = fig.add_subplot(121)
+    ax1.step(x, gross_noisy, where="mid", color=_DATA_COLOR, linewidth=1.0, label="Gross (data)")
+    ax1.plot(x, background, color=_BG_COLOR, linestyle="--", linewidth=1.3, label="Background")
+    ax1.fill_between(
+        x[mask], background[mask], gross_noisy[mask], step="mid",
+        color=_FIT_COLOR, alpha=0.25, label="Net",
+    )
+    ax1.axvspan(*left_bg, color=_REGION_BG_COLOR, alpha=0.25)
+    ax1.axvspan(*right_bg, color=_REGION_BG_COLOR, alpha=0.25)
+    ax1.axvspan(*fit_region, color=_REGION_FIT_COLOR, alpha=0.10)
+    ax1.set_title("With background regions")
+    ax1.set_xlabel("Channel")
+    ax1.set_ylabel("Counts")
+    ax1.legend(loc="upper left", fontsize=7)
+
+    ax2 = fig.add_subplot(122, sharey=ax1)
+    ax2.step(x, gross_noisy, where="mid", color=_DATA_COLOR, linewidth=1.0, label="Gross (data)")
+    ax2.fill_between(
+        x[mask], 0, gross_noisy[mask], step="mid",
+        color=_FIT_COLOR, alpha=0.25, label="Gross area",
+    )
+    ax2.axvspan(*fit_region, color=_REGION_FIT_COLOR, alpha=0.10)
+    ax2.set_title("Without background regions")
+    ax2.set_xlabel("Channel")
+    ax2.legend(loc="upper left", fontsize=7)
+
+    fig.suptitle("Integration: with vs. without background subtraction")
+    fig.tight_layout(rect=(0, 0, 1, 0.92))
     return _figure_to_png_bytes(fig)
 
 
