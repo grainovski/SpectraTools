@@ -79,10 +79,17 @@ def test_howto_html_covers_every_operation():
         "Add and Subtract Spectra",
         "Performing a fit",
         "Integration",
+        "Saving and exporting",
         "View options",
         "Knowledge Database",
     ]:
         assert topic in html, f"missing topic {topic!r}"
+
+
+def test_howto_html_documents_export_formats():
+    html = build_howto_html()
+    for term in ["_fits.jsonl", "Export All Fits", "_fits_report.txt", "Export This Fit"]:
+        assert term in html, f"missing term {term!r}"
 
 
 def test_howto_integration_section_mentions_optional_background():

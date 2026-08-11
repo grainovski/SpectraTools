@@ -247,7 +247,27 @@ pressing <kbd>Ctrl+I</kbd> reports the raw area and centroid (plus
 FWHM and skewness) with no background subtraction; marking two
 background regions first still works exactly as before.</p>
 
-<h3>9. View options</h3>
+<h3>9. Saving and exporting fit results</h3>
+<p>Every fit or integration you commit (<kbd>Ctrl+F</kbd> /
+<kbd>Ctrl+I</kbd>) is automatically logged to a file next to the
+spectrum: the spectrum's own filename with <code>_fits.jsonl</code>
+appended (e.g. <code>eu.spe</code> logs to <code>eu_fits.jsonl</code>).
+Each line is one self-contained JSON record covering every parameter
+and its uncertainty, plus keV equivalents when calibration is active.
+This happens automatically every time -- there's nothing to trigger and
+nothing to configure.</p>
+<p>To save a human-readable report instead, press <kbd>Ctrl+E</kbd>
+(<b>Export All Fits...</b>): a save dialog opens, defaulting to the
+spectrum's filename with <code>_fits_report.txt</code> appended, and
+writes every committed fit and integration on the active spectrum as
+one plain-text report. To export just one instead, right-click its row
+in the Fit Results panel and choose <b>Export This Fit...</b> (defaults
+to the filename with <code>_fit</code> and its number appended, e.g.
+<code>_fit2_report.txt</code>). Either way, the report lists every
+parameter with its uncertainty in plain text -- see the Knowledge
+Database page for what each one means.</p>
+
+<h3>10. View options</h3>
 <p><kbd>Ctrl+G</kbd> toggles a logarithmic Y axis. <kbd>Ctrl+D</kbd>
 toggles dark theme. <kbd>Ctrl+1</kbd>/<kbd>Ctrl+2</kbd>/<kbd>Ctrl+3</kbd>
 show or hide the Spectra, Fit Results, and Fit Parameters panels.
