@@ -430,3 +430,17 @@ def test_howto_loading_section_mentions_n42_format():
     html = build_howto_html()
     assert "<b>.n42</b>" in html
     assert "four supported formats" in html
+
+
+def test_howto_saving_section_notes_n42_is_read_only():
+    html = build_howto_html()
+    # Scoped to the "3. Saving a spectrum" section specifically -- a bare
+    # `"read-only" in html` check could pass from unrelated prose
+    # elsewhere on the page.
+    saving_section = html.split("<h3>3. Saving a spectrum</h3>")[1].split("<h3>")[0]
+    assert "<b>.n42</b>" in saving_section
+    assert "read-only" in saving_section
+    # Guards against the specific stale claim this test was added to fix:
+    # saving no longer supports "the same" formats as reading now that
+    # reading also accepts the (write-unsupported) .n42 format.
+    assert "the same three formats" not in html

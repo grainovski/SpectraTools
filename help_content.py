@@ -177,8 +177,8 @@ spectrum without needing to right-click a specific row.</p>
 
 <h3>3. Saving a spectrum</h3>
 <p><b>File &gt; Save Spectrum...</b> (<kbd>Ctrl+S</kbd>) saves the active
-spectrum, prompting you to choose one of the same three formats
-(.txt/.spe/.spk) it can read.</p>
+spectrum, prompting you to choose one of three formats (.txt/.spe/.spk);
+<b>.n42</b> is read-only and isn't offered here.</p>
 
 <h3>4. Calibrating the energy axis</h3>
 <p><b>Operations &gt; Calibration...</b> (<kbd>Ctrl+L</kbd>) opens a
