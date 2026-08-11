@@ -2,6 +2,7 @@ import os
 import tempfile
 
 import numpy as np
+import pytest
 from matplotlib.backend_bases import MouseEvent
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QDialog, QMenu
@@ -1094,3 +1095,29 @@ def test_close_spectrum_action_in_file_menu_between_save_and_recent_files(qapp):
     close_index = actions.index(main_window.close_spectrum_action)
     recent_index = actions.index(main_window.recent_menu.menuAction())
     assert save_index < close_index < recent_index
+
+
+def test_opening_n42_file_with_calibration_auto_activates_it(qapp):
+    main_window = MainWindow()
+    fixture = os.path.join(os.path.dirname(__file__), "fixtures", "316-2_160V_0785uA.n42")
+
+    main_window._load_files([fixture])
+
+    assert main_window._calibration_active is True
+    assert main_window._calibration.kind == "quadratic"
+    assert main_window._calibration.a == pytest.approx(-11.3498272291349)
+    assert main_window.calibration_toggle_action.isChecked() is True
+    assert main_window.calibration_active_menu_action.isChecked() is True
+
+
+def test_opening_n42_file_does_not_override_an_already_active_calibration(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    fixture = os.path.join(os.path.dirname(__file__), "fixtures", "316-2_160V_0785uA.n42")
+    main_window._apply_calibration_change(Calibration(kind="linear", a=99.0, b=1.0), True)
+
+    main_window._load_files([fixture])
+
+    assert main_window._calibration.kind == "linear"
+    assert main_window._calibration.a == 99.0

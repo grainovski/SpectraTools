@@ -41,6 +41,7 @@ from help_content import (
     open_help_page,
 )
 from histogram_io import ParseError, load_histogram, save_histogram
+from n42_io import load_n42
 from settings import Settings
 from spe_io import load_spe, save_spe
 from spectrum import LoadedSpectrum, next_color
@@ -732,26 +733,32 @@ class MainWindow(QMainWindow):
             self,
             "Open Histogram",
             self.settings.last_folder(),
-            "Spectrum files (*.txt *.spe *.spk);;Text files (*.txt);;"
-            "SPE files (*.spe);;SPK files (*.spk);;All files (*)",
+            "Spectrum files (*.txt *.spe *.spk *.n42);;Text files (*.txt);;"
+            "SPE files (*.spe);;SPK files (*.spk);;N42 files (*.n42);;All files (*)",
         )
         if paths:
             self._load_files(paths)
 
     def _try_load_spectrum(self, path):
         lower = path.lower()
-        if lower.endswith(".spe"):
-            loader = load_spe
-        elif lower.endswith(".spk"):
-            loader = load_spk
-        else:
-            loader = load_histogram
+        calibration = None
         try:
-            data = loader(path)
+            if lower.endswith(".spe"):
+                data = load_spe(path)
+            elif lower.endswith(".spk"):
+                data = load_spk(path)
+            elif lower.endswith(".n42"):
+                data, calibration = load_n42(path)
+            else:
+                data = load_histogram(path)
         except ParseError as exc:
             return None, f"{os.path.basename(path)}: {exc}"
         except OSError as exc:
             return None, f"{os.path.basename(path)}: {exc}"
+
+        if calibration is not None and not self._calibration_active:
+            self._apply_calibration_change(calibration, True)
+
         color_index = self._next_color_index
         self._next_color_index += 1
         spectrum = LoadedSpectrum(path, data, next_color(color_index, self._theme))
