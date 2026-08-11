@@ -8,6 +8,7 @@ def test_initial_state():
     assert state.fit_region is None
     assert state.pending_fit_click is None
     assert state.peak_positions == []
+    assert state.show_background_preview is False
 
 
 def test_bg_click_pairs_into_one_region():

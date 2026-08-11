@@ -47,7 +47,9 @@ class FitModeState:
     def add_bg_click(self, x):
         """Returns the completed (lo, hi) region if this click
         completed a pair, else None (this click becomes the pending
-        first point). A 3rd completed pair evicts the oldest region."""
+        first point). A 3rd completed pair evicts the oldest region.
+        Also clears a stale background-preview flag if one was
+        showing, since it's now computed from since-changed regions."""
         if self.pending_bg_click is None:
             self.pending_bg_click = x
             return None
