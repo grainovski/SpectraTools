@@ -126,6 +126,29 @@ def test_load_n42_four_coefficients_gives_no_calibration(tmp_path):
     assert calibration is None
 
 
+def test_load_n42_zero_b_coefficient_linear_gives_no_calibration(tmp_path):
+    # b == 0 makes Calibration.__post_init__ raise CalibrationError
+    # (calibration.py:35-36) -- a device's "not yet calibrated"
+    # placeholder should degrade to no calibration, not a load failure.
+    xml_text = _MINIMAL_N42.format(
+        calibration_block=_CALIBRATION_BLOCK.format(coefficients="5.0 0.0"),
+        spectrum_block=_spectrum_block("0 1 2"),
+    )
+    data, calibration = load_n42(_write_n42(tmp_path, xml_text))
+    assert list(data) == [0, 1, 2]
+    assert calibration is None
+
+
+def test_load_n42_zero_b_coefficient_quadratic_gives_no_calibration(tmp_path):
+    xml_text = _MINIMAL_N42.format(
+        calibration_block=_CALIBRATION_BLOCK.format(coefficients="5.0 0.0 0.0"),
+        spectrum_block=_spectrum_block("0 1 2"),
+    )
+    data, calibration = load_n42(_write_n42(tmp_path, xml_text))
+    assert list(data) == [0, 1, 2]
+    assert calibration is None
+
+
 def test_load_n42_no_energy_calibration_element_gives_none(tmp_path):
     xml_text = _MINIMAL_N42.format(
         calibration_block="",

@@ -2,7 +2,7 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
-from calibration import Calibration
+from calibration import Calibration, CalibrationError
 from histogram_io import ParseError
 
 _NS = "{http://physics.nist.gov/N42/2011/N42}"
@@ -63,12 +63,20 @@ def _parse_calibration(root, spectrum_el):
         coefficients = [float(tok) for tok in values_el.text.split()]
     except ValueError:
         return None
-    if len(coefficients) == 2:
-        a, b = coefficients
-        return Calibration(kind="linear", a=a, b=b)
-    if len(coefficients) == 3:
-        a, b, c = coefficients
-        return Calibration(kind="quadratic", a=a, b=b, c=c)
+    try:
+        if len(coefficients) == 2:
+            a, b = coefficients
+            return Calibration(kind="linear", a=a, b=b)
+        if len(coefficients) == 3:
+            a, b, c = coefficients
+            return Calibration(kind="quadratic", a=a, b=b, c=c)
+    except CalibrationError:
+        # e.g. b == 0.0 -- a degenerate/placeholder calibration some
+        # devices write before the detector has actually been
+        # calibrated. Same "unusable calibration" outcome as a
+        # non-numeric or wrong-arity CoefficientValues list above:
+        # treated as no calibration rather than a load failure.
+        return None
     return None  # a polynomial order this app's Calibration model can't represent
 
 
