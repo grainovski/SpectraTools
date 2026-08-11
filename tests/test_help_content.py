@@ -60,7 +60,7 @@ def test_howto_html_contains_every_shortcut():
         "Ctrl+G", "Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+D",
         "Ctrl+L", "Ctrl+T", "Ctrl+M", "Ctrl+R", "Ctrl+N", "Ctrl+A", "Ctrl+Shift+A",
         "Ctrl+=", "Ctrl+-", "Ctrl+0",
-        "Ctrl+F", "Ctrl+C", "Ctrl+Shift+C", "Ctrl+E", "Ctrl+I",
+        "Ctrl+F", "Ctrl+B", "Ctrl+C", "Ctrl+Shift+C", "Ctrl+E", "Ctrl+I",
         "B", "R", "P", "F1",
     ]:
         assert f"<kbd>{shortcut}</kbd>" in html, f"missing shortcut {shortcut!r}"
@@ -107,6 +107,12 @@ def test_howto_ctrl_c_description_says_hide_not_delete():
     # both locations must independently say the right thing.
     assert "hides its already-committed fits" in html
     assert "Ctrl+Shift+C</kbd> permanently deletes the active spectrum's" in html
+
+
+def test_howto_html_documents_ctrl_b_preview():
+    html = build_howto_html()
+    assert "Preview the background fit from the two background regions alone" in html
+    assert "no fit region or peaks needed" in html
 
 
 def test_howto_html_is_a_complete_html_document():

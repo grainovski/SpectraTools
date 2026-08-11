@@ -133,6 +133,7 @@ program supports.</p>
 <tr><td><kbd>R</kbd></td><td>Hold and click twice (once on each end) to mark the fit region</td></tr>
 <tr><td><kbd>P</kbd></td><td>Hold and click once per peak to mark a peak position</td></tr>
 <tr><td><kbd>Ctrl+F</kbd></td><td>Fit</td></tr>
+<tr><td><kbd>Ctrl+B</kbd></td><td>Preview the background fit from the two background regions alone (no fit region or peaks needed); press again to hide</td></tr>
 <tr><td><kbd>Ctrl+2</kbd></td><td>Toggle the Fit Results panel</td></tr>
 <tr><td><kbd>Ctrl+3</kbd></td><td>Toggle the Fit Parameters panel</td></tr>
 <tr><td><kbd>Ctrl+C</kbd></td><td>Clear in-progress marks and hide committed fits (not delete)</td></tr>
@@ -227,6 +228,11 @@ share one FWHM by default; see the Knowledge Database page for the
 panel; per-parameter values (with uncertainties) appear in the Fit
 Parameters panel.</li>
 </ol>
+<p>Once both background regions are marked, <kbd>Ctrl+B</kbd> previews
+just the background line -- no fit region or peaks needed -- useful
+for sanity-checking the background before marking the rest. It's a
+preview only: nothing is added to Fit Results, logged, or exported.
+Press <kbd>Ctrl+B</kbd> again to hide it.</p>
 <p>See the Knowledge Database page for exactly what's being computed
 here, and what each fit parameter means.</p>
 <p><kbd>Ctrl+C</kbd> clears the active spectrum's in-progress B/R/P
