@@ -424,3 +424,9 @@ def test_knowledge_database_html_figure_numbers_and_cross_references():
     assert "Figure 6. Linear vs. quadratic calibration" in html
     assert "area = &Sigma;y" in html
     assert "&sigma;&sup2; = &Sigma;((x&minus;centroid)" in html
+
+
+def test_howto_loading_section_mentions_n42_format():
+    html = build_howto_html()
+    assert "<b>.n42</b>" in html
+    assert "four supported formats" in html

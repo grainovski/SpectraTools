@@ -154,12 +154,16 @@ program supports.</p>
 
 <h3>1. Loading a spectrum</h3>
 <p><b>File &gt; Open...</b> (<kbd>Ctrl+O</kbd>) opens a file picker for the
-three supported formats: <b>.txt</b> (one integer count per line, channel
-number implied by line position), <b>.spe</b>,
-and <b>.spk</b>. Recently opened files also appear under
-<b>File &gt; Recent Files</b> for one-click reopening. Every spectrum you
-open stays loaded until you close it -- opening a new one adds it
-alongside the others rather than replacing what's already there.</p>
+four supported formats: <b>.txt</b> (one integer count per line, channel
+number implied by line position), <b>.spe</b>, <b>.spk</b>, and
+<b>.n42</b> (ANSI/IEEE N42.42; only the raw histogram and, if present,
+the embedded energy calibration are read -- everything else in the file
+is ignored, and an N42 file's calibration is applied automatically only
+when no calibration is already active). Recently opened files also
+appear under <b>File &gt; Recent Files</b> for one-click reopening.
+Every spectrum you open stays loaded until you close it -- opening a
+new one adds it alongside the others rather than replacing what's
+already there.</p>
 
 <h3>2. Working with multiple spectra</h3>
 <p>Loaded spectra appear in the Spectra panel, one row each. Exactly one
