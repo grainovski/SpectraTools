@@ -16,7 +16,7 @@ from peak_fit import (
     FWHM_FACTOR, FitError, IntegrationResult, compute_background, fit_peaks,
     fit_result_values_by_name, hypermet_left_tail, integrate_region, parameter_names,
 )
-from theme import fit_drawing_colors
+from theme import NEUTRAL_LINE_COLOR, fit_drawing_colors
 
 BG_REGION_CAP = 2
 
@@ -524,15 +524,20 @@ class FitModeController(QObject):
             if active is not None:
                 left, right = state.ordered_bg_regions()
                 x = np.arange(len(active.data), dtype=float)
-                slope, intercept = compute_background(x, active.data, left, right)
-                bg_lo_x, bg_hi_x = left[0], right[1]
-                bg_lo_y = slope * bg_lo_x + intercept
-                bg_hi_y = slope * bg_hi_x + intercept
-                line = axes.plot(
-                    [to_display(bg_lo_x), to_display(bg_hi_x)], [bg_lo_y, bg_hi_y],
-                    color="black", linestyle="--", linewidth=1.2,
-                )[0]
-                self._progress_artists.append(line)
+                try:
+                    slope, intercept = compute_background(x, active.data, left, right)
+                except FitError as exc:
+                    state.show_background_preview = False
+                    self._show_status_message(f"Background preview failed: {exc}", 5000)
+                else:
+                    bg_lo_x, bg_hi_x = left[0], right[1]
+                    bg_lo_y = slope * bg_lo_x + intercept
+                    bg_hi_y = slope * bg_hi_x + intercept
+                    line = axes.plot(
+                        [to_display(bg_lo_x), to_display(bg_hi_x)], [bg_lo_y, bg_hi_y],
+                        color=NEUTRAL_LINE_COLOR, linestyle="--", linewidth=1.2,
+                    )[0]
+                    self._progress_artists.append(line)
 
         self.main_window.canvas.draw_idle()
 

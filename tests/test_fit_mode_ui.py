@@ -3718,3 +3718,46 @@ def test_background_preview_button_has_ctrl_b_shortcut_and_no_toolbar(qapp):
     assert main_window.background_preview_button.shortcut().toString() == "Ctrl+B"
     assert main_window.background_preview_button.isEnabled() is True
     assert main_window.background_preview_button in main_window.actions()
+
+
+def test_toggle_background_preview_catches_fit_error_and_resets_the_flag(qapp):
+    # One background region placed entirely beyond the active spectrum's
+    # own data (200 channels: valid indices 0-199) -- reachable in
+    # practice since MainWindow._zoom_x() clamps pan/zoom to the widest
+    # *visible* spectrum, not necessarily the active one, so a background
+    # region marked while comparing differently-sized spectra can easily
+    # land outside the active spectrum's own length. compute_background()
+    # (via _region_centroid) raises FitError for a region with no data
+    # point in it -- toggle_background_preview() sets
+    # show_background_preview True *before* _redraw_progress() attempts
+    # the computation, so an uncaught FitError here would both crash and
+    # leave the flag stuck on, re-raising on every later redraw until
+    # Ctrl+C. Must instead show a status message and turn the flag back
+    # off, exactly like run_fit()/run_integration() do for their own
+    # FitError cases (see test_fit_failure_leaves_marks_intact_and_shows_message).
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    main_window.axes.set_xlim(0, 400)  # wide enough for the off-data clicks below to register
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 300)
+    _held_key_click(main_window, "b", 320)  # entirely beyond the spectrum's 200 channels
+
+    # The exact region tuple compute_background()/_region_centroid() sees
+    # for the failing (right-hand, higher-mean-x) region -- built the same
+    # way the source does (state.ordered_bg_regions()) rather than
+    # hardcoded, since matplotlib's MouseEvent.xdata is a numpy float64
+    # and its repr (used by the f-string in the FitError message) varies
+    # by numpy version, e.g. "300.0" vs "np.float64(300.0)".
+    _, failing_region = main_window.fit_controller.state.ordered_bg_regions()
+    lines_before = len(main_window.axes.lines)
+
+    main_window.fit_controller.toggle_background_preview()  # must not raise
+
+    assert len(main_window.axes.lines) == lines_before  # no preview line drawn
+    assert (
+        main_window.statusBar().currentMessage()
+        == f"Background preview failed: Background region {failing_region} contains no data"
+    )
+    assert main_window.fit_controller.state.show_background_preview is False
