@@ -1417,13 +1417,51 @@ def test_draw_committed_fits_integration_result_draws_at_calibrated_x(qapp):
     # channels.
     bg_line = main_window.axes.lines[-1]
     xdata = bg_line.get_xdata()
-    assert xdata[0] == pytest.approx(52.5)  # channel 85 -> keV 10+0.5*85
-    assert xdata[1] == pytest.approx(67.5)  # channel 115 -> keV 10+0.5*115
+    assert xdata[0] == pytest.approx(45.0)  # channel 70 (left_bg_region[0]) -> keV 10+0.5*70
+    assert xdata[1] == pytest.approx(75.0)  # channel 130 (right_bg_region[1]) -> keV 10+0.5*130
 
     # The centroid/FWHM/area annotation is anchored at the calibrated
     # net_centroid position.
     annotation = main_window.axes.texts[-1]
     assert annotation.get_position()[0] == pytest.approx(60.0)  # net_centroid 100 -> keV 60
+
+
+def test_draw_committed_fits_fit_background_line_spans_bg_regions(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    spectrum.fits.append(
+        FitResult(
+            left_bg_region=(70.0, 85.0), right_bg_region=(115.0, 130.0),
+            fit_region=(85.0, 115.0), background_slope=0.1, background_intercept=20.0,
+            peaks=[
+                PeakResult(
+                    position=100.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                    area=1000.0, area_err=50.0, amplitude=200.0, sigma=2.0,
+                )
+            ],
+        )
+    )
+
+    main_window.axes.clear()
+    main_window.fit_controller.draw_committed_fits(spectrum)
+
+    # The background dashed line (linewidth 1 and linestyle "--", distinct
+    # from the fit curve's 1.5, each peak component's 0.75, and the
+    # peak-position marker's linewidth 1 but linestyle ":") must span the
+    # background regions' own outer bounds, not the fit region --
+    # background_slope is nonzero here specifically so a wrong span
+    # would move both Y endpoints too, not just X.
+    bg_lines = [
+        line for line in main_window.axes.lines
+        if line.get_linewidth() == 1 and line.get_linestyle() == "--"
+    ]
+    assert len(bg_lines) == 1
+    xdata = bg_lines[0].get_xdata()
+    ydata = bg_lines[0].get_ydata()
+    assert xdata[0] == pytest.approx(70.0)   # left_bg_region[0]
+    assert xdata[1] == pytest.approx(130.0)  # right_bg_region[1]
+    assert ydata[0] == pytest.approx(0.1 * 70.0 + 20.0)
+    assert ydata[1] == pytest.approx(0.1 * 130.0 + 20.0)
 
 
 @pytest.mark.xfail(

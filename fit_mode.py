@@ -602,9 +602,9 @@ class FitModeController(QObject):
 
             if isinstance(result, IntegrationResult):
                 if result.has_background:
-                    lo, hi = result.fit_region
+                    bg_line_lo, bg_line_hi = result.left_bg_region[0], result.right_bg_region[1]
                     axes.plot(
-                        [to_display(lo), to_display(hi)],
+                        [to_display(bg_line_lo), to_display(bg_line_hi)],
                         [result.background_density, result.background_density],
                         color=bg_line_color, linestyle="--", linewidth=1,
                     )
@@ -630,10 +630,11 @@ class FitModeController(QObject):
                 continue
 
             lo, hi = result.fit_region
-            background_lo = result.background_slope * lo + result.background_intercept
-            background_hi = result.background_slope * hi + result.background_intercept
+            bg_line_lo, bg_line_hi = result.left_bg_region[0], result.right_bg_region[1]
+            background_lo = result.background_slope * bg_line_lo + result.background_intercept
+            background_hi = result.background_slope * bg_line_hi + result.background_intercept
             axes.plot(
-                [to_display(lo), to_display(hi)], [background_lo, background_hi],
+                [to_display(bg_line_lo), to_display(bg_line_hi)], [background_lo, background_hi],
                 color=bg_line_color, linestyle="--", linewidth=1,
             )
 
