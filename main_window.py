@@ -1063,6 +1063,11 @@ class MainWindow(QMainWindow):
         self.integrate_button.triggered.connect(self.fit_controller.run_integration)
         self.addAction(self.integrate_button)
 
+        self.background_preview_button = QAction("Preview Background Fit", self)
+        self.background_preview_button.setShortcut("Ctrl+B")
+        self.background_preview_button.triggered.connect(self.fit_controller.toggle_background_preview)
+        self.addAction(self.background_preview_button)
+
     def _on_canvas_click(self, event):
         self.fit_controller.on_click(event)
 

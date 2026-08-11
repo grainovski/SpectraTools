@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
 
 import fit_export
 from peak_fit import (
-    FWHM_FACTOR, FitError, IntegrationResult, fit_peaks, fit_result_values_by_name,
-    hypermet_left_tail, integrate_region, parameter_names,
+    FWHM_FACTOR, FitError, IntegrationResult, compute_background, fit_peaks,
+    fit_result_values_by_name, hypermet_left_tail, integrate_region, parameter_names,
 )
 from theme import fit_drawing_colors
 
@@ -518,6 +518,21 @@ class FitModeController(QObject):
             self._progress_artists.append(
                 axes.axvline(to_display(x), color="red", linestyle=":", linewidth=1)
             )
+
+        if state.show_background_preview and len(state.bg_regions) == BG_REGION_CAP:
+            active = next((s for s in self.main_window.spectra if s.active), None)
+            if active is not None:
+                left, right = state.ordered_bg_regions()
+                x = np.arange(len(active.data), dtype=float)
+                slope, intercept = compute_background(x, active.data, left, right)
+                bg_lo_x, bg_hi_x = left[0], right[1]
+                bg_lo_y = slope * bg_lo_x + intercept
+                bg_hi_y = slope * bg_hi_x + intercept
+                line = axes.plot(
+                    [to_display(bg_lo_x), to_display(bg_hi_x)], [bg_lo_y, bg_hi_y],
+                    color="black", linestyle="--", linewidth=1.2,
+                )[0]
+                self._progress_artists.append(line)
 
         self.main_window.canvas.draw_idle()
 
@@ -1207,3 +1222,10 @@ class FitModeController(QObject):
         except OSError as exc:
             self._show_status_message(f"Could not write fit log: {exc}", 5000)
         self.main_window._plot_data(preserve_view=True)
+
+    def toggle_background_preview(self):
+        if not self.state.ready_to_preview_background():
+            self._show_status_message(self.state.background_blocked_reason(), 5000)
+            return
+        self.state.show_background_preview = not self.state.show_background_preview
+        self._redraw_progress()

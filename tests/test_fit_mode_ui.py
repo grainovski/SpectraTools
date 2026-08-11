@@ -3656,3 +3656,65 @@ def test_run_integration_shows_no_message_and_commits_when_marks_are_complete(qa
 
     assert len(spectrum.fits) == 1
     assert main_window.statusBar().currentMessage() == ""
+
+
+def test_toggle_background_preview_draws_line_spanning_bg_regions(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    lines_before = len(main_window.axes.lines)
+
+    main_window.fit_controller.toggle_background_preview()
+
+    assert len(main_window.axes.lines) == lines_before + 1
+    assert main_window.statusBar().currentMessage() == ""
+    preview_line = main_window.axes.lines[-1]
+    xdata = preview_line.get_xdata()
+    assert xdata[0] == pytest.approx(70.0)
+    assert xdata[1] == pytest.approx(130.0)
+
+
+def test_toggle_background_preview_hides_on_second_press(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+
+    main_window.fit_controller.toggle_background_preview()
+    lines_with_preview = len(main_window.axes.lines)
+
+    main_window.fit_controller.toggle_background_preview()
+
+    assert len(main_window.axes.lines) == lines_with_preview - 1
+
+
+def test_toggle_background_preview_shows_a_status_message_when_marks_are_incomplete(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    # only one background region marked
+
+    main_window.fit_controller.toggle_background_preview()
+
+    assert (
+        main_window.statusBar().currentMessage()
+        == "Mark two background regions (hold B and click twice per region) before previewing the background"
+    )
+    assert main_window.fit_controller.state.show_background_preview is False
+
+
+def test_background_preview_button_has_ctrl_b_shortcut_and_no_toolbar(qapp):
+    main_window = MainWindow()
+
+    assert main_window.background_preview_button.shortcut().toString() == "Ctrl+B"
+    assert main_window.background_preview_button.isEnabled() is True
+    assert main_window.background_preview_button in main_window.actions()
