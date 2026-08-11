@@ -144,7 +144,7 @@ def _region_centroid(x, y, region):
     return float(np.mean(x[mask])), float(np.mean(y[mask]))
 
 
-def _compute_background(x, y, left_bg_region, right_bg_region):
+def compute_background(x, y, left_bg_region, right_bg_region):
     left_x, left_y = _region_centroid(x, y, left_bg_region)
     right_x, right_y = _region_centroid(x, y, right_bg_region)
     if right_x == left_x:
@@ -277,7 +277,7 @@ def fit_peaks(
     if not peak_positions:
         raise FitError("At least one peak must be marked")
 
-    slope, intercept = _compute_background(x, y, left_bg_region, right_bg_region)
+    slope, intercept = compute_background(x, y, left_bg_region, right_bg_region)
 
     lo, hi = fit_region
     mask = (x >= lo) & (x <= hi)

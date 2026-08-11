@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from peak_fit import FitError, FitResult, PeakResult, _compute_background, hypermet_left_tail
+from peak_fit import FitError, FitResult, PeakResult, compute_background, hypermet_left_tail
 
 
 def test_hypermet_left_tail_biases_left_not_right():
@@ -185,7 +185,7 @@ def test_fit_error_is_an_exception():
 def test_compute_background_flat():
     x = np.arange(200, dtype=float)
     y = np.full(200, 15.0)
-    slope, intercept = _compute_background(x, y, (10.0, 20.0), (150.0, 160.0))
+    slope, intercept = compute_background(x, y, (10.0, 20.0), (150.0, 160.0))
     assert slope == pytest.approx(0.0, abs=1e-9)
     assert intercept == pytest.approx(15.0, abs=1e-9)
 
@@ -193,7 +193,7 @@ def test_compute_background_flat():
 def test_compute_background_sloped():
     x = np.arange(200, dtype=float)
     y = 0.5 * x + 3.0
-    slope, intercept = _compute_background(x, y, (10.0, 20.0), (150.0, 160.0))
+    slope, intercept = compute_background(x, y, (10.0, 20.0), (150.0, 160.0))
     assert slope == pytest.approx(0.5, abs=1e-6)
     assert intercept == pytest.approx(3.0, abs=1e-4)
 
@@ -202,14 +202,14 @@ def test_compute_background_rejects_empty_region():
     x = np.arange(200, dtype=float)
     y = np.full(200, 15.0)
     with pytest.raises(FitError):
-        _compute_background(x, y, (500.0, 501.0), (150.0, 160.0))
+        compute_background(x, y, (500.0, 501.0), (150.0, 160.0))
 
 
 def test_compute_background_rejects_identical_mean_x():
     x = np.arange(200, dtype=float)
     y = np.full(200, 15.0)
     with pytest.raises(FitError):
-        _compute_background(x, y, (10.0, 20.0), (10.0, 20.0))
+        compute_background(x, y, (10.0, 20.0), (10.0, 20.0))
 
 
 from peak_fit import fit_peaks
