@@ -277,3 +277,47 @@ def test_integrate_blocked_reason_is_none_with_two_bg_regions():
     state.add_fit_click(115)
     assert state.ready_to_integrate() is True
     assert state.integrate_blocked_reason() is None
+
+
+def test_background_blocked_reason_when_no_bg_regions():
+    state = FitModeState()
+    assert (
+        state.background_blocked_reason()
+        == "Mark two background regions (hold B and click twice per region) before previewing the background"
+    )
+
+
+def test_background_blocked_reason_when_one_bg_region():
+    state = FitModeState()
+    state.add_bg_click(70)
+    state.add_bg_click(85)
+    assert (
+        state.background_blocked_reason()
+        == "Mark two background regions (hold B and click twice per region) before previewing the background"
+    )
+
+
+def test_background_blocked_reason_is_none_when_two_bg_regions():
+    state = FitModeState()
+    state.add_bg_click(70)
+    state.add_bg_click(85)
+    state.add_bg_click(115)
+    state.add_bg_click(130)
+    assert state.background_blocked_reason() is None
+    assert state.ready_to_preview_background() is True
+
+
+def test_add_bg_click_resets_background_preview_flag_when_regions_change():
+    state = FitModeState()
+    state.add_bg_click(70)
+    state.add_bg_click(85)
+    state.add_bg_click(115)
+    state.add_bg_click(130)
+    state.show_background_preview = True
+
+    # A third completed pair evicts the oldest region -- a preview
+    # computed from the old regions is now stale and must clear.
+    state.add_bg_click(200)
+    state.add_bg_click(210)
+
+    assert state.show_background_preview is False

@@ -42,6 +42,7 @@ class FitModeState:
         self.fit_region = None
         self.pending_fit_click = None
         self.peak_positions = []
+        self.show_background_preview = False
 
     def add_bg_click(self, x):
         """Returns the completed (lo, hi) region if this click
@@ -55,6 +56,7 @@ class FitModeState:
         self.bg_regions.append(region)
         if len(self.bg_regions) > BG_REGION_CAP:
             self.bg_regions.pop(0)
+        self.show_background_preview = False
         return region
 
     def add_fit_click(self, x):
@@ -127,6 +129,17 @@ class FitModeState:
         if len(self.bg_regions) not in (0, BG_REGION_CAP):
             return "Mark zero or two background regions (not one) before integrating"
         return None
+
+    def background_blocked_reason(self):
+        """Same shape as fit_blocked_reason()/integrate_blocked_reason()
+        -- the background preview needs only the two background
+        regions, independent of fit_region or peaks."""
+        if len(self.bg_regions) != BG_REGION_CAP:
+            return "Mark two background regions (hold B and click twice per region) before previewing the background"
+        return None
+
+    def ready_to_preview_background(self):
+        return self.background_blocked_reason() is None
 
     def ordered_bg_regions(self):
         """Returns (left, right) background regions ordered by mean
