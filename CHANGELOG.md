@@ -4,6 +4,47 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [2.2.0] - 2026-08-11
+
+### Added
+
+- **Integration without background regions**: `Ctrl+I` now works with zero
+  background regions marked, not just two — reports the raw gross
+  area/centroid/FWHM/skewness with no background subtraction. Marking two
+  background regions first still works exactly as before.
+- **`Ctrl+B`**: previews the background fit computed from the two marked
+  background regions alone — no fit region or peaks needed. Useful for
+  sanity-checking the background before marking the rest. It's a preview
+  only: nothing is added to Fit Results, logged, or exported. Press
+  `Ctrl+B` again to hide it.
+- **Status-bar feedback when `Ctrl+F`/`Ctrl+I`/`Ctrl+B` are pressed with
+  incomplete marks** — previously silent no-ops, these now name
+  specifically what's still missing.
+- **Knowledge Database page** gained real formulas: how sigma relates to
+  FWHM, how a fit's position/volume/uncertainties are computed (including
+  the full-vs-net volume distinction), and how Integration computes
+  gross/background/net directly from the data — with two new annotated
+  figures.
+- **HowTo page** gained documentation of the automatic per-fit JSON-Lines
+  log and the `Ctrl+E` text-report export format (neither was documented
+  before), and of the new `Ctrl+B` shortcut.
+
+### Changed
+
+- **`Ctrl+C`** ("Clear") now hides the active spectrum's committed fits
+  instead of permanently deleting them — grayed out in Fit Results,
+  removed from the plot, but recoverable by re-fitting the same marks.
+  In-progress B/R/P marks are still cleared as before. `Ctrl+Shift+C`
+  remains the permanent-delete option, unchanged.
+
+### Fixed
+
+- **The background line for a committed fit or integration was drawn
+  across the fit region instead of the two background regions it's
+  actually calculated from** — visually misleading whenever those two
+  spans differ, which is the normal case. Now spans the background
+  regions correctly, for both a peak fit and an integration.
+
 ## [2.1.1] - 2026-08-05
 
 ### Fixed
