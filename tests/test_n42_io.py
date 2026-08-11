@@ -1,0 +1,160 @@
+import os
+
+import numpy as np
+import pytest
+
+from histogram_io import ParseError
+from n42_io import load_n42
+
+FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
+
+_MINIMAL_N42 = """<?xml version="1.0"?>
+<RadInstrumentData xmlns="http://physics.nist.gov/N42/2011/N42">
+  {calibration_block}
+  <RadMeasurement id="RadMeasurement-1">
+    {spectrum_block}
+  </RadMeasurement>
+</RadInstrumentData>
+"""
+
+_CALIBRATION_BLOCK = """<EnergyCalibration id="EnergyCalibration-1">
+    <CoefficientValues>{coefficients}</CoefficientValues>
+  </EnergyCalibration>"""
+
+
+def _spectrum_block(channel_data, compression="None", cal_ref="EnergyCalibration-1"):
+    ref_attr = f' energyCalibrationReference="{cal_ref}"' if cal_ref else ""
+    return (
+        f'<Spectrum id="RadMeasurement-1Spectrum-1"{ref_attr}>'
+        f'<ChannelData compressionCode="{compression}">{channel_data}</ChannelData>'
+        f"</Spectrum>"
+    )
+
+
+def _write_n42(tmp_path, xml_text, name="test.n42"):
+    path = tmp_path / name
+    path.write_text(xml_text, encoding="utf-8")
+    return str(path)
+
+
+def test_load_n42_real_sample_file():
+    data, calibration = load_n42(os.path.join(FIXTURES, "316-2_160V_0785uA.n42"))
+    assert len(data) == 16384
+    assert list(data[:16]) == [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]
+    assert int(data.sum()) == 599187
+    assert int(data[3488]) == 1428
+    assert calibration.kind == "quadratic"
+    assert calibration.a == pytest.approx(-11.3498272291349)
+    assert calibration.b == pytest.approx(0.16808176890571)
+    assert calibration.c == pytest.approx(0.0)
+
+
+def test_load_n42_basic_none_compression(tmp_path):
+    xml_text = _MINIMAL_N42.format(
+        calibration_block=_CALIBRATION_BLOCK.format(coefficients="1.0 2.0 3.0"),
+        spectrum_block=_spectrum_block("0 1 2 3"),
+    )
+    data, calibration = load_n42(_write_n42(tmp_path, xml_text))
+    assert list(data) == [0, 1, 2, 3]
+    assert calibration.kind == "quadratic"
+    assert calibration.a == 1.0
+    assert calibration.b == 2.0
+    assert calibration.c == 3.0
+
+
+def test_load_n42_counted_zeroes_compression(tmp_path):
+    xml_text = _MINIMAL_N42.format(
+        calibration_block="",
+        spectrum_block=_spectrum_block("5 0 3 7 0 2", compression="CountedZeroes", cal_ref=None),
+    )
+    data, calibration = load_n42(_write_n42(tmp_path, xml_text))
+    assert list(data) == [5, 0, 0, 0, 7, 0, 0]
+    assert calibration is None
+
+
+def test_load_n42_counted_zeroes_unpaired_zero_raises(tmp_path):
+    xml_text = _MINIMAL_N42.format(
+        calibration_block="",
+        spectrum_block=_spectrum_block("5 0", compression="CountedZeroes", cal_ref=None),
+    )
+    with pytest.raises(ParseError):
+        load_n42(_write_n42(tmp_path, xml_text))
+
+
+def test_load_n42_unrecognized_compression_raises(tmp_path):
+    xml_text = _MINIMAL_N42.format(
+        calibration_block="",
+        spectrum_block=_spectrum_block("0 1 2", compression="RLE", cal_ref=None),
+    )
+    with pytest.raises(ParseError):
+        load_n42(_write_n42(tmp_path, xml_text))
+
+
+def test_load_n42_zero_spectra_raises(tmp_path):
+    xml_text = _MINIMAL_N42.format(calibration_block="", spectrum_block="")
+    with pytest.raises(ParseError):
+        load_n42(_write_n42(tmp_path, xml_text))
+
+
+def test_load_n42_multiple_spectra_raises(tmp_path):
+    xml_text = _MINIMAL_N42.format(
+        calibration_block="",
+        spectrum_block=_spectrum_block("0 1", cal_ref=None) + _spectrum_block("2 3", cal_ref=None),
+    )
+    with pytest.raises(ParseError):
+        load_n42(_write_n42(tmp_path, xml_text))
+
+
+def test_load_n42_two_coefficients_gives_linear_calibration(tmp_path):
+    xml_text = _MINIMAL_N42.format(
+        calibration_block=_CALIBRATION_BLOCK.format(coefficients="10.0 0.5"),
+        spectrum_block=_spectrum_block("0 1 2"),
+    )
+    _, calibration = load_n42(_write_n42(tmp_path, xml_text))
+    assert calibration.kind == "linear"
+    assert calibration.a == 10.0
+    assert calibration.b == 0.5
+
+
+def test_load_n42_four_coefficients_gives_no_calibration(tmp_path):
+    xml_text = _MINIMAL_N42.format(
+        calibration_block=_CALIBRATION_BLOCK.format(coefficients="1 2 3 4"),
+        spectrum_block=_spectrum_block("0 1 2"),
+    )
+    data, calibration = load_n42(_write_n42(tmp_path, xml_text))
+    assert list(data) == [0, 1, 2]
+    assert calibration is None
+
+
+def test_load_n42_no_energy_calibration_element_gives_none(tmp_path):
+    xml_text = _MINIMAL_N42.format(
+        calibration_block="",
+        spectrum_block=_spectrum_block("0 1 2", cal_ref=None),
+    )
+    _, calibration = load_n42(_write_n42(tmp_path, xml_text))
+    assert calibration is None
+
+
+def test_load_n42_dangling_calibration_reference_gives_none(tmp_path):
+    xml_text = _MINIMAL_N42.format(
+        calibration_block="",
+        spectrum_block=_spectrum_block("0 1 2", cal_ref="DoesNotExist"),
+    )
+    _, calibration = load_n42(_write_n42(tmp_path, xml_text))
+    assert calibration is None
+
+
+def test_load_n42_malformed_xml_raises(tmp_path):
+    path = tmp_path / "broken.n42"
+    path.write_text("<RadInstrumentData><unclosed>", encoding="utf-8")
+    with pytest.raises(ParseError):
+        load_n42(str(path))
+
+
+def test_load_n42_empty_channel_data_raises(tmp_path):
+    xml_text = _MINIMAL_N42.format(
+        calibration_block="",
+        spectrum_block=_spectrum_block("", cal_ref=None),
+    )
+    with pytest.raises(ParseError):
+        load_n42(_write_n42(tmp_path, xml_text))
