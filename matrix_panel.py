@@ -2,6 +2,7 @@ import os
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -15,6 +16,116 @@ from PySide6.QtWidgets import (
 from matrix_cut import compute_projection
 from mtx_io import load_mtx
 from theme import style_axes
+
+CUT_REGION_COLOR = "tab:red"
+CUT_REGION_ALPHA = 0.25
+BG_REGION_COLOR = "tab:green"
+BG_REGION_ALPHA = 0.3
+
+
+class MatrixCutState:
+    """Tracks in-progress cut-region/background-region marks on a
+    matrix's working projection -- exactly one cut region, any number
+    of background regions (unlike fit_mode.py's FitModeState, which
+    caps background regions at 2; TV's own philosophy is "the more
+    background you mark, the better"). Two-click pairing, modeled on
+    FitModeState (fit_mode.py:29-159)."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.cut_region = None
+        self._pending_cut_click = None
+        self.bg_regions = []
+        self._pending_bg_click = None
+
+    def add_cut_click(self, x):
+        if self._pending_cut_click is None:
+            self._pending_cut_click = x
+            return False
+        lo, hi = sorted((self._pending_cut_click, x))
+        self.cut_region = (lo, hi)
+        self._pending_cut_click = None
+        return True
+
+    def add_bg_click(self, x):
+        if self._pending_bg_click is None:
+            self._pending_bg_click = x
+            return False
+        lo, hi = sorted((self._pending_bg_click, x))
+        self.bg_regions.append((lo, hi))
+        self._pending_bg_click = None
+        return True
+
+    def clear_cut(self):
+        self.cut_region = None
+        self._pending_cut_click = None
+
+    def clear_bg(self):
+        self.bg_regions = []
+        self._pending_bg_click = None
+
+
+class MatrixCutController(QObject):
+    """Held-key + click marker placement for the matrix panel's
+    projection view -- hold C for the cut region, hold B for a
+    background region. Modeled on FitModeController's eventFilter/
+    _held_key mechanism (fit_mode.py:382-428), simplified to two mark
+    types instead of three."""
+
+    def __init__(self, panel):
+        super().__init__()
+        self.panel = panel
+        self.state = MatrixCutState()
+        self._held_key = None
+        self._artists = []
+        panel.canvas.installEventFilter(self)
+        panel.canvas.mpl_connect("button_press_event", self.on_click)
+
+    def eventFilter(self, obj, event):
+        if obj is self.panel.canvas:
+            if event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat():
+                if event.key() == Qt.Key.Key_C:
+                    self._held_key = "cut"
+                elif event.key() == Qt.Key.Key_B:
+                    self._held_key = "bg"
+            elif event.type() == QEvent.Type.KeyRelease and not event.isAutoRepeat():
+                self._held_key = None
+        return False
+
+    def on_click(self, event):
+        if event.inaxes != self.panel.axes or event.xdata is None or event.button != 1:
+            return
+        if self._held_key == "cut":
+            self.state.add_cut_click(event.xdata)
+        elif self._held_key == "bg":
+            self.state.add_bg_click(event.xdata)
+        else:
+            return
+        self._redraw_markers()
+        self.panel._update_activate_button()
+
+    def clear(self):
+        self.state.reset()
+        self._redraw_markers()
+        self.panel._update_activate_button()
+
+    def _redraw_markers(self):
+        for artist in self._artists:
+            try:
+                artist.remove()
+            except NotImplementedError:
+                pass
+        self._artists = []
+
+        axes = self.panel.axes
+        if self.state.cut_region is not None:
+            lo, hi = self.state.cut_region
+            self._artists.append(axes.axvspan(lo, hi, color=CUT_REGION_COLOR, alpha=CUT_REGION_ALPHA))
+        for lo, hi in self.state.bg_regions:
+            self._artists.append(axes.axvspan(lo, hi, color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA))
+        self.panel.canvas.draw()
 
 
 class MatrixPanel(QMainWindow):
@@ -54,10 +165,19 @@ class MatrixPanel(QMainWindow):
 
         self.heatmap_button = QPushButton("Show Heatmap...")
 
+        self.activate_cut_button = QPushButton("Activate Cut")
+        self.activate_cut_button.setEnabled(False)
+        self.activate_cut_button.clicked.connect(self._activate_cut)
+
+        self.clear_marks_button = QPushButton("Clear Marks")
+        self.clear_marks_button.clicked.connect(self._clear_marks)
+
         top_bar = QHBoxLayout()
         top_bar.addWidget(QLabel("Working on:"))
         top_bar.addWidget(self.axis_selector)
         top_bar.addStretch()
+        top_bar.addWidget(self.clear_marks_button)
+        top_bar.addWidget(self.activate_cut_button)
         top_bar.addWidget(self.heatmap_button)
 
         container = QWidget()
@@ -67,10 +187,13 @@ class MatrixPanel(QMainWindow):
         layout.addWidget(self.canvas)
         self.setCentralWidget(container)
 
+        self.cut_controller = MatrixCutController(self)
+
         self._plot_projection()
 
     def _on_axis_changed(self, index):
         self.working_axis = self.axis_selector.itemData(index)
+        self.cut_controller.clear()
         self._plot_projection()
 
     def _plot_projection(self):
@@ -81,3 +204,20 @@ class MatrixPanel(QMainWindow):
         self.axes.set_xlabel(f"{self.working_axis.upper()} channel")
         self.axes.set_ylabel("Counts")
         self.canvas.draw()
+
+    def _clear_marks(self):
+        self.cut_controller.clear()
+
+    def _update_activate_button(self):
+        self.activate_cut_button.setEnabled(self.cut_controller.state.cut_region is not None)
+
+    def _activate_cut(self):
+        from matrix_cut import compute_cut
+
+        state = self.cut_controller.state
+        result = compute_cut(self.matrix, self.working_axis, state.cut_region, state.bg_regions)
+        label = (
+            f"{os.path.basename(self.path)} cut "
+            f"[{state.cut_region[0]:.1f}, {state.cut_region[1]:.1f}]"
+        )
+        self.main_window._add_combined_spectrum(label, result)
