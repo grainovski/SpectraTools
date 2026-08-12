@@ -4,6 +4,19 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [2.2.1] - 2026-08-12
+
+### Added
+
+- **N42 file support (read-only)**: `File > Open...` now also accepts
+  `.n42` files (ANSI/IEEE N42.42-2011). Only the raw histogram and, if
+  present, the embedded energy calibration are read — everything else in
+  the file is ignored, and there's no way to save back to `.n42`. If no
+  calibration is currently active, an N42 file's own calibration is
+  applied automatically; if one is already active, it's left alone. Files
+  containing anything other than exactly one spectrum are rejected with a
+  clear error rather than guessed at.
+
 ## [2.2.0] - 2026-08-11
 
 ### Added
