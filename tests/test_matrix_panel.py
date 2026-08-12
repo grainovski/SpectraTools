@@ -190,3 +190,13 @@ def test_matrix_panel_activate_cut_label_includes_working_axis(qapp):
 
     added = main_window.spectra[-1]
     assert panel.working_axis in added.path
+
+
+def test_matrix_panel_heatmap_button_opens_heatmap_window(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    panel._open_heatmap()
+
+    assert panel._heatmap_window is not None
+    assert panel._heatmap_window.isVisible()

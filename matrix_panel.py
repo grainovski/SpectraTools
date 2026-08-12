@@ -166,6 +166,7 @@ class MatrixPanel(QMainWindow):
         self.axis_selector.currentIndexChanged.connect(self._on_axis_changed)
 
         self.heatmap_button = QPushButton("Show Heatmap...")
+        self.heatmap_button.clicked.connect(self._open_heatmap)
 
         self.activate_cut_button = QPushButton("Activate Cut")
         self.activate_cut_button.setEnabled(False)
@@ -223,3 +224,9 @@ class MatrixPanel(QMainWindow):
             f"[{state.cut_region[0]:.1f}, {state.cut_region[1]:.1f}]"
         )
         self.main_window._add_combined_spectrum(label, result)
+
+    def _open_heatmap(self):
+        from matrix_heatmap import MatrixHeatmapWindow
+
+        self._heatmap_window = MatrixHeatmapWindow(self.matrix, self.path)
+        self._heatmap_window.show()
