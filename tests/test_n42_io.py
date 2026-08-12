@@ -181,3 +181,17 @@ def test_load_n42_empty_channel_data_raises(tmp_path):
     )
     with pytest.raises(ParseError):
         load_n42(_write_n42(tmp_path, xml_text))
+
+
+def test_load_n42_rejects_value_overflowing_int64(tmp_path):
+    # A channel value beyond int64 range parses fine as a Python int()
+    # but raises OverflowError from np.array(..., dtype=np.int64). This
+    # must raise ParseError instead, not crash with an unhandled
+    # OverflowError -- matching spk_io.py's identical guard for the same
+    # risk (see test_lc_rejects_value_overflowing_int64).
+    xml_text = _MINIMAL_N42.format(
+        calibration_block="",
+        spectrum_block=_spectrum_block("0 1 99999999999999999999999999999999", cal_ref=None),
+    )
+    with pytest.raises(ParseError):
+        load_n42(_write_n42(tmp_path, xml_text))

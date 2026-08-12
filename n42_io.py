@@ -46,7 +46,10 @@ def _parse_channel_data(spectrum_el, path):
     else:
         raise ParseError(f"Unsupported N42 ChannelData compressionCode {compression!r}: {path}")
 
-    return np.array(values, dtype=np.int64)
+    try:
+        return np.array(values, dtype=np.int64)
+    except OverflowError as exc:
+        raise ParseError(f"N42 ChannelData contains an out-of-range channel value: {path}") from exc
 
 
 def _parse_calibration(root, spectrum_el):
