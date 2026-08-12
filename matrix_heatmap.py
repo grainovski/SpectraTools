@@ -6,6 +6,27 @@ from matplotlib.colors import SymLogNorm
 from matplotlib.figure import Figure
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
+_MAX_DISPLAY_DIM = 1024
+
+
+def _downsample_for_display(matrix, max_dim=_MAX_DISPLAY_DIM):
+    """Block-sums `matrix` down to at most `max_dim` in each dimension
+    for display purposes only -- the heatmap is explicitly a visual
+    overview, not a precision tool (markers/gating always happen on
+    the full-resolution projection, never here), so trading resolution
+    for responsiveness is the right call on an 8192x8192 real matrix,
+    which otherwise takes ~79s to render (SymLogNorm + imshow +
+    colorbar over 67M cells). Sums (not averages) matching this app's
+    existing rebin convention (spectrum_operations.py) -- counts add,
+    they don't average, when you coarsen a histogram's binning."""
+    factor = max(1, max(matrix.shape) // max_dim)
+    if factor == 1:
+        return matrix
+    rows = (matrix.shape[0] // factor) * factor
+    cols = (matrix.shape[1] // factor) * factor
+    trimmed = matrix[:rows, :cols]
+    return trimmed.reshape(rows // factor, factor, cols // factor, factor).sum(axis=(1, 3))
+
 
 class MatrixHeatmapWindow(QMainWindow):
     """A separate, non-modal, view-only visualization of a loaded
@@ -36,12 +57,18 @@ class MatrixHeatmapWindow(QMainWindow):
         layout.addWidget(self.canvas)
         self.setCentralWidget(container)
 
+        # Downsample before norming/rendering -- the heatmap is a visual
+        # overview, not a precision tool, and norming+rendering the full
+        # array at real (e.g. 8192x8192) matrix sizes is what made this
+        # window take ~79s to open (see _downsample_for_display above).
+        display_matrix = _downsample_for_display(matrix)
+
         # SymLogNorm handles the negative values this app's matrix
         # data can genuinely contain (random-coincidence subtraction)
         # without error -- plain LogNorm requires strictly positive
         # data and would raise on any matrix with a negative cell.
-        norm = SymLogNorm(linthresh=1.0, vmin=matrix.min(), vmax=max(matrix.max(), 1))
-        self.image = self.axes.imshow(matrix, norm=norm, origin="lower", aspect="auto")
+        norm = SymLogNorm(linthresh=1.0, vmin=display_matrix.min(), vmax=max(display_matrix.max(), 1))
+        self.image = self.axes.imshow(display_matrix, norm=norm, origin="lower", aspect="auto")
         self.figure.colorbar(self.image, ax=self.axes)
         self.axes.set_xlabel("X channel")
         self.axes.set_ylabel("Y channel")
