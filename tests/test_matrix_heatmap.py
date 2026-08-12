@@ -1,15 +1,13 @@
-import os
-
 import numpy as np
+from matplotlib.colors import to_rgba
 
 from matrix_heatmap import MatrixHeatmapWindow, _downsample_for_display
-
-FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
+from theme import DARK_BG, DARK_TEXT
 
 
 def test_matrix_heatmap_window_displays_matrix(qapp):
     matrix = np.arange(100, dtype=np.int64).reshape(10, 10)
-    window = MatrixHeatmapWindow(matrix, "test.mtx")
+    window = MatrixHeatmapWindow(matrix, "test.mtx", "light")
 
     assert window.windowTitle() == "Heatmap -- test.mtx"
     assert window.image is not None
@@ -17,7 +15,7 @@ def test_matrix_heatmap_window_displays_matrix(qapp):
 
 def test_matrix_heatmap_window_has_navigation_toolbar_for_zoom(qapp):
     matrix = np.arange(100, dtype=np.int64).reshape(10, 10)
-    window = MatrixHeatmapWindow(matrix, "test.mtx")
+    window = MatrixHeatmapWindow(matrix, "test.mtx", "light")
 
     # NavigationToolbar2QT's stock "Zoom" tool is what provides
     # rectangle-select zoom in/out -- confirm it's present (this app's
@@ -30,8 +28,33 @@ def test_matrix_heatmap_window_has_navigation_toolbar_for_zoom(qapp):
 
 def test_matrix_heatmap_handles_negative_values_without_crashing(qapp):
     matrix = np.array([[-5, 10], [20, -1]], dtype=np.int64)
-    window = MatrixHeatmapWindow(matrix, "test.mtx")
+    window = MatrixHeatmapWindow(matrix, "test.mtx", "light")
     assert window.image is not None
+
+
+def test_matrix_heatmap_window_applies_theme_to_plot_and_colorbar(qapp):
+    # Regression guard: passing theme="dark" must actually change the
+    # rendered colors, not just be accepted as an argument -- a test that
+    # only checked "constructor doesn't crash" would pass even if the
+    # style_axes() calls were silently removed from __init__, exactly the
+    # class of "all tests green, feature dead in real use" bug this app's
+    # own history has already hit twice (matrix_panel.py's focus-policy
+    # and eventFilter bugs, caught in Task 4's review).
+    matrix = np.arange(100, dtype=np.int64).reshape(10, 10)
+    window = MatrixHeatmapWindow(matrix, "test.mtx", "dark")
+
+    # style_axes(self.axes, theme) sets the *figure's* facecolor, shared
+    # by every Axes drawn in it (including the colorbar's own).
+    assert window.figure.get_facecolor() == to_rgba(DARK_BG)
+
+    # The colorbar draws its tick labels on its own separate Axes
+    # (self.colorbar.ax), distinct from self.axes -- style_axes(self.axes,
+    # ...) alone can't reach them. Confirms the second, explicit
+    # style_axes(self.colorbar.ax, theme) call is what keeps the colorbar's
+    # tick numbers legible (not left at matplotlib's hardcoded black,
+    # which would be illegible against the now-dark figure background).
+    tick_colors = {t.get_color() for t in window.colorbar.ax.get_yticklabels()}
+    assert tick_colors == {DARK_TEXT}
 
 
 def test_downsample_for_display_block_sums_correctly():

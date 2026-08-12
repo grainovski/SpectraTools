@@ -151,6 +151,14 @@ class MatrixPanel(QMainWindow):
             "y": compute_projection(self.matrix, "y"),
         }
         self.working_axis = "x"
+        # A list, not a single attribute -- MatrixHeatmapWindow is a
+        # parentless, non-modal top-level window, so under Qt's ownership
+        # rules the Python-side reference is what keeps it alive. A
+        # single attribute would get overwritten (and the previous
+        # window's only reference dropped, making it eligible for
+        # garbage collection and liable to vanish) if "Show Heatmap..."
+        # is clicked again while an earlier heatmap window is still open.
+        self._heatmap_windows = []
 
         self.setWindowTitle(f"Matrix -- {os.path.basename(path)}")
         self.resize(800, 500)
@@ -228,5 +236,6 @@ class MatrixPanel(QMainWindow):
     def _open_heatmap(self):
         from matrix_heatmap import MatrixHeatmapWindow
 
-        self._heatmap_window = MatrixHeatmapWindow(self.matrix, self.path)
-        self._heatmap_window.show()
+        window = MatrixHeatmapWindow(self.matrix, self.path, self.main_window._theme)
+        self._heatmap_windows.append(window)
+        window.show()

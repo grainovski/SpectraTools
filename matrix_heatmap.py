@@ -1,10 +1,11 @@
 import os
 
-import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.colors import SymLogNorm
 from matplotlib.figure import Figure
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
+
+from theme import style_axes
 
 _MAX_DISPLAY_DIM = 1024
 
@@ -36,7 +37,7 @@ class MatrixHeatmapWindow(QMainWindow):
     absent from its entire source tree during design); this is a
     genuine enhancement, not a port."""
 
-    def __init__(self, matrix, path):
+    def __init__(self, matrix, path, theme):
         super().__init__()
         self.setWindowTitle(f"Heatmap -- {os.path.basename(path)}")
         self.resize(700, 700)
@@ -57,6 +58,13 @@ class MatrixHeatmapWindow(QMainWindow):
         layout.addWidget(self.canvas)
         self.setCentralWidget(container)
 
+        # Match the app's dark/light theme, same as every other plotting
+        # surface (main_window.py, matrix_panel.py's _plot_projection).
+        # This window never redraws after construction, so a single call
+        # here (rather than re-styling on every draw, as _plot_projection
+        # must since it's invoked repeatedly) is sufficient.
+        style_axes(self.axes, theme)
+
         # Downsample before norming/rendering -- the heatmap is a visual
         # overview, not a precision tool, and norming+rendering the full
         # array at real (e.g. 8192x8192) matrix sizes is what made this
@@ -69,7 +77,16 @@ class MatrixHeatmapWindow(QMainWindow):
         # data and would raise on any matrix with a negative cell.
         norm = SymLogNorm(linthresh=1.0, vmin=display_matrix.min(), vmax=max(display_matrix.max(), 1))
         self.image = self.axes.imshow(display_matrix, norm=norm, origin="lower", aspect="auto")
-        self.figure.colorbar(self.image, ax=self.axes)
+        self.colorbar = self.figure.colorbar(self.image, ax=self.axes)
+        # style_axes(self.axes, ...) above also sets the *figure's*
+        # facecolor (shared by every Axes in it), but a colorbar draws its
+        # ticks/labels on its own separate Axes (matplotlib creates it
+        # internally, distinct from self.axes) that style_axes(self.axes,
+        # ...) can't reach. Without this second call, the colorbar's tick
+        # numbers would keep matplotlib's hardcoded black and become
+        # unreadable against the now-dark figure background in dark
+        # theme -- not just mismatched, but actually illegible.
+        style_axes(self.colorbar.ax, theme)
         self.axes.set_xlabel("X channel")
         self.axes.set_ylabel("Y channel")
         self.canvas.draw()

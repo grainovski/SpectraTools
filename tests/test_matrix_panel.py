@@ -198,5 +198,25 @@ def test_matrix_panel_heatmap_button_opens_heatmap_window(qapp):
 
     panel._open_heatmap()
 
-    assert panel._heatmap_window is not None
-    assert panel._heatmap_window.isVisible()
+    assert len(panel._heatmap_windows) == 1
+    assert panel._heatmap_windows[0].isVisible()
+
+
+def test_matrix_panel_heatmap_button_opening_twice_keeps_both_windows(qapp):
+    # Regression guard for the actual bug: MatrixHeatmapWindow is
+    # parentless and non-modal, so under PySide6's ownership rules the
+    # Python-side reference held on the panel is what keeps it alive. A
+    # single "self._heatmap_window = ..." attribute (rather than a list)
+    # would be overwritten by a second open, dropping the first window's
+    # only reference and leaving it eligible for garbage collection --
+    # it could simply vanish. The list must retain both.
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    panel._open_heatmap()
+    panel._open_heatmap()
+
+    assert len(panel._heatmap_windows) == 2
+    assert panel._heatmap_windows[0] is not panel._heatmap_windows[1]
+    assert panel._heatmap_windows[0].isVisible()
+    assert panel._heatmap_windows[1].isVisible()
