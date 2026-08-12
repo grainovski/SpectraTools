@@ -1,3 +1,4 @@
+import functools
 import os
 import struct
 
@@ -8,6 +9,18 @@ from histogram_io import ParseError
 from mtx_io import MAGIC_LC, load_mtx
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
+
+
+@functools.lru_cache(maxsize=None)
+def _load_cached(filename):
+    """Loads and decodes a real fixture file once per test run and
+    reuses the result across every test that needs it. _decode_row is a
+    pure-Python per-value loop over up to 8192x8192 tag bytes (~7.5s for
+    one load of gg.mtx) -- without this cache, the 24 real-file loads
+    below would re-decode the same two files from scratch every time,
+    which used to make this file alone take ~316s."""
+    return load_mtx(os.path.join(FIXTURES, filename))
+
 
 # Oracle values obtained by compiling libmfile-1.0.7 from source (under
 # WSL, bypassing its CRLF-broken autotools configure by invoking gcc
@@ -43,14 +56,14 @@ def _row_checksum(row):
 
 @pytest.mark.parametrize("filename", ["gpff.mtx", "gg.mtx"])
 def test_load_mtx_real_file_shape_and_dtype(filename):
-    data = load_mtx(os.path.join(FIXTURES, filename))
+    data = _load_cached(filename)
     assert data.shape == (8192, 8192)
     assert data.dtype == np.int64
 
 
 @pytest.mark.parametrize("filename,row", list(_ORACLE_ROWS.keys()))
 def test_load_mtx_real_file_row_matches_oracle(filename, row):
-    data = load_mtx(os.path.join(FIXTURES, filename))
+    data = _load_cached(filename)
     expected = _ORACLE_ROWS[(filename, row)]
     actual_row = data[row, :]
     assert int(actual_row.sum()) == expected["sum"]
@@ -60,7 +73,7 @@ def test_load_mtx_real_file_row_matches_oracle(filename, row):
 
 
 def test_load_mtx_real_file_spot_check_values():
-    gpff = load_mtx(os.path.join(FIXTURES, "gpff.mtx"))
+    gpff = _load_cached("gpff.mtx")
     assert list(gpff[0, :20]) == [
         6, -1, 1, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, -1, 0, 1,
     ]
@@ -68,7 +81,7 @@ def test_load_mtx_real_file_spot_check_values():
         3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ]
 
-    gg = load_mtx(os.path.join(FIXTURES, "gg.mtx"))
+    gg = _load_cached("gg.mtx")
     assert list(gg[0, :20]) == [
         206242, 9669, 955, 234, 137, 82, 78, 64, 49, 39, 36, 49, 52, 57, 61, 53, 65, 76, 116, 132,
     ]
@@ -80,12 +93,12 @@ def test_load_mtx_real_file_spot_check_values():
 def test_load_mtx_real_file_negative_values_preserved():
     # gpff.mtx level 0 is real random-coincidence-subtracted data,
     # confirmed by the user -- negative values must survive unclamped.
-    gpff = load_mtx(os.path.join(FIXTURES, "gpff.mtx"))
+    gpff = _load_cached("gpff.mtx")
     assert (gpff < 0).any()
 
 
 def test_load_mtx_symmetric_file_is_actually_symmetric():
-    gg = load_mtx(os.path.join(FIXTURES, "gg.mtx"))
+    gg = _load_cached("gg.mtx")
     assert gg[10, 2000] == gg[2000, 10] == 1
 
 
