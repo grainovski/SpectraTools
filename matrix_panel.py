@@ -80,7 +80,9 @@ class MatrixCutController(QObject):
         self.state = MatrixCutState()
         self._held_key = None
         self._artists = []
+        panel.canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         panel.canvas.installEventFilter(self)
+        panel.canvas.mpl_connect("figure_enter_event", lambda event: panel.canvas.setFocus())
         panel.canvas.mpl_connect("button_press_event", self.on_click)
 
     def eventFilter(self, obj, event):
@@ -217,7 +219,7 @@ class MatrixPanel(QMainWindow):
         state = self.cut_controller.state
         result = compute_cut(self.matrix, self.working_axis, state.cut_region, state.bg_regions)
         label = (
-            f"{os.path.basename(self.path)} cut "
+            f"{os.path.basename(self.path)} {self.working_axis} cut "
             f"[{state.cut_region[0]:.1f}, {state.cut_region[1]:.1f}]"
         )
         self.main_window._add_combined_spectrum(label, result)

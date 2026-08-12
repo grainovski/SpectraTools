@@ -1,6 +1,7 @@
 import os
 
 import pytest
+from PySide6.QtCore import Qt
 
 from main_window import MainWindow
 from matrix_panel import MatrixPanel
@@ -31,6 +32,20 @@ def test_matrix_panel_switching_axis_updates_working_axis(qapp):
     panel.axis_selector.setCurrentIndex(1)
 
     assert panel.working_axis == "y"
+
+
+def test_matrix_panel_canvas_accepts_keyboard_focus(qapp):
+    # Regression guard: a bare matplotlib canvas defaults to
+    # Qt.FocusPolicy.NoFocus, which structurally cannot receive
+    # QKeyEvents -- MatrixCutController's eventFilter KeyPress/KeyRelease
+    # branch would be dead code in real usage (holding C/B while hovering
+    # the plot would never set _held_key) without an explicit
+    # setFocusPolicy upgrade, matching FitModeController's own
+    # canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus) (fit_mode.py:405).
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    assert panel.canvas.focusPolicy() != Qt.FocusPolicy.NoFocus
 
 
 from matplotlib.backend_bases import MouseEvent
@@ -143,3 +158,20 @@ def test_matrix_panel_activate_cut_result_matches_direct_computation(qapp):
     expected = compute_cut(panel.matrix, "x", (100.0, 300.0), [(400.0, 450.0)])
     added = main_window.spectra[-1]
     assert added.data == pytest.approx(expected)
+
+
+def test_matrix_panel_activate_cut_label_includes_working_axis(qapp):
+    # An X-gated cut and a Y-gated cut at the same nominal region bounds
+    # are physically different results (compute_cut indexes by the
+    # complementary axis) -- the label must disambiguate them, especially
+    # since gamma-gamma matrices (like this fixture) are often
+    # near-symmetric.
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    _held_key_click(panel, "cut", 100.0)
+    _held_key_click(panel, "cut", 300.0)
+    panel._activate_cut()
+
+    added = main_window.spectra[-1]
+    assert panel.working_axis in added.path
