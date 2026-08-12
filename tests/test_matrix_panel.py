@@ -1,12 +1,30 @@
+import functools
 import os
 
 import pytest
+from matplotlib.backend_bases import MouseEvent
 from PySide6.QtCore import Qt
 
+import matrix_panel
 from main_window import MainWindow
 from matrix_panel import MatrixPanel
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
+
+# Every test in this file constructs a fresh MatrixPanel (needed for
+# state isolation between tests), and MatrixPanel.__init__ decodes the
+# real 8192x8192 gg.mtx fixture via load_mtx every time -- several
+# seconds each. Without sharing decoded results across tests, this
+# file's runtime balloons linearly with test count (12 tests ->
+# ~190s). Same fix as test_mtx_io.py's own caching: memoize load_mtx
+# by path and monkeypatch it in for every test, since all tests here
+# use the same fixture path and load_mtx is a pure function of it.
+_cached_load_mtx = functools.lru_cache(maxsize=None)(matrix_panel.load_mtx)
+
+
+@pytest.fixture(autouse=True)
+def _use_cached_load_mtx(monkeypatch):
+    monkeypatch.setattr(matrix_panel, "load_mtx", _cached_load_mtx)
 
 
 def test_matrix_panel_loads_matrix_and_computes_both_projections(qapp):
@@ -46,9 +64,6 @@ def test_matrix_panel_canvas_accepts_keyboard_focus(qapp):
     panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
 
     assert panel.canvas.focusPolicy() != Qt.FocusPolicy.NoFocus
-
-
-from matplotlib.backend_bases import MouseEvent
 
 
 def _click(panel, xdata, ydata=10.0):
