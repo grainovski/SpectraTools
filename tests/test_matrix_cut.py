@@ -149,3 +149,17 @@ def test_compute_cut_out_of_range_background_region_does_not_divide_by_zero():
     result_mixed = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(3, 4), (7, 100)])
     result_valid_only = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(3, 4)])
     assert result_mixed == pytest.approx(result_valid_only)
+
+
+def test_compute_cut_all_background_regions_out_of_range_means_no_subtraction():
+    # A single bg region entirely outside the matrix's bounds -- unlike
+    # the "does_not_divide_by_zero" test above, there is no companion
+    # valid region here, so bg_width totals exactly 0 even after
+    # per-region flooring (bg_regions is non-empty, so the earlier
+    # "not bg_regions" guard does not apply). A bg_width of 0 can only
+    # happen when every bg region's floored width -- and therefore its
+    # sum -- is zero, so the correct result is pos unchanged, not a
+    # ZeroDivisionError from dividing by that 0.
+    matrix = _small_matrix()
+    result = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(100, 200)])
+    assert list(result) == [1, 10, -1, 100]  # same as pos, unsubtracted

@@ -31,12 +31,13 @@ def _region_bounds(matrix, axis, region):
 def _region_width(matrix, axis, region):
     """Channel count covered by `region` after clamping to the
     matrix's extent. Floored at 0 -- a region entirely past an edge
-    (lo_idx clamped down to size-1 while hi_idx is still below it, or
-    vice versa) would otherwise yield a negative width, which would
-    silently corrupt compute_cut's gate-width ratio (or, in a
-    coincidental case, divide by exactly zero) instead of the region
-    contributing nothing, matching TV's own SpcProject clamping
-    behavior on the sum side (tv-1.9.13/lib/tv/vsSpectra.c:971-980)."""
+    (lo_idx clamped up to 0 while hi_idx is still below it, or hi_idx
+    clamped down to size-1 while lo_idx is already above it) would
+    otherwise yield a negative width, which would silently corrupt
+    compute_cut's gate-width ratio (or, in a coincidental case, divide
+    by exactly zero) instead of the region contributing nothing,
+    matching TV's own SpcProject clamping behavior on the sum side
+    (tv-1.9.13/lib/tv/vsSpectra.c:971-980)."""
     lo_idx, hi_idx = _region_bounds(matrix, axis, region)
     return max(0, hi_idx - lo_idx + 1)
 
@@ -84,5 +85,17 @@ def compute_cut(matrix, axis, cut_region, bg_regions):
     for region in bg_regions:
         bg = bg + _region_sum(matrix, axis, region)
         bg_width += _region_width(matrix, axis, region)
+
+    if bg_width == 0:
+        # Every bg region is individually out of the matrix's bounds
+        # (each one's floored width is 0) -- the same lo_idx > hi_idx
+        # condition that zeroes a region's width also zeroes its sum,
+        # so `bg` is guaranteed all-zero here too. Falling through to
+        # the division would be a ZeroDivisionError for no benefit:
+        # returning pos unchanged is the exact (not approximate)
+        # limiting value of the gate-width ratio, and matches the
+        # zero-bg_regions case above -- no valid background specified,
+        # so no subtraction.
+        return pos
 
     return pos - (pos_width / bg_width) * bg
