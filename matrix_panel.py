@@ -239,3 +239,18 @@ class MatrixPanel(QMainWindow):
         window = MatrixHeatmapWindow(self.matrix, self.path, self.main_window._theme)
         self._heatmap_windows.append(window)
         window.show()
+
+    def _on_activated(self):
+        self.main_window.setEnabled(False)
+        self.setEnabled(True)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowActivate:
+            self._on_activated()
+
+    def closeEvent(self, event):
+        super().closeEvent(event)
+        if self in self.main_window._matrix_panels:
+            self.main_window._matrix_panels.remove(self)
+        self.main_window.setEnabled(True)

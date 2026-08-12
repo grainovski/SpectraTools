@@ -8,7 +8,7 @@ matplotlib.use("QtAgg")
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
-from PySide6.QtCore import Qt, QRectF
+from PySide6.QtCore import QEvent, Qt, QRectF
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -41,6 +41,7 @@ from help_content import (
     open_help_page,
 )
 from histogram_io import ParseError, load_histogram, save_histogram
+from matrix_panel import MatrixPanel
 from n42_io import load_n42
 from settings import Settings
 from spe_io import load_spe, save_spe
@@ -236,6 +237,7 @@ class MainWindow(QMainWindow):
         self.resize(900, 600)
 
         self.spectra = []
+        self._matrix_panels = []  # currently-open MatrixPanel windows -- see _on_activated
         # Monotonically increasing, never reused -- unlike len(self.spectra),
         # this can't collide with a still-loaded spectrum's color after one
         # is removed (there's no plot legend, so color is the only way to
@@ -299,6 +301,11 @@ class MainWindow(QMainWindow):
         # moved the cursor there.
         self.canvas.setFocus()
 
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowActivate:
+            self._on_activated()
+
     def _build_menu(self):
         self.file_menu = self.menuBar().addMenu("&File")
 
@@ -306,6 +313,11 @@ class MainWindow(QMainWindow):
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self._open_file_dialog)
         self.file_menu.addAction(open_action)
+
+        self.open_matrix_action = QAction("Open Matrix...", self)
+        self.open_matrix_action.setShortcut("Ctrl+Shift+O")
+        self.open_matrix_action.triggered.connect(self._open_matrix_dialog)
+        self.file_menu.addAction(self.open_matrix_action)
 
         self.save_spectrum_action = QAction("Save Spectrum...", self)
         self.save_spectrum_action.setShortcut("Ctrl+S")
@@ -738,6 +750,27 @@ class MainWindow(QMainWindow):
         )
         if paths:
             self._load_files(paths)
+
+    def _open_matrix_dialog(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open Matrix", self.settings.last_folder(), "Matrix files (*.mtx);;All files (*)"
+        )
+        if path:
+            try:
+                self._open_matrix_panel(path)
+            except ParseError as exc:
+                QMessageBox.warning(self, "Could not open matrix", str(exc))
+
+    def _open_matrix_panel(self, path):
+        panel = MatrixPanel(self, path)
+        self._matrix_panels.append(panel)
+        panel.show()
+        return panel
+
+    def _on_activated(self):
+        for panel in self._matrix_panels:
+            panel.setEnabled(False)
+        self.setEnabled(True)
 
     def _try_load_spectrum(self, path):
         lower = path.lower()
