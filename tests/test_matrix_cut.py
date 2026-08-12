@@ -105,3 +105,47 @@ def test_compute_cut_rounds_half_away_from_zero_like_tv():
     matrix = _small_matrix()
     result = compute_cut(matrix, "x", cut_region=(0.5, 1.5), bg_regions=[])
     assert list(result) == [5, 50, -5, 200]  # same as columns 1,2 exactly
+
+
+def test_compute_cut_invalid_axis_raises():
+    matrix = _small_matrix()
+    with pytest.raises(ValueError):
+        compute_cut(matrix, "z", cut_region=(0, 0), bg_regions=[])
+
+
+def test_compute_cut_out_of_range_cut_region_contributes_zero():
+    # cut_region entirely past the last column (valid range 0..4) --
+    # the gate selects no real data, so net must be all zeros rather
+    # than crashing or silently wrapping to some other column range.
+    matrix = _small_matrix()
+    result = compute_cut(matrix, "x", cut_region=(10, 20), bg_regions=[])
+    assert list(result) == [0, 0, 0, 0]
+
+
+def test_compute_cut_out_of_range_background_region_does_not_corrupt_result():
+    # bg_regions mixes a valid region (3,4) with one entirely past the
+    # last column (10,20). Before clamping, (10,20) would resolve to
+    # lo_idx=10, hi_idx=4 -- a negative raw width -- which would shrink
+    # or flip the sign of the gate-width ratio and corrupt the result.
+    # The out-of-range region must instead contribute zero width and
+    # zero sum, leaving the result identical to using the valid region
+    # alone.
+    matrix = _small_matrix()
+    result_mixed = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(3, 4), (10, 20)])
+    result_valid_only = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(3, 4)])
+    assert result_mixed == pytest.approx(result_valid_only)
+
+
+def test_compute_cut_out_of_range_background_region_does_not_divide_by_zero():
+    # (3,4) has (clamped) width 2. (7,100) is entirely past the last
+    # column, and its *raw* (unclamped) width -- hi_idx=4, lo_idx=7 --
+    # is exactly -2, which would sum with (3,4)'s +2 to a total
+    # bg_width of exactly 0 (a ZeroDivisionError in the gate-width
+    # ratio) without per-region clamping. Flooring each region's width
+    # at 0 before summing means (7,100) contributes 0 instead of -2,
+    # so the total stays 2 and the result matches the valid region
+    # alone.
+    matrix = _small_matrix()
+    result_mixed = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(3, 4), (7, 100)])
+    result_valid_only = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(3, 4)])
+    assert result_mixed == pytest.approx(result_valid_only)

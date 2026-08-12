@@ -1,6 +1,15 @@
 import numpy as np
 
 
+def _check_axis(axis):
+    """Shared validation for both public entry points -- anything
+    other than 'x'/'y' (a typo, None, 'Y', 'row', ...) must fail loudly
+    rather than being silently treated as 'x' by the ternaries in the
+    private helpers below."""
+    if axis not in ("x", "y"):
+        raise ValueError(f"axis must be 'x' or 'y', got {axis!r}")
+
+
 def _nint(x):
     """Round-half-away-from-zero, matching TV's own NINT macro
     (lib/tv/vsTypes.h) -- Python's built-in round() uses
@@ -20,8 +29,16 @@ def _region_bounds(matrix, axis, region):
 
 
 def _region_width(matrix, axis, region):
+    """Channel count covered by `region` after clamping to the
+    matrix's extent. Floored at 0 -- a region entirely past an edge
+    (lo_idx clamped down to size-1 while hi_idx is still below it, or
+    vice versa) would otherwise yield a negative width, which would
+    silently corrupt compute_cut's gate-width ratio (or, in a
+    coincidental case, divide by exactly zero) instead of the region
+    contributing nothing, matching TV's own SpcProject clamping
+    behavior on the sum side (tv-1.9.13/lib/tv/vsSpectra.c:971-980)."""
     lo_idx, hi_idx = _region_bounds(matrix, axis, region)
-    return hi_idx - lo_idx + 1
+    return max(0, hi_idx - lo_idx + 1)
 
 
 def _region_sum(matrix, axis, region):
@@ -38,12 +55,11 @@ def compute_projection(matrix, axis):
     """axis='x' -> matrix.sum(axis=0), a spectrum indexed by X-channel
     (column). axis='y' -> matrix.sum(axis=1), a spectrum indexed by
     Y-channel (row)."""
+    _check_axis(axis)
     if axis == "x":
         return matrix.sum(axis=0)
-    elif axis == "y":
-        return matrix.sum(axis=1)
     else:
-        raise ValueError(f"axis must be 'x' or 'y', got {axis!r}")
+        return matrix.sum(axis=1)
 
 
 def compute_cut(matrix, axis, cut_region, bg_regions):
@@ -56,6 +72,7 @@ def compute_cut(matrix, axis, cut_region, bg_regions):
     COMPLEMENTARY axis (axis='x' input -> Y-indexed output, and vice
     versa). Zero bg_regions => net = pos (no subtraction, not an
     error). Never clamps negative results."""
+    _check_axis(axis)
     pos = _region_sum(matrix, axis, cut_region)
 
     if not bg_regions:
