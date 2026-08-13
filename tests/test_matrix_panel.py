@@ -630,6 +630,49 @@ def test_matrix_panel_integrate_action_reachable(qapp):
     assert panel.background_preview_button.shortcut().toString() == "Ctrl+B"
 
 
+def test_matrix_panel_fit_results_table_populates_after_fit(qapp, monkeypatch):
+    # Regression guard: MatrixPanel._plot_data() never called
+    # fit_controller.update_results_list(), so the Fit Results table
+    # silently never populated after a fit or integration, contradicting
+    # the HowTo page's claim that it "works exactly like the main
+    # window's." The underlying fit data was always correct (appended to
+    # the spectrum's own .fits list by run_fit() below) -- only the
+    # table-refresh wiring was missing. Same append_auto_log side-effect
+    # dodge test_matrix_panel_and_main_window_integrate_identically above
+    # already uses.
+    monkeypatch.setattr(fit_mode.fit_export, "append_auto_log", lambda *a, **k: None)
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    # A real fit (not just Integration's direct sum) needs marks
+    # ready_to_fit() actually requires: two background regions AND a
+    # fit region AND at least one peak -- test_matrix_panel_fitting_a_peak_on_the_projection_works
+    # above only marks region+peak (it never calls run_fit(), so it
+    # never needs bg regions), and test_matrix_panel_and_main_window_integrate_identically
+    # marks b+r but no peak (Integration doesn't need one). This test
+    # needs all three, so it combines both: b+r+p, same fixed-constant
+    # style as test_matrix_panel_and_main_window_integrate_identically,
+    # with region bounds chosen to bracket the real, dominant peak in
+    # gg.mtx's x-projection (verified to actually converge, not just
+    # reach ready_to_fit()).
+    left_bg, right_bg, fit_region, peak = (60.0, 90.0), (310.0, 340.0), (100.0, 300.0), 200.0
+
+    panel.fit_controller._held_key = "b"
+    _click(panel, left_bg[0]); _click(panel, left_bg[1])
+    _click(panel, right_bg[0]); _click(panel, right_bg[1])
+    panel.fit_controller._held_key = "r"
+    _click(panel, fit_region[0]); _click(panel, fit_region[1])
+    panel.fit_controller._held_key = "p"
+    _click(panel, peak)
+    panel.fit_controller._held_key = None
+
+    assert panel.fit_controller.state.ready_to_fit()
+    panel.fit_controller.run_fit()
+
+    assert len(panel.spectra[0].fits) == 1  # confirms the fit itself really did succeed
+    assert panel.fit_controller.results_table.rowCount() == 1
+
+
 def test_matrix_panel_activate_cut_shortcut(qapp):
     main_window = MainWindow()
     panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))

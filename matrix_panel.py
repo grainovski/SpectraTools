@@ -483,6 +483,7 @@ class MatrixPanel(QMainWindow):
         x = self.channel_to_display(channels)
         self.axes.plot(x, spectrum.data, drawstyle="steps-mid", linewidth=0.8, color=spectrum.color)
         self.fit_controller.draw_committed_fits(spectrum)
+        self.fit_controller.update_results_list()
         self.axes.set_xlabel("Energy (keV)" if self._calibration_active else f"{self.working_axis.upper()} channel")
         self.axes.set_ylabel("Counts")
         if xlim_override is not None:
