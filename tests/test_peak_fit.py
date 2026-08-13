@@ -1237,9 +1237,16 @@ def test_integrate_region_raises_clear_error_on_negative_counts_in_fit_region():
     # -- matching this file's own existing precedent of raising FitError
     # for an analogous negative-covariance case (see the pcov check
     # above in fit_peaks).
+    #
+    # Background regions are kept entirely positive here (unlike the fit
+    # region) so this test genuinely isolates the fit-region check from
+    # its sibling test below -- a regression that dropped the fit-region
+    # check but kept the background one must NOT be able to pass this
+    # test by accident.
     x = np.arange(200, dtype=float)
-    y = np.full(200, -5.0)
-    y[90:110] += 40.0  # a "peak" sitting on a negative background
+    y = np.full(200, 5.0)  # positive baseline everywhere...
+    y[60:140] = -5.0  # ...except made negative specifically inside the fit region...
+    y[90:110] += 40.0  # ...with a "peak" sitting on top of that negative background
     with pytest.raises(FitError, match="negative counts"):
         integrate_region(x, y, (150, 155), (160, 165), (60, 140))
 
