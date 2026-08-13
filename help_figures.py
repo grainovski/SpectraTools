@@ -269,9 +269,9 @@ def calibration_curve_figure():
 
 def matrix_projection_cut_figure():
     """A small schematic 2D coincidence matrix with a cut (orange) and
-    background (purple) band marked on one axis, alongside the resulting
-    1D projection -- the reference figure the Knowledge Database's 2D
-    spectra section points back to. Same region colors as
+    background (purple) band marked on one axis, alongside the full 1D
+    projection those bands are marked on -- the reference figure for the
+    "2D matrices, projections, and cuts" section. Same region colors as
     anatomy_of_a_fit_figure's R/B marks (_REGION_FIT_COLOR /
     _REGION_BG_COLOR), reused here for the analogous cut/background
     concept."""

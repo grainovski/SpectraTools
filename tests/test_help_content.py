@@ -470,7 +470,7 @@ def test_howto_html_documents_matrix_panel_fit_integrate_calibrate():
 
 
 def test_knowledge_database_explains_2d_matrix_concepts():
-    html = build_knowledge_database_html()
+    html = _strip_base64_images(build_knowledge_database_html())
     assert "projection" in html.lower()
     assert "cut" in html.lower() or "gate" in html.lower()
     assert "coincidence" in html.lower()

@@ -568,16 +568,18 @@ Uncertainties propagate through the same derivative.</p>
 <figure>
 <img src="{matrix_src}" alt="2D matrix, cut, and projection">
 <figcaption>Figure 7. A schematic 2D coincidence matrix with a diagonal
-ridge of correlated counts, a cut region (orange) and a background
-region (purple) marked on the X axis, and the resulting X
-projection.</figcaption>
+ridge of correlated counts (left) and its full X projection (right),
+with a cut region (orange) and background region (purple) marked on
+the X axis of both. Activating the cut sums only the gated rows to
+build a new spectrum on the <i>other</i> axis -- not shown
+here.</figcaption>
 </figure>
 <p>A <b>2D coincidence matrix</b> (<b>File &gt; Open Matrix...</b>, see
 the HowTo page's "11. Matrix analysis") records pairs of gamma rays
 detected close together in time -- typically one in each of two
 detectors watching the same source. Each coincident pair increments one
-cell of the matrix; X and Y are each detector's own channel axis, so a
-cell's (X, Y) position records which channel each detector saw for that
+cell of the matrix; X and Y are the two detectors' own channel axes, so
+a cell's (X, Y) position records which channel each detector saw for that
 event. A cascade of two genuinely correlated gamma rays -- the same two
 energies, detected together, over and over across many decays -- builds
 up as a streak of counts at a fixed (X, Y), the diagonal ridge shown in
@@ -602,7 +604,7 @@ gamma rays suppressed.</p>
 <p>A cut region alone still includes <b>random, uncorrelated</b>
 coincidences -- unrelated gamma rays that happened to land in that band
 anyway. Marking one or more background regions elsewhere on the same
-axis (hold <kbd>G</kbd>) and pressing "Activate Cut" subtracts them
+axis (hold <kbd>G</kbd>) and pressing "Activate Cut" subtract them
 out: the background regions' counts are pooled and scaled by the ratio
 of the cut region's width to the total background width, then
 subtracted channel by channel from the cut -- the same
