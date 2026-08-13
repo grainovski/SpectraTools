@@ -220,3 +220,11 @@ def test_matrix_panel_heatmap_button_opening_twice_keeps_both_windows(qapp):
     assert panel._heatmap_windows[0] is not panel._heatmap_windows[1]
     assert panel._heatmap_windows[0].isVisible()
     assert panel._heatmap_windows[1].isVisible()
+
+
+def test_matrix_panel_projection_displayed_as_histogram(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    line = panel.axes.lines[0]
+    assert line.get_drawstyle() == "steps-mid"

@@ -211,7 +211,7 @@ class MatrixPanel(QMainWindow):
         self.axes.clear()
         style_axes(self.axes, self.main_window._theme)
         data = self.projections[self.working_axis]
-        self.axes.plot(range(len(data)), data, linewidth=0.8)
+        self.axes.plot(range(len(data)), data, drawstyle="steps-mid", linewidth=0.8)
         self.axes.set_xlabel(f"{self.working_axis.upper()} channel")
         self.axes.set_ylabel("Counts")
         self.canvas.draw()
