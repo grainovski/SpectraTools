@@ -482,7 +482,17 @@ git commit -m "fix: rename gate background key to G, make gate marking calibrati
 
 ### Task 5: `_plot_data` (replaces `_plot_projection`)
 
-**Context:** Mirrors `main_window.py:884-926`'s `_plot_data` exactly, adapted for `self.spectra` always having exactly one entry and no `log_scale_action` (matrix panel has no log-scale toggle — out of scope, not requested; always linear, matching this window's existing, unchanged behavior). Also updates Task 3's `_apply_calibration_change` to use the new method with view-preservation, matching `main_window.py:493-523`'s pattern.
+**Context:** Mirrors `main_window.py:884-926`'s `_plot_data` exactly, adapted for `self.spectra` always having exactly one entry and no `log_scale_action` (matrix panel has no log-scale toggle — out of scope, not requested; always linear, matching this window's existing, unchanged behavior). Also updates Task 3's `_apply_calibration_change` to preserve THIS panel's own view across a calibration change, matching `main_window.py:493-523`'s pattern.
+
+**Important — Task 3's actual final shape (a real bug was found and fixed in its code review, after this plan section was originally written):** `_apply_calibration_change` does **not** independently set `self._calibration`/`self._calibration_active` and redraw as this section originally assumed. It delegates:
+```python
+    def _apply_calibration_change(self, new_calibration, new_active):
+        self.main_window._apply_calibration_change(new_calibration, new_active)
+        self._plot_projection()
+```
+This exists because an earlier version called `self.main_window._plot_data(preserve_view=True)` directly, which reused `main_window.axes.get_xlim()`'s raw numbers verbatim — captured AFTER the calibration had already changed, so those numbers carried no memory of what they meant under the OLD calibration, silently showing the wrong region. Delegating to `main_window._apply_calibration_change` (which already gets its OWN view's round-trip right, updates its toolbar/menu indicators, and redraws every panel in `main_window._matrix_panels` — including this one, in real usage via `_open_matrix_panel` registration) fixes that, and also fixes two things this plan section didn't originally address at all: main_window's calibration-toggle UI staying in sync, and a SECOND open matrix panel picking up the change too.
+
+What that delegation does **not** yet do: preserve THIS panel's own zoomed view across the change (it just calls a bare `self._plot_projection()`, which — consistent with that method's existing, unchanged, always-resets-to-full-view behavior — resets to the full projection). Adding real view-preservation for this panel's own plot is genuinely a Task 5 concern, not a regression to fix now — `_plot_projection()` has never taken a `preserve_view`/`xlim_override` argument at all, at any point in this plan before this task.
 
 **Files:**
 - Modify: `matrix_panel.py`
@@ -573,20 +583,32 @@ Do NOT add a temporary `fit_controller` stand-in — instead, guard the call in 
 ```
 (replace the unconditional `self.fit_controller.draw_committed_fits(spectrum)` line above with this guarded version). Task 7 will remove the `hasattr` guard once `fit_controller` always exists by the time `_plot_data` can be called (i.e., once it's constructed unconditionally in `__init__`).
 
-Update every call site that referenced `_plot_projection`:
-- In `__init__`, change `self._plot_projection()` to `self._plot_data()`.
-- In `_on_axis_changed`, change `self._plot_projection()` to `self._plot_data()`.
+Update every call site that referenced `_plot_projection`, in `matrix_panel.py` **and** `main_window.py`:
+- In `matrix_panel.py`'s `__init__`, change `self._plot_projection()` to `self._plot_data()`.
+- In `matrix_panel.py`'s `_on_axis_changed`, change `self._plot_projection()` to `self._plot_data()`.
+- In `matrix_panel.py`'s `_apply_calibration_change` (see below) — the trailing `self._plot_projection()` becomes part of the new view-preserving body, not a bare call.
+- In `main_window.py`'s `_apply_calibration_change` (**not `matrix_panel.py`** — this is the one genuinely-necessary change to `main_window.py` this whole plan makes, added during Task 3's code review, not part of this plan's original file-structure section), find:
+  ```python
+        for panel in self._matrix_panels:
+            panel._plot_projection()
+  ```
+  and change it to:
+  ```python
+        for panel in self._matrix_panels:
+            panel._plot_data()
+  ```
+  This is a real call site — skipping it leaves an `AttributeError` waiting for the next time a calibration change reaches an open matrix panel through `MainWindow`'s own dialog/toolbar, once `_plot_projection` no longer exists.
 
-Update `_apply_calibration_change` (from Task 3) to preserve the view across the calibration change, matching `main_window.py`'s own pattern:
+Update `_apply_calibration_change` (from Task 3) to ALSO preserve this panel's own view across the calibration change, on top of the delegation Task 3's code review already put in place — capture this panel's own channel-space view bounds (via `display_to_channel`, using the OLD calibration) BEFORE delegating, then re-render at the equivalent bounds under the NEW calibration:
 ```python
     def _apply_calibration_change(self, new_calibration, new_active):
         old_xlim = self.axes.get_xlim()
         channel_bounds = (self.display_to_channel(old_xlim[0]), self.display_to_channel(old_xlim[1]))
-        self._calibration = new_calibration
-        self._calibration_active = new_active
+        self.main_window._apply_calibration_change(new_calibration, new_active)
         new_xlim = (self.channel_to_display(channel_bounds[0]), self.channel_to_display(channel_bounds[1]))
         self._plot_data(xlim_override=new_xlim)
 ```
+Note `channel_bounds` must be computed BEFORE `self.main_window._apply_calibration_change(...)` runs — that call is what overwrites the shared calibration state `self.display_to_channel` reads, so computing it after would use the NEW calibration for a value that's supposed to represent the OLD view.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
