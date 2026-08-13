@@ -7,6 +7,7 @@ from matplotlib.backend_bases import MouseEvent
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QDialog, QMenu
 
+import fit_mode
 from main_window import MainWindow
 from spectrum import LoadedSpectrum
 
@@ -654,7 +655,9 @@ def test_apply_add_names_result_with_basenames_when_factor_is_one(qapp):
 
     main_window._apply_add(spectrum_a, spectrum_b, 1.0)
 
-    assert main_window.spectra[-1].path == "a.spe + b.spe"
+    # Anchored at Spectrum A's directory (see the auto-log-location test
+    # below) -- the label itself is still just the two basenames.
+    assert main_window.spectra[-1].path == os.path.join("/fake/dir", "a.spe + b.spe")
 
 
 def test_apply_add_names_result_with_factor_when_not_one(qapp):
@@ -664,7 +667,7 @@ def test_apply_add_names_result_with_factor_when_not_one(qapp):
 
     main_window._apply_add(spectrum_a, spectrum_b, 2.5)
 
-    assert main_window.spectra[-1].path == "a.spe + 2.5xb.spe"
+    assert main_window.spectra[-1].path == os.path.join("/fake/dir", "a.spe + 2.5xb.spe")
 
 
 def test_apply_subtract_produces_subtracted_data(qapp):
@@ -701,7 +704,7 @@ def test_apply_subtract_names_result_with_basenames_when_factor_is_one(qapp):
 
     main_window._apply_subtract(spectrum_a, spectrum_b, 1.0)
 
-    assert main_window.spectra[-1].path == "a.spe - b.spe"
+    assert main_window.spectra[-1].path == os.path.join("/fake/dir", "a.spe - b.spe")
 
 
 def test_apply_subtract_names_result_with_factor_when_not_one(qapp):
@@ -711,7 +714,71 @@ def test_apply_subtract_names_result_with_factor_when_not_one(qapp):
 
     main_window._apply_subtract(spectrum_a, spectrum_b, 2.5)
 
-    assert main_window.spectra[-1].path == "a.spe - 2.5xb.spe"
+    assert main_window.spectra[-1].path == os.path.join("/fake/dir", "a.spe - 2.5xb.spe")
+
+
+def test_apply_add_result_integration_auto_logs_next_to_spectrum_a_directory(qapp, tmp_path):
+    """Regression guard: integrating on a spectrum produced by Add must
+    auto-log next to Spectrum A's real file, not the process's cwd.
+    _apply_add used to name the combined spectrum with bare basenames
+    only (e.g. "a.spe + b.spe"), which has no directory of its own --
+    fit_export.auto_log_path's empty os.path.dirname sent every
+    auto-log write to the process's cwd instead. The dirname assertion
+    is checked before run_integration() executes, so a failing (RED)
+    run never writes a stray log file outside tmp_path."""
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window, path=str(tmp_path / "a.spe"))
+    spectrum_b = _make_active_spectrum(main_window)  # a different (temp) directory
+
+    main_window._apply_add(spectrum_a, spectrum_b, 1.0)
+
+    added = main_window.spectra[-1]
+    from fit_export import auto_log_path
+    log_path = auto_log_path(added.path)
+    assert os.path.dirname(log_path) == str(tmp_path)
+
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    main_window.fit_controller.run_integration()
+
+    assert len(added.fits) == 1
+    assert os.path.exists(log_path)
+
+
+def test_export_fits_default_directory_resolves_for_an_added_spectrum(qapp, monkeypatch, tmp_path):
+    """fit_mode.py's _export_fits (the "Export Fit Report" dialog) reads
+    os.path.dirname(active.path) for its default save directory -- the
+    exact same pattern as fit_export.auto_log_path. Proves it inherits
+    the fix above with no changes of its own needed: once _apply_add
+    anchors the combined spectrum's .path at Spectrum A's directory,
+    the export dialog defaults there too instead of the process's cwd."""
+    # This test only cares about _export_fits' default directory, not the
+    # auto-log file run_integration() writes as an unrelated side effect
+    # -- same no-op technique test_matrix_panel_and_main_window_integrate_identically
+    # uses to keep that side effect out of the repo.
+    monkeypatch.setattr(fit_mode.fit_export, "append_auto_log", lambda *a, **k: None)
+
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window, path=str(tmp_path / "a.spe"))
+    spectrum_b = _make_active_spectrum(main_window)  # a different (temp) directory
+
+    main_window._apply_add(spectrum_a, spectrum_b, 1.0)
+    added = main_window.spectra[-1]
+
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    main_window.fit_controller.run_integration()
+    assert len(added.fits) == 1
+
+    captured = []
+    monkeypatch.setattr(
+        fit_mode.QFileDialog, "getSaveFileName",
+        lambda *a, **k: captured.append(a) or ("", ""),
+    )
+    main_window.fit_controller._export_fits(added, [0])
+
+    default_path = captured[0][2]
+    assert os.path.dirname(default_path) == str(tmp_path)
 
 
 def test_add_combined_spectrum_disambiguates_a_colliding_path(qapp):

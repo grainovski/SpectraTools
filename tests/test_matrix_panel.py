@@ -726,3 +726,38 @@ def test_matrix_panel_projection_integration_auto_logs_next_to_source_matrix_fil
     assert os.path.dirname(log_path) == str(tmp_path)
     assert os.path.basename(log_path) == "gg_x_projection_fits.jsonl"
     assert os.path.exists(log_path)
+
+
+def test_matrix_panel_activate_cut_integration_auto_logs_next_to_source_matrix_file(qapp, tmp_path, monkeypatch):
+    """Regression guard: integrating on a spectrum created via "Activate
+    Cut" must auto-log next to the real .mtx file, not the process's
+    cwd. _activate_cut wraps the cut result with a bare display-label
+    path (e.g. "gg.mtx x cut [5.0, 45.0]"), which has no directory of
+    its own -- fit_export.auto_log_path's empty os.path.dirname used to
+    send the auto-log to the process's cwd instead of beside the source
+    matrix file. The dirname assertion is checked before
+    run_integration() executes, so a failing (RED) run never writes a
+    stray log file outside tmp_path."""
+    small_matrix = np.zeros((50, 50))
+    small_matrix[10:40, 10:40] = 100.0
+    monkeypatch.setattr(matrix_panel, "load_mtx", lambda path: small_matrix)
+
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, str(tmp_path / "gg.mtx"))
+
+    _held_key_click(panel, "cut", 5.0)
+    _held_key_click(panel, "cut", 45.0)
+    panel._activate_cut()
+
+    added = main_window.spectra[-1]
+    log_path = fit_mode.fit_export.auto_log_path(added.path)
+    assert os.path.dirname(log_path) == str(tmp_path)
+
+    main_window.fit_controller._held_key = "r"
+    _click(main_window, 5.0)
+    _click(main_window, 45.0)
+    main_window.fit_controller._held_key = None
+    main_window.fit_controller.run_integration()
+
+    assert len(added.fits) == 1
+    assert os.path.exists(log_path)

@@ -522,7 +522,13 @@ class MatrixPanel(QMainWindow):
             f"{os.path.basename(self.path)} {self.working_axis} cut "
             f"[{state.cut_region[0]:.1f}, {state.cut_region[1]:.1f}]"
         )
-        self.main_window._add_combined_spectrum(label, result)
+        # Anchored at the real matrix file's directory (not just its
+        # basename in the label above) so fit_export.auto_log_path and
+        # fit_mode.py's "Export Fit Report" default directory -- both of
+        # which read os.path.dirname of a spectrum's .path -- resolve next
+        # to gg.mtx instead of silently falling back to the process's cwd.
+        path = os.path.join(os.path.dirname(self.path), label)
+        self.main_window._add_combined_spectrum(path, result)
 
     def _open_heatmap(self):
         from matrix_heatmap import MatrixHeatmapWindow

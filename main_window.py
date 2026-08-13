@@ -674,7 +674,15 @@ class MainWindow(QMainWindow):
         data = add(spectrum_a.data, spectrum_b.data, factor)
         name_a = os.path.basename(spectrum_a.path)
         name_b = os.path.basename(spectrum_b.path)
-        path = f"{name_a} + {name_b}" if factor == 1 else f"{name_a} + {factor}x{name_b}"
+        label = f"{name_a} + {name_b}" if factor == 1 else f"{name_a} + {factor}x{name_b}"
+        # Anchored at Spectrum A's directory (the operand named first, and
+        # the dialog's default "active" pick) so fit_export.auto_log_path
+        # and fit_mode.py's "Export Fit Report" default directory -- both
+        # of which read os.path.dirname of a spectrum's .path -- resolve
+        # somewhere real instead of silently falling back to the process's
+        # cwd. Spectrum B's directory is dropped; there is no single
+        # correct choice when the two operands live in different places.
+        path = os.path.join(os.path.dirname(spectrum_a.path), label)
         self._add_combined_spectrum(path, data)
 
     def _open_subtract_dialog(self):
@@ -689,7 +697,9 @@ class MainWindow(QMainWindow):
         data = subtract(spectrum_a.data, spectrum_b.data, factor)
         name_a = os.path.basename(spectrum_a.path)
         name_b = os.path.basename(spectrum_b.path)
-        path = f"{name_a} - {name_b}" if factor == 1 else f"{name_a} - {factor}x{name_b}"
+        label = f"{name_a} - {name_b}" if factor == 1 else f"{name_a} - {factor}x{name_b}"
+        # See _apply_add's comment: anchored at Spectrum A's directory.
+        path = os.path.join(os.path.dirname(spectrum_a.path), label)
         self._add_combined_spectrum(path, data)
 
     def _add_combined_spectrum(self, path, data):
