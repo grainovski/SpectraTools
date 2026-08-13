@@ -7,6 +7,8 @@ from histogram_io import ParseError
 
 _NS = "{http://physics.nist.gov/N42/2011/N42}"
 
+_MAX_RUN_LENGTH = 1 << 20  # generous bound for a single CountedZeroes run; anything beyond this is corrupt, not a real spectrum
+
 
 def _decode_counted_zeroes(tokens, path):
     """Expands N42's CountedZeroes run-length encoding: a "0" token is
@@ -20,6 +22,11 @@ def _decode_counted_zeroes(tokens, path):
             if i + 1 >= len(tokens):
                 raise ParseError(f"N42 CountedZeroes data ends mid run-length pair: {path}")
             run_length = tokens[i + 1]
+            if not (0 <= run_length <= _MAX_RUN_LENGTH):
+                raise ParseError(
+                    f"N42 CountedZeroes run-length {run_length} is out of range "
+                    f"(must be 0-{_MAX_RUN_LENGTH}): {path}"
+                )
             values.extend([0] * run_length)
             i += 2
         else:
