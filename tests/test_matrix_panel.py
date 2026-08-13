@@ -437,3 +437,53 @@ def test_matrix_panel_calibrating_preserves_the_current_view(qapp):
     # View was (100, 500) in channel space; after a b=2.0 calibration
     # the same channel window should now read as (200, 1000) in keV.
     assert panel.axes.get_xlim() == pytest.approx((200.0, 1000.0))
+
+
+def test_matrix_panel_has_trimmed_toolbar_and_zoom_actions(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    action_texts = [a.text() for a in panel.nav_toolbar.actions()]
+    assert "Zoom" not in action_texts  # stock rectangle-zoom is trimmed out
+    assert panel.zoom_in_action.shortcut().toString() == "Ctrl+="
+    assert panel.zoom_out_action.shortcut().toString() == "Ctrl+-"
+    assert panel.full_view_action.shortcut().toString() == "Ctrl+0"
+
+
+def test_matrix_panel_zoom_in_narrows_xlim(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    full_lo, full_hi = panel.axes.get_xlim()
+    full_width = full_hi - full_lo
+
+    panel.zoom_in_action.trigger()
+
+    new_lo, new_hi = panel.axes.get_xlim()
+    assert (new_hi - new_lo) < full_width
+
+
+def test_matrix_panel_full_view_action_resets_zoom(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    full_xlim = panel.axes.get_xlim()
+    panel.axes.set_xlim(1000, 2000)
+
+    panel.full_view_action.trigger()
+
+    assert panel.axes.get_xlim() == pytest.approx(full_xlim)
+
+
+def test_matrix_panel_scroll_event_zooms(qapp):
+    from matplotlib.backend_bases import MouseEvent
+
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    full_lo, full_hi = panel.axes.get_xlim()
+    full_width = full_hi - full_lo
+
+    px, py = panel.axes.transData.transform((4096.0, 10.0))
+    event = MouseEvent("scroll_event", panel.canvas, px, py, button="up")
+    panel.canvas.callbacks.process("scroll_event", event)
+
+    new_lo, new_hi = panel.axes.get_xlim()
+    assert (new_hi - new_lo) < full_width

@@ -1,9 +1,10 @@
 import os
 
 import numpy as np
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -25,6 +26,7 @@ CUT_REGION_COLOR = "tab:red"
 CUT_REGION_ALPHA = 0.25
 BG_REGION_COLOR = "tab:green"
 BG_REGION_ALPHA = 0.3
+ZOOM_FACTOR = 1.5
 
 
 class MatrixCutState:
@@ -200,7 +202,27 @@ class MatrixPanel(QMainWindow):
         self.figure = Figure()
         self.axes = self.figure.add_subplot(111)
         self.canvas = FigureCanvasQTAgg(self.figure)
-        self.nav_toolbar = NavigationToolbar2QT(self.canvas, self, coordinates=False)
+        from main_window import _TrimmedNavigationToolbar  # local: avoids a circular import with main_window.py
+
+        self.nav_toolbar = _TrimmedNavigationToolbar(self.canvas, self, coordinates=False)
+        self.nav_toolbar.addSeparator()
+
+        self.zoom_in_action = QAction("Zoom In (+)", self)
+        self.zoom_in_action.setShortcut("Ctrl+=")
+        self.zoom_in_action.triggered.connect(lambda: self._zoom_x(1 / ZOOM_FACTOR))
+        self.nav_toolbar.addAction(self.zoom_in_action)
+
+        self.zoom_out_action = QAction("Zoom Out (-)", self)
+        self.zoom_out_action.setShortcut("Ctrl+-")
+        self.zoom_out_action.triggered.connect(lambda: self._zoom_x(ZOOM_FACTOR))
+        self.nav_toolbar.addAction(self.zoom_out_action)
+
+        self.full_view_action = QAction("Full View", self)
+        self.full_view_action.setShortcut("Ctrl+0")
+        self.full_view_action.triggered.connect(self._show_full_view)
+        self.nav_toolbar.addAction(self.full_view_action)
+
+        self.canvas.mpl_connect("scroll_event", self._on_scroll)
 
         self.axis_selector = QComboBox()
         self.axis_selector.addItem("X projection", "x")
@@ -321,6 +343,56 @@ class MatrixPanel(QMainWindow):
         self.main_window._apply_calibration_change(new_calibration, new_active)
         new_xlim = (self.channel_to_display(channel_bounds[0]), self.channel_to_display(channel_bounds[1]))
         self._plot_data(xlim_override=new_xlim)
+
+    def _on_scroll(self, event):
+        if event.inaxes != self.axes or event.xdata is None:
+            return
+        factor = (1 / ZOOM_FACTOR) if event.button == "up" else ZOOM_FACTOR
+        self._zoom_x(factor, center=event.xdata)
+
+    def _zoom_x(self, factor, center=None):
+        spectrum = self.spectra[0]
+        xlim = self.axes.get_xlim()
+        if center is None:
+            center = (xlim[0] + xlim[1]) / 2
+        half_width = abs(xlim[1] - xlim[0]) / 2 * factor
+        max_channel = len(spectrum.data) - 1
+        display_lo = self.channel_to_display(0)
+        display_hi = self.channel_to_display(max_channel)
+        display_lo, display_hi = min(display_lo, display_hi), max(display_lo, display_hi)
+        new_lo = max(display_lo, center - half_width)
+        new_hi = min(display_hi, center + half_width)
+        if new_hi <= new_lo:
+            new_hi = min(display_hi, new_lo + 1)
+        new_xlim = (new_lo, new_hi) if xlim[0] <= xlim[1] else (new_hi, new_lo)
+        self.axes.set_xlim(new_xlim)
+        self._autoscale_y(new_xlim)
+        self.canvas.draw()
+        self.nav_toolbar.push_current()
+
+    def _show_full_view(self):
+        spectrum = self.spectra[0]
+        max_channel = len(spectrum.data) - 1
+        full_xlim = (self.channel_to_display(0), self.channel_to_display(max_channel))
+        self.axes.set_xlim(full_xlim)
+        self._autoscale_y(full_xlim)
+        self.canvas.draw()
+        self.nav_toolbar.push_current()
+
+    def _autoscale_y(self, xlim):
+        spectrum = self.spectra[0]
+        channel_lo = self.display_to_channel(xlim[0])
+        channel_hi = self.display_to_channel(xlim[1])
+        channel_lo, channel_hi = min(channel_lo, channel_hi), max(channel_lo, channel_hi)
+        lo_bound = max(0, int(np.floor(channel_lo)))
+        hi_bound = min(int(np.ceil(channel_hi)) + 1, len(spectrum.data))
+        if lo_bound >= hi_bound:
+            return
+        window = spectrum.data[lo_bound:hi_bound]
+        y_min = float(np.min(window))
+        y_max = float(np.max(window))
+        margin = (y_max - y_min) * 0.05 or 1.0
+        self.axes.set_ylim(y_min - margin, y_max + margin)
 
     def _on_axis_changed(self, index):
         self.working_axis = self.axis_selector.itemData(index)
