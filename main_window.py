@@ -306,6 +306,20 @@ class MainWindow(QMainWindow):
         if event.type() == QEvent.Type.WindowActivate:
             self._on_activated()
 
+    def closeEvent(self, event):
+        # MatrixPanel windows are parentless top-level windows (deliberately,
+        # so they behave independently rather than as Qt-modal children --
+        # see matrix_panel.py). That means Qt's quitOnLastWindowClosed
+        # doesn't quit the app just because MainWindow closes: any matrix
+        # panel left open keeps counting as a visible top-level window, so
+        # app.exec() would never return and the process would linger with
+        # no visible explanation. list(...) copies before iterating because
+        # each panel.close() synchronously mutates self._matrix_panels via
+        # its own closeEvent (MatrixPanel.closeEvent removes itself).
+        for panel in list(self._matrix_panels):
+            panel.close()
+        super().closeEvent(event)
+
     def _build_menu(self):
         self.file_menu = self.menuBar().addMenu("&File")
 
@@ -756,12 +770,24 @@ class MainWindow(QMainWindow):
             self, "Open Matrix", self.settings.last_folder(), "Matrix files (*.mtx);;All files (*)"
         )
         if path:
+            # Decoding a real matrix (e.g. 8192x8192 lc-compressed) takes
+            # several seconds on the GUI thread -- without feedback the app
+            # appears to hang. The status message is posted before the wait
+            # cursor and flushed with processEvents() so it actually paints
+            # before the blocking load starts (the event loop can't repaint
+            # once _open_matrix_panel is on the stack).
+            self.statusBar().showMessage("Loading matrix...")
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            QApplication.processEvents()
             try:
                 self._open_matrix_panel(path)
             except ParseError as exc:
                 QMessageBox.warning(self, "Could not open matrix", str(exc))
             else:
                 self.settings.set_last_folder(os.path.dirname(path))
+            finally:
+                QApplication.restoreOverrideCursor()
+                self.statusBar().clearMessage()
 
     def _open_matrix_panel(self, path):
         panel = MatrixPanel(self, path)

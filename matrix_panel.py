@@ -250,6 +250,11 @@ class MatrixPanel(QMainWindow):
             self._on_activated()
 
     def closeEvent(self, event):
+        # Same parentless-top-level-window concern as MainWindow.closeEvent:
+        # a MatrixHeatmapWindow left open would keep the app from quitting
+        # even after this panel (and MainWindow) are both closed.
+        for window in list(self._heatmap_windows):
+            window.close()
         super().closeEvent(event)
         if self in self.main_window._matrix_panels:
             self.main_window._matrix_panels.remove(self)
