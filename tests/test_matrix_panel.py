@@ -641,3 +641,45 @@ def test_matrix_panel_switching_axis_clears_fit_state(qapp):
     panel.axis_selector.setCurrentIndex(1)
 
     assert panel.fit_controller.state.fit_region is None
+
+
+def test_matrix_panel_and_main_window_integrate_identically(qapp):
+    """Loads the identical numpy array as an ordinary spectrum in
+    MainWindow and as a matrix projection in MatrixPanel, integrates
+    the same region on both, and confirms matching gross/background/net
+    -- proving the duck-typed FitModeController reuse produces
+    identical results, not just that it runs without crashing."""
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    data = panel.spectra[0].data
+
+    from spectrum import LIGHT_COLOR_CYCLE, LoadedSpectrum
+    spectrum = LoadedSpectrum("synthetic.spe", data, color=LIGHT_COLOR_CYCLE[0])
+    spectrum.active = True
+    main_window.spectra = [spectrum]
+    # Real usage always calls _plot_data() immediately after adding a
+    # spectrum (see e.g. main_window.py's own load path); without it,
+    # main_window.axes keeps matplotlib's default (0, 1) xlim from
+    # construction (when self.spectra was still empty), so every
+    # simulated click below would land outside the axes bounding box
+    # and be silently dropped by on_click's inaxes guard. Same idiom
+    # already used by test_matrix_panel_calibration_change_correctly_updates_main_window_view
+    # above.
+    main_window._plot_data()
+
+    left_bg, right_bg, fit_region = (50.0, 70.0), (250.0, 270.0), (100.0, 200.0)
+
+    for target in (main_window, panel):
+        target.fit_controller._held_key = "b"
+        _click(target, left_bg[0]); _click(target, left_bg[1])
+        _click(target, right_bg[0]); _click(target, right_bg[1])
+        target.fit_controller._held_key = "r"
+        _click(target, fit_region[0]); _click(target, fit_region[1])
+        target.fit_controller._held_key = None
+        target.fit_controller.run_integration()
+
+    mw_result = main_window.spectra[0].fits[-1]
+    panel_result = panel.spectra[0].fits[-1]
+    assert panel_result.gross_area == pytest.approx(mw_result.gross_area)
+    assert panel_result.background_area == pytest.approx(mw_result.background_area)
+    assert panel_result.net_area == pytest.approx(mw_result.net_area)
