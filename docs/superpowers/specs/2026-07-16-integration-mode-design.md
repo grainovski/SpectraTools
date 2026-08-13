@@ -142,6 +142,12 @@ where `bgMom2` would
 be locally consistent. This looks like a copy-paste slip in the original
 C but is replicated exactly per explicit decision, alongside the
 background-scaling quirk above.
+Correction: this citation was imprecise — only `vsFitInt.c:281` (feeding
+`DM2`/`background_fwhm_err`) has the net-M2 cross-moment quirk;
+`vsFitInt.c:303` (feeding `DM3`/`background_skewness_err`) uses the
+background's own `bgMom2`, not the net's `mom2`, and is not part of this
+quirk. `integrate_region()`'s `termb` line was fixed to use `bg_M2`
+accordingly (v3.1.0 audit fix).
 
 All of gross/background/net guard against `sum == 0.0` (an empty or
 exactly-zero-net region) the same way TV does (`if (sum != 0.0)` /
