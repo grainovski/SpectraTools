@@ -37,6 +37,14 @@ def test_raises_parse_error_on_no_numeric_data():
         load_histogram(str(FIXTURES / "no_numeric_data.txt"))
 
 
+def test_load_histogram_raises_parse_error_not_crash_on_undecodable_bytes(tmp_path):
+    path = tmp_path / "not_text.bin"
+    # Bytes that are invalid in both UTF-8 and Windows cp1252.
+    path.write_bytes(b"\xff\xfe\x00\x01\x8f\x90\x91\x92" * 20)
+    with pytest.raises(ParseError):
+        load_histogram(str(path))
+
+
 def test_bucket_under_4096_pads_to_4096(tmp_path):
     file_path = tmp_path / "short.txt"
     values = list(range(10))
