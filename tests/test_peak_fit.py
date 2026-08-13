@@ -278,14 +278,16 @@ def test_fit_peaks_reports_full_and_net_region_areas():
     assert result.gross_area > result.net_area
 
 
-def test_fit_peaks_gross_area_err_finite_for_negative_region():
+def test_fit_peaks_gross_area_err_is_nan_not_crash_for_negative_region():
     """fit_peaks' own gross_area_err sibling to the integrate_region fix:
     gross_area is the raw (background-still-included) sum over the fit
     region. np.sqrt() on a negative scalar doesn't crash like math.sqrt
-    does, but it silently produces NaN -- a deeply negative flat
-    background dominating a real, well-defined Gaussian peak's
-    contribution forces gross_area negative here, exactly what a
-    Subtract Spectra result can look like feeding into a fit."""
+    does -- it silently produces NaN, matching TV's own lack of a guard
+    here. Deliberately different resolution from integrate_region()'s
+    FitError: gross_area_err is one auxiliary summary field on an
+    otherwise-valid, already-successful fit (the fit itself doesn't
+    care about the sign of y_sub), so this fit is allowed to succeed
+    with a NaN in that one field rather than being rejected outright."""
     x, y = _make_spectrum(
         channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=-50.0,
     )
@@ -297,7 +299,11 @@ def test_fit_peaks_gross_area_err_finite_for_negative_region():
         peak_positions=[100.0],
     )
     assert result.gross_area < 0.0  # sanity: this really exercises the negative branch
-    assert math.isfinite(result.gross_area_err)
+    assert math.isnan(result.gross_area_err)
+    # The rest of the fit is unaffected -- a real, well-defined peak was
+    # still found and reported normally.
+    assert len(result.peaks) == 1
+    assert math.isfinite(result.peaks[0].area)
 
 
 def test_fit_peaks_reports_full_area_per_peak():
@@ -1221,34 +1227,43 @@ def test_integrate_region_net_second_moment_uses_abs_net_area():
     assert result.net_fwhm_err == pytest.approx(5.338971539536898)
 
 
-def test_integrate_region_does_not_crash_on_negative_counts():
+def test_integrate_region_raises_clear_error_on_negative_counts_in_fit_region():
     # Simulates a Subtract-Spectra-derived spectrum: unclamped negative
-    # counts in and around the fit region.
+    # counts in the fit region itself. TV's own uncertainty formulas have
+    # no guard for this case (confirmed directly against vsFitInt.c --
+    # ABS() there wraps only the sum/divisor, never the sqrt argument),
+    # so rather than manufacturing a number TV was never designed to
+    # produce, this is rejected outright with a clear, actionable message
+    # -- matching this file's own existing precedent of raising FitError
+    # for an analogous negative-covariance case (see the pcov check
+    # above in fit_peaks).
     x = np.arange(200, dtype=float)
     y = np.full(200, -5.0)
     y[90:110] += 40.0  # a "peak" sitting on a negative background
-    result = integrate_region(x, y, (10, 30), (150, 170), (60, 140))
-    assert math.isfinite(result.gross_area_err)
-    assert math.isfinite(result.background_area_err)
-    assert math.isfinite(result.net_area_err)
+    with pytest.raises(FitError, match="negative counts"):
+        integrate_region(x, y, (150, 155), (160, 165), (60, 140))
 
 
-def test_integrate_region_negative_counts_errors_are_nonnegative_magnitudes():
+def test_integrate_region_raises_clear_error_on_negative_counts_in_background_region():
+    # Same rejection, but triggered by a background region alone -- the
+    # fit region itself is entirely non-negative here, proving the check
+    # on the background data path is independent of the one on the fit
+    # region.
     x = np.arange(200, dtype=float)
-    y = np.full(200, -5.0)
+    y = np.full(200, 5.0)
     y[90:110] += 40.0
-    result = integrate_region(x, y, (10, 30), (150, 170), (60, 140))
-    assert result.gross_area_err >= 0.0
-    assert result.background_area_err >= 0.0
-    assert result.net_area_err >= 0.0
+    y[150:155] = -3.0  # only the left background region goes negative
+    with pytest.raises(FitError, match="negative counts"):
+        integrate_region(x, y, (150, 155), (170, 175), (60, 140))
 
 
-def test_integrate_region_positive_counts_unaffected_by_abs_guard():
-    # Regression guard: for ordinary non-negative data, abs() around the
-    # sqrt argument must be a true no-op -- same result as before the fix.
+def test_integrate_region_positive_counts_unaffected_by_negative_count_guard():
+    # Regression guard: for ordinary non-negative data (the overwhelming
+    # majority of real usage), the new negative-count check must never
+    # fire -- same result as before this fix existed.
     x = np.linspace(0, 200, 201)
     y = np.zeros(201)
     y[90:110] = 40.0
     y += 5.0
-    result_before_style = integrate_region(x, y, (10, 30), (150, 170), (60, 140))
-    assert result_before_style.gross_area_err == pytest.approx(math.sqrt(sum(y[(x >= 60) & (x <= 140)])))
+    result = integrate_region(x, y, (10, 30), (150, 170), (60, 140))
+    assert result.gross_area_err == pytest.approx(math.sqrt(sum(y[(x >= 60) & (x <= 140)])))
