@@ -72,10 +72,12 @@ class MatrixCutState:
 
 class MatrixCutController(QObject):
     """Held-key + click marker placement for the matrix panel's
-    projection view -- hold C for the cut region, hold B for a
-    background region. Modeled on FitModeController's eventFilter/
-    _held_key mechanism (fit_mode.py:382-428), simplified to two mark
-    types instead of three."""
+    projection view -- hold C for the cut region, hold G for a
+    background region (not B -- reserved for the main window's own
+    fit-marking system, which a later task adds to this same window).
+    Modeled on FitModeController's eventFilter/_held_key mechanism
+    (fit_mode.py:382-428), simplified to two mark types instead of
+    three."""
 
     def __init__(self, panel):
         super().__init__()
@@ -93,8 +95,8 @@ class MatrixCutController(QObject):
             if event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat():
                 if event.key() == Qt.Key.Key_C:
                     self._held_key = "cut"
-                elif event.key() == Qt.Key.Key_B:
-                    self._held_key = "bg"
+                elif event.key() == Qt.Key.Key_G:
+                    self._held_key = "gate_bg"
             elif event.type() == QEvent.Type.KeyRelease and not event.isAutoRepeat():
                 self._held_key = None
         return False
@@ -102,10 +104,11 @@ class MatrixCutController(QObject):
     def on_click(self, event):
         if event.inaxes != self.panel.axes or event.xdata is None or event.button != 1:
             return
+        channel_x = self.panel.display_to_channel(event.xdata)
         if self._held_key == "cut":
-            self.state.add_cut_click(event.xdata)
-        elif self._held_key == "bg":
-            self.state.add_bg_click(event.xdata)
+            self.state.add_cut_click(channel_x)
+        elif self._held_key == "gate_bg":
+            self.state.add_bg_click(channel_x)
         else:
             return
         self._redraw_markers()
@@ -125,11 +128,37 @@ class MatrixCutController(QObject):
         self._artists = []
 
         axes = self.panel.axes
-        if self.state.cut_region is not None:
-            lo, hi = self.state.cut_region
-            self._artists.append(axes.axvspan(lo, hi, color=CUT_REGION_COLOR, alpha=CUT_REGION_ALPHA))
-        for lo, hi in self.state.bg_regions:
-            self._artists.append(axes.axvspan(lo, hi, color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA))
+        to_display = self.panel.channel_to_display
+        state = self.state
+
+        if state._pending_cut_click is not None:
+            self._artists.append(
+                axes.axvline(
+                    to_display(state._pending_cut_click),
+                    color=CUT_REGION_COLOR, linestyle="--", linewidth=1,
+                )
+            )
+        if state.cut_region is not None:
+            lo, hi = state.cut_region
+            self._artists.append(
+                axes.axvspan(
+                    to_display(lo), to_display(hi), color=CUT_REGION_COLOR, alpha=CUT_REGION_ALPHA
+                )
+            )
+
+        if state._pending_bg_click is not None:
+            self._artists.append(
+                axes.axvline(
+                    to_display(state._pending_bg_click),
+                    color=BG_REGION_COLOR, linestyle="--", linewidth=1,
+                )
+            )
+        for lo, hi in state.bg_regions:
+            self._artists.append(
+                axes.axvspan(
+                    to_display(lo), to_display(hi), color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA
+                )
+            )
         self.panel.canvas.draw()
 
 
@@ -319,7 +348,7 @@ class MatrixPanel(QMainWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
-        # Same rationale as MainWindow.showEvent: hold-C/hold-B marking
+        # Same rationale as MainWindow.showEvent: hold-C/hold-G marking
         # depends on the canvas holding keyboard focus, and the top bar's
         # combo box/buttons are focusable widgets that can claim initial
         # focus on some window managers before the user has ever hovered

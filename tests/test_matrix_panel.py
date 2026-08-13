@@ -100,8 +100,8 @@ def test_matrix_panel_marking_background_region_with_two_clicks(qapp):
     main_window = MainWindow()
     panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
 
-    _held_key_click(panel, "bg", 300.0)
-    _held_key_click(panel, "bg", 350.0)
+    _held_key_click(panel, "gate_bg", 300.0)
+    _held_key_click(panel, "gate_bg", 350.0)
 
     # Compare the single tuple, not the whole list, via pytest.approx --
     # pytest.approx on a list containing tuples does not recurse into the
@@ -116,12 +116,12 @@ def test_matrix_panel_multiple_background_regions_allowed(qapp):
     main_window = MainWindow()
     panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
 
-    _held_key_click(panel, "bg", 300.0)
-    _held_key_click(panel, "bg", 350.0)
-    _held_key_click(panel, "bg", 500.0)
-    _held_key_click(panel, "bg", 550.0)
-    _held_key_click(panel, "bg", 700.0)
-    _held_key_click(panel, "bg", 750.0)
+    _held_key_click(panel, "gate_bg", 300.0)
+    _held_key_click(panel, "gate_bg", 350.0)
+    _held_key_click(panel, "gate_bg", 500.0)
+    _held_key_click(panel, "gate_bg", 550.0)
+    _held_key_click(panel, "gate_bg", 700.0)
+    _held_key_click(panel, "gate_bg", 750.0)
 
     assert len(panel.cut_controller.state.bg_regions) == 3
 
@@ -167,8 +167,8 @@ def test_matrix_panel_activate_cut_result_matches_direct_computation(qapp):
 
     _held_key_click(panel, "cut", 100.0)
     _held_key_click(panel, "cut", 300.0)
-    _held_key_click(panel, "bg", 400.0)
-    _held_key_click(panel, "bg", 450.0)
+    _held_key_click(panel, "gate_bg", 400.0)
+    _held_key_click(panel, "gate_bg", 450.0)
     panel._activate_cut()
 
     expected = compute_cut(panel.matrix, "x", (100.0, 300.0), [(400.0, 450.0)])
@@ -361,3 +361,40 @@ def test_matrix_panel_calibration_change_propagates_to_sibling_panels(qapp):
     panel_a._apply_calibration_change(Calibration(kind="linear", a=0.0, b=1.0, c=0.0), True)
 
     assert panel_b.axes.get_xlabel() != "stale label"
+
+
+def test_matrix_panel_cut_marks_stored_in_channel_space(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    panel._calibration = Calibration(kind="linear", a=0.0, b=2.0, c=0.0)
+    panel._calibration_active = True
+
+    _held_key_click(panel, "cut", 200.0)
+    _held_key_click(panel, "cut", 400.0)
+
+    # Clicked at display (keV) positions 200/400 with b=2.0 -- channel
+    # space is display / 2, so the stored region should be (100, 200),
+    # not the raw display values (200, 400).
+    assert panel.cut_controller.state.cut_region == pytest.approx((100.0, 200.0))
+
+
+def test_matrix_panel_pending_cut_click_shows_dashed_preview_line(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    _held_key_click(panel, "cut", 150.0)
+
+    lines = [a for a in panel.cut_controller._artists if hasattr(a, "get_linestyle")]
+    assert any(line.get_linestyle() == "--" for line in lines)
+
+
+def test_matrix_panel_pending_gate_bg_click_shows_dashed_preview_line(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    _held_key_click(panel, "gate_bg", 300.0)
+
+    lines = [a for a in panel.cut_controller._artists if hasattr(a, "get_linestyle")]
+    assert any(line.get_linestyle() == "--" for line in lines)
