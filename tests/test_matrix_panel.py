@@ -487,3 +487,74 @@ def test_matrix_panel_scroll_event_zooms(qapp):
 
     new_lo, new_hi = panel.axes.get_xlim()
     assert (new_hi - new_lo) < full_width
+
+
+def test_matrix_panel_plot_data_autoscales_y(qapp, monkeypatch):
+    # Regression guard: _plot_data originally set X limits but never
+    # called _autoscale_y (unlike main_window's own _plot_data), so
+    # zooming in on X left the Y axis at the full spectrum's count
+    # range -- e.g. after a calibration change round-trips the X zoom
+    # back into view, the peak the user zoomed in on would still look
+    # visually squashed against the full spectrum's tallest peak.
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    calls = []
+    monkeypatch.setattr(panel, "_autoscale_y", lambda xlim: calls.append(xlim))
+
+    panel._plot_data()
+
+    assert calls != []
+
+
+def test_matrix_panel_plot_data_updates_nav_toolbar_history(qapp, monkeypatch):
+    # Regression guard: _plot_data never called nav_toolbar.update()/
+    # push_current() (unlike main_window's own _plot_data), so the
+    # toolbar's Home button kept a stale view recorded from before an
+    # axis switch or calibration change -- clicking Home could reapply
+    # a different projection's (or a different calibration's) raw
+    # xlim/ylim numbers onto the current plot.
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    calls = []
+    monkeypatch.setattr(panel.nav_toolbar, "push_current", lambda: calls.append(True))
+
+    panel._plot_data()
+
+    assert calls != []
+
+
+def test_calibration_change_from_main_window_preserves_matrix_panel_zoom(qapp):
+    # Regression guard: main_window._apply_calibration_change's
+    # panel-refresh loop originally called panel._plot_data() with no
+    # arguments, which always resets to full view -- a calibration
+    # change made from MAIN WINDOW'S OWN dialog/toolbar (not from the
+    # matrix panel) silently discarded any open panel's zoom, unlike
+    # main_window's own view, which was already correctly preserved.
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    panel = main_window._open_matrix_panel(os.path.join(FIXTURES, "gg.mtx"))
+    panel.axes.set_xlim(20.0, 40.0)
+
+    main_window._apply_calibration_change(Calibration(kind="linear", a=0.0, b=3.0, c=0.0), True)
+
+    assert panel.axes.get_xlim() == pytest.approx((60.0, 120.0))
+
+
+def test_calibration_change_from_one_panel_preserves_sibling_panel_zoom(qapp):
+    # Same gap as above, from the other direction: a calibration change
+    # initiated from panel_a only round-tripped panel_a's OWN view (via
+    # MatrixPanel._apply_calibration_change's own logic) -- any OTHER
+    # open panel still went through the bare, view-resetting loop.
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    panel_a = main_window._open_matrix_panel(os.path.join(FIXTURES, "gg.mtx"))
+    panel_b = main_window._open_matrix_panel(os.path.join(FIXTURES, "gg.mtx"))
+    panel_b.axes.set_xlim(20.0, 40.0)
+
+    panel_a._apply_calibration_change(Calibration(kind="linear", a=0.0, b=3.0, c=0.0), True)
+
+    assert panel_b.axes.get_xlim() == pytest.approx((60.0, 120.0))

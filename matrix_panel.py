@@ -419,7 +419,16 @@ class MatrixPanel(QMainWindow):
         else:
             xlim = (self.channel_to_display(0), self.channel_to_display(len(spectrum.data) - 1))
         self.axes.set_xlim(xlim)
+        self._autoscale_y(xlim)
         self.canvas.draw()
+        # Our custom zoom bypasses the toolbar's usual box-zoom/pan path,
+        # matching main_window.py's own _plot_data -- without this the
+        # Home button wouldn't know about this view, and after an axis
+        # switch or calibration change would reapply a now-nonsensical
+        # old view (a different projection's or a different calibration's
+        # raw xlim/ylim numbers) instead of resetting the history.
+        self.nav_toolbar.update()
+        self.nav_toolbar.push_current()
         self._update_fit_mode_availability()
 
     def _update_fit_mode_availability(self):

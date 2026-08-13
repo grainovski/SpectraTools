@@ -508,6 +508,19 @@ class MainWindow(QMainWindow):
                 self.display_to_channel(old_xlim[0]),
                 self.display_to_channel(old_xlim[1]),
             )
+        # Same reasoning as channel_bounds above, applied to every open
+        # matrix panel too -- captured under the OLD calibration, before
+        # it's overwritten below, so a zoomed-in panel doesn't silently
+        # reset to full view just because the change came from here
+        # (or from a SIBLING panel) rather than from that panel's own
+        # calibration dialog.
+        panel_channel_bounds = {
+            panel: (
+                panel.display_to_channel(panel.axes.get_xlim()[0]),
+                panel.display_to_channel(panel.axes.get_xlim()[1]),
+            )
+            for panel in self._matrix_panels
+        }
         self._calibration = new_calibration
         self._calibration_active = new_active
         self.calibration_toggle_action.setEnabled(new_calibration is not None)
@@ -526,9 +539,16 @@ class MainWindow(QMainWindow):
         # these exact attributes, not a separate copy) -- a change made
         # here needs to visibly redraw those windows too, not just leave
         # their already-drawn plot showing the old units until something
-        # else happens to trigger a redraw.
-        for panel in self._matrix_panels:
-            panel._plot_data()
+        # else happens to trigger a redraw. Each panel's own zoom is
+        # restored via panel_channel_bounds captured above, the same way
+        # this window's own zoom is preserved just above -- not just
+        # reset to full view.
+        for panel, old_bounds in panel_channel_bounds.items():
+            panel_new_xlim = (
+                panel.channel_to_display(old_bounds[0]),
+                panel.channel_to_display(old_bounds[1]),
+            )
+            panel._plot_data(xlim_override=panel_new_xlim)
 
     def _open_multiply_dialog(self):
         active = next((s for s in self.spectra if s.active), None)
