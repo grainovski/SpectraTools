@@ -1,3 +1,5 @@
+import types
+
 import numpy as np
 from matplotlib.colors import to_rgba
 
@@ -5,9 +7,17 @@ from matrix_heatmap import MatrixHeatmapWindow, _downsample_for_display
 from theme import DARK_BG, DARK_TEXT
 
 
+def _fake_panel():
+    # MatrixHeatmapWindow only needs a `panel._heatmap_windows` list to
+    # self-remove from on close (see closeEvent) -- a real MatrixPanel
+    # would work too, but constructing one means decoding a real matrix
+    # fixture, which these tests don't otherwise need.
+    return types.SimpleNamespace(_heatmap_windows=[])
+
+
 def test_matrix_heatmap_window_displays_matrix(qapp):
     matrix = np.arange(100, dtype=np.int64).reshape(10, 10)
-    window = MatrixHeatmapWindow(matrix, "test.mtx", "light")
+    window = MatrixHeatmapWindow(matrix, "test.mtx", "light", _fake_panel())
 
     assert window.windowTitle() == "Heatmap -- test.mtx"
     assert window.image is not None
@@ -15,7 +25,7 @@ def test_matrix_heatmap_window_displays_matrix(qapp):
 
 def test_matrix_heatmap_window_has_navigation_toolbar_for_zoom(qapp):
     matrix = np.arange(100, dtype=np.int64).reshape(10, 10)
-    window = MatrixHeatmapWindow(matrix, "test.mtx", "light")
+    window = MatrixHeatmapWindow(matrix, "test.mtx", "light", _fake_panel())
 
     # NavigationToolbar2QT's stock "Zoom" tool is what provides
     # rectangle-select zoom in/out -- confirm it's present (this app's
@@ -28,7 +38,7 @@ def test_matrix_heatmap_window_has_navigation_toolbar_for_zoom(qapp):
 
 def test_matrix_heatmap_handles_negative_values_without_crashing(qapp):
     matrix = np.array([[-5, 10], [20, -1]], dtype=np.int64)
-    window = MatrixHeatmapWindow(matrix, "test.mtx", "light")
+    window = MatrixHeatmapWindow(matrix, "test.mtx", "light", _fake_panel())
     assert window.image is not None
 
 
@@ -41,7 +51,7 @@ def test_matrix_heatmap_window_applies_theme_to_plot_and_colorbar(qapp):
     # own history has already hit twice (matrix_panel.py's focus-policy
     # and eventFilter bugs, caught in Task 4's review).
     matrix = np.arange(100, dtype=np.int64).reshape(10, 10)
-    window = MatrixHeatmapWindow(matrix, "test.mtx", "dark")
+    window = MatrixHeatmapWindow(matrix, "test.mtx", "dark", _fake_panel())
 
     # style_axes(self.axes, theme) sets the *figure's* facecolor, shared
     # by every Axes drawn in it (including the colorbar's own).
@@ -55,6 +65,23 @@ def test_matrix_heatmap_window_applies_theme_to_plot_and_colorbar(qapp):
     # which would be illegible against the now-dark figure background).
     tick_colors = {t.get_color() for t in window.colorbar.ax.get_yticklabels()}
     assert tick_colors == {DARK_TEXT}
+
+
+def test_matrix_heatmap_window_removes_itself_from_panel_on_close(qapp):
+    # Regression guard: closing a heatmap window directly (its own
+    # titlebar X, not via the owning panel) must prune it from
+    # panel._heatmap_windows -- that list's Python-side reference is what
+    # keeps this parentless top-level window alive, so without pruning, a
+    # closed-but-still-referenced window would be retained for the rest of
+    # the panel's lifetime, growing unboundedly across repeat open/close.
+    matrix = np.arange(100, dtype=np.int64).reshape(10, 10)
+    panel = _fake_panel()
+    window = MatrixHeatmapWindow(matrix, "test.mtx", "light", panel)
+    panel._heatmap_windows.append(window)
+
+    window.close()
+
+    assert window not in panel._heatmap_windows
 
 
 def test_downsample_for_display_block_sums_correctly():

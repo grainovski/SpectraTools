@@ -37,8 +37,9 @@ class MatrixHeatmapWindow(QMainWindow):
     absent from its entire source tree during design); this is a
     genuine enhancement, not a port."""
 
-    def __init__(self, matrix, path, theme):
+    def __init__(self, matrix, path, theme, panel):
         super().__init__()
+        self.panel = panel
         self.setWindowTitle(f"Heatmap -- {os.path.basename(path)}")
         self.resize(700, 700)
 
@@ -90,3 +91,14 @@ class MatrixHeatmapWindow(QMainWindow):
         self.axes.set_xlabel("X channel")
         self.axes.set_ylabel("Y channel")
         self.canvas.draw()
+
+    def closeEvent(self, event):
+        # Parentless top-level window (see matrix_panel.py's own closeEvent
+        # comment) -- panel._heatmap_windows holding a reference is what
+        # keeps this window alive. Without self-removal here, closing a
+        # heatmap window directly (its own titlebar, not via the panel)
+        # would leave a dead reference retained for the panel's entire
+        # remaining lifetime, growing unboundedly across repeat open/close.
+        super().closeEvent(event)
+        if self in self.panel._heatmap_windows:
+            self.panel._heatmap_windows.remove(self)

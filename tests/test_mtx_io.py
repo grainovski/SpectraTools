@@ -179,6 +179,27 @@ def test_load_mtx_zero_levels_raises(tmp_path):
         load_mtx(str(path))
 
 
+def test_load_mtx_oversized_columns_raises_parse_error_not_memory_error(tmp_path):
+    # Regression guard: lines/columns come straight from the file header
+    # with no bound check before sizing np.zeros((lines, columns)). A
+    # corrupted columns field (e.g. 0xFFFFFFFF) would otherwise attempt a
+    # multi-GB allocation and raise MemoryError -- not a subclass of
+    # OSError, so it would propagate uncaught past load_mtx's own `except
+    # OSError`, past main_window._open_matrix_dialog's `except ParseError`,
+    # and crash the app instead of showing "Could not open matrix."
+    path = tmp_path / "hugecols.mtx"
+    path.write_bytes(struct.pack("<11I", MAGIC_LC, 2, 1, 1, 0xFFFFFFFF, 44, 0, 0, 0, 0, 0))
+    with pytest.raises(ParseError):
+        load_mtx(str(path))
+
+
+def test_load_mtx_oversized_lines_raises_parse_error(tmp_path):
+    path = tmp_path / "hugelines.mtx"
+    path.write_bytes(struct.pack("<11I", MAGIC_LC, 2, 1, 0xFFFFFFFF, 1, 44, 0, 0, 0, 0, 0))
+    with pytest.raises(ParseError):
+        load_mtx(str(path))
+
+
 def test_load_mtx_truncated_row_table_raises(tmp_path):
     # Header claims 5 lines (needs a 40-byte table) but the file ends
     # right after the header.

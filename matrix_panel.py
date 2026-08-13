@@ -236,12 +236,30 @@ class MatrixPanel(QMainWindow):
     def _open_heatmap(self):
         from matrix_heatmap import MatrixHeatmapWindow
 
-        window = MatrixHeatmapWindow(self.matrix, self.path, self.main_window._theme)
+        window = MatrixHeatmapWindow(self.matrix, self.path, self.main_window._theme, self)
         self._heatmap_windows.append(window)
         window.show()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Same rationale as MainWindow.showEvent: hold-C/hold-B marking
+        # depends on the canvas holding keyboard focus, and the top bar's
+        # combo box/buttons are focusable widgets that can claim initial
+        # focus on some window managers before the user has ever hovered
+        # the canvas (figure_enter_event alone wouldn't cover that case).
+        self.canvas.setFocus()
+
     def _on_activated(self):
         self.main_window.setEnabled(False)
+        # Generalizes MainWindow._on_activated's own loop to the
+        # multi-panel case: with two or more matrix panels open,
+        # activating this one must disable every OTHER panel too, not
+        # just MainWindow -- otherwise two panels could end up enabled
+        # simultaneously, breaking the "activating one disables the
+        # other" guarantee for anything beyond exactly one panel.
+        for panel in self.main_window._matrix_panels:
+            if panel is not self:
+                panel.setEnabled(False)
         self.setEnabled(True)
 
     def changeEvent(self, event):
@@ -258,4 +276,14 @@ class MatrixPanel(QMainWindow):
         super().closeEvent(event)
         if self in self.main_window._matrix_panels:
             self.main_window._matrix_panels.remove(self)
-        self.main_window.setEnabled(True)
+        # Only fall back to re-enabling MainWindow if nothing else in the
+        # exclusivity group is currently enabled. With a single panel this
+        # is always true (MainWindow was the one disabled), but with two
+        # or more panels open, closing a PANEL THAT WASN'T THE ACTIVE ONE
+        # must not steal focus-exclusivity away from whichever window
+        # (MainWindow or another panel) is actually still active.
+        others_enabled = self.main_window.isEnabled() or any(
+            panel.isEnabled() for panel in self.main_window._matrix_panels
+        )
+        if not others_enabled:
+            self.main_window.setEnabled(True)

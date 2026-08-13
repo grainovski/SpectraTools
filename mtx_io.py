@@ -7,6 +7,7 @@ from histogram_io import ParseError
 MAGIC_LC = 0x80FFFF10
 _HEADER_FORMAT = "<11I"
 _HEADER_SIZE = 44
+_DIM_MAX = 1 << 16  # matches spk_io.py's own MAT_COLMAX bound
 
 
 def _zigzag_decode(n):
@@ -107,6 +108,11 @@ def load_mtx(path):
                 )
             if levels < 1:
                 raise ParseError(f"lc matrix file declares zero levels: {path}")
+            if not (1 <= lines <= _DIM_MAX) or not (1 <= columns <= _DIM_MAX):
+                raise ParseError(
+                    f"Invalid matrix dimensions {lines}x{columns} "
+                    f"(must be 1-{_DIM_MAX} each): {path}"
+                )
 
             # Row-table entries are {u_int pos, u_int len}, one per
             # (level, line), ordered level-major then row -- level 0's
