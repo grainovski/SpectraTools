@@ -1129,6 +1129,27 @@ class FitModeController(QObject):
         self._redraw_progress()
         self.main_window._update_fit_mode_availability()
 
+    def _commit_result(self, active, result):
+        # Re-fitting/re-integrating the exact same marks (e.g. after
+        # toggling a checkbox) is a supported workflow, not a mistake --
+        # but drawing every attempt at the identical region on top of
+        # the others is just visual clutter. Only the latest attempt at
+        # a given region is drawn; every attempt stays listed in Fit
+        # Results.
+        for earlier in active.fits:
+            if (
+                earlier.left_bg_region == result.left_bg_region
+                and earlier.right_bg_region == result.right_bg_region
+                and earlier.fit_region == result.fit_region
+            ):
+                earlier.visible = False
+        active.fits.append(result)
+        calibration = self.main_window._calibration if self.main_window._calibration_active else None
+        try:
+            fit_export.append_auto_log(active.path, result, calibration)
+        except OSError as exc:
+            self._show_status_message(f"Could not write fit log: {exc}", 5000)
+
     def run_fit(self):
         if not self.state.ready_to_fit():
             self._show_status_message(self.state.fit_blocked_reason(), 5000)
@@ -1169,25 +1190,7 @@ class FitModeController(QObject):
             self._show_status_message(f"Fit failed: {exc}", 5000)
             return
         result.timestamp = datetime.now().isoformat(timespec="seconds")
-        # Re-fitting the exact same marks (e.g. after toggling a
-        # checkbox) is a supported workflow, not a mistake -- but
-        # drawing every attempt at the identical region on top of the
-        # others is just visual clutter. Only the latest attempt at a
-        # given region is drawn; every attempt stays listed in Fit
-        # Results.
-        for earlier in active.fits:
-            if (
-                earlier.left_bg_region == result.left_bg_region
-                and earlier.right_bg_region == result.right_bg_region
-                and earlier.fit_region == result.fit_region
-            ):
-                earlier.visible = False
-        active.fits.append(result)
-        calibration = self.main_window._calibration if self.main_window._calibration_active else None
-        try:
-            fit_export.append_auto_log(active.path, result, calibration)
-        except OSError as exc:
-            self._show_status_message(f"Could not write fit log: {exc}", 5000)
+        self._commit_result(active, result)
         names = parameter_names(len(result.peaks), result.link_widths, result.tail_fraction is not None)
         self.update_parameters_panel(names, fit_result_values_by_name(result))
         self.main_window._plot_data(preserve_view=True)
@@ -1208,19 +1211,7 @@ class FitModeController(QObject):
             self._show_status_message(f"Integration failed: {exc}", 5000)
             return
         result.timestamp = datetime.now().isoformat(timespec="seconds")
-        for earlier in active.fits:
-            if (
-                earlier.left_bg_region == result.left_bg_region
-                and earlier.right_bg_region == result.right_bg_region
-                and earlier.fit_region == result.fit_region
-            ):
-                earlier.visible = False
-        active.fits.append(result)
-        calibration = self.main_window._calibration if self.main_window._calibration_active else None
-        try:
-            fit_export.append_auto_log(active.path, result, calibration)
-        except OSError as exc:
-            self._show_status_message(f"Could not write fit log: {exc}", 5000)
+        self._commit_result(active, result)
         self.main_window._plot_data(preserve_view=True)
 
     def toggle_background_preview(self):
