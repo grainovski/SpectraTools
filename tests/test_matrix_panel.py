@@ -627,3 +627,17 @@ def test_matrix_panel_integrate_action_reachable(qapp):
     assert panel.fit_button.shortcut().toString() == "Ctrl+F"
     assert panel.clear_fit_button.shortcut().toString() == "Ctrl+C"
     assert panel.background_preview_button.shortcut().toString() == "Ctrl+B"
+
+
+def test_matrix_panel_switching_axis_clears_fit_state(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    panel.fit_controller._held_key = "r"
+    _click(panel, 100.0)
+    _click(panel, 300.0)
+    panel.fit_controller._held_key = None
+    assert panel.fit_controller.state.fit_region is not None
+
+    panel.axis_selector.setCurrentIndex(1)
+
+    assert panel.fit_controller.state.fit_region is None

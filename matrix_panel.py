@@ -463,6 +463,7 @@ class MatrixPanel(QMainWindow):
         self.working_axis = self.axis_selector.itemData(index)
         self._rebuild_spectra()
         self.cut_controller.clear()
+        self.fit_controller.reset_marks()
         self._plot_data()
 
     def _plot_data(self, preserve_view=False, xlim_override=None):
