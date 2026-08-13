@@ -651,12 +651,15 @@ def test_matrix_panel_and_main_window_integrate_identically(qapp, monkeypatch):
     -- proving the duck-typed FitModeController reuse produces
     identical results, not just that it runs without crashing."""
     # run_integration() unavoidably calls the real append_auto_log as a
-    # side effect -- both spectra's "paths" here are bare labels, not
-    # real file locations, so left unpatched this writes stray
-    # *_fits.jsonl files into the repo root on every test run. Same
-    # technique test_fit_mode_ui.py already uses to keep this class of
-    # side effect out of the repo; this test only reads the in-memory
-    # FitResult objects, never the log file, so a no-op is safe.
+    # side effect -- the main_window side's "synthetic.spe" spectrum is a
+    # bare label with no real directory, so left unpatched this writes a
+    # stray *_fits.jsonl into the repo root on every test run (the panel
+    # side now resolves to a real path next to the committed gg.mtx
+    # fixture, but that's tests/fixtures/, not exactly a welcome
+    # surprise there either). Same technique test_fit_mode_ui.py already
+    # uses to keep this class of side effect out of the repo; this test
+    # only reads the in-memory FitResult objects, never the log file, so
+    # a no-op is safe.
     monkeypatch.setattr(fit_mode.fit_export, "append_auto_log", lambda *a, **k: None)
 
     main_window = MainWindow()
@@ -693,3 +696,33 @@ def test_matrix_panel_and_main_window_integrate_identically(qapp, monkeypatch):
     assert panel_result.gross_area == pytest.approx(mw_result.gross_area)
     assert panel_result.background_area == pytest.approx(mw_result.background_area)
     assert panel_result.net_area == pytest.approx(mw_result.net_area)
+
+
+def test_matrix_panel_projection_integration_auto_logs_next_to_source_matrix_file(qapp, tmp_path, monkeypatch):
+    """Regression guard: integrating directly on a matrix panel's
+    projection (not via "Activate Cut") must auto-log next to the real
+    .mtx file with an unambiguous name. MatrixPanel._rebuild_spectra
+    used to wrap the projection with a bare display-label .path (e.g.
+    "gg.mtx x projection"), which fit_export.auto_log_path's
+    os.path.splitext misparsed as stem "gg" with extension
+    ".mtx x projection" -- losing the axis entirely, and since the
+    label has no real directory, silently wrote gg_fits.jsonl into the
+    process's cwd instead of beside the source matrix file."""
+    small_matrix = np.zeros((50, 50))
+    small_matrix[10:40, 10:40] = 100.0
+    monkeypatch.setattr(matrix_panel, "load_mtx", lambda path: small_matrix)
+
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, str(tmp_path / "gg.mtx"))
+
+    panel.fit_controller._held_key = "r"
+    _click(panel, 5.0)
+    _click(panel, 45.0)
+    panel.fit_controller._held_key = None
+    panel.fit_controller.run_integration()
+
+    assert len(panel.spectra[0].fits) == 1
+    log_path = fit_mode.fit_export.auto_log_path(panel.spectra[0].path)
+    assert os.path.dirname(log_path) == str(tmp_path)
+    assert os.path.basename(log_path) == "gg_x_projection_fits.jsonl"
+    assert os.path.exists(log_path)

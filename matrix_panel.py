@@ -324,8 +324,15 @@ class MatrixPanel(QMainWindow):
         harmless as long as it only ever reached matplotlib's own
         axes.plot(color=...), which accepts named colors fine."""
         data = self.projections[self.working_axis]
-        label = f"{os.path.basename(self.path)} {self.working_axis} projection"
-        spectrum = LoadedSpectrum(label, data, color=LIGHT_COLOR_CYCLE[0])
+        # .path must stay path-shaped, not a free-form label: fit_export.auto_log_path
+        # and fit_mode.py's "Export Fit Report" default filename both derive a stem via
+        # os.path.splitext(os.path.basename(...)) -- a label like "gg.mtx x projection"
+        # gets misparsed as stem "gg" with extension ".mtx x projection", losing the
+        # axis entirely, and its empty os.path.dirname sends auto-log writes to the
+        # process's cwd instead of next to this real matrix file.
+        root, ext = os.path.splitext(self.path)
+        path = f"{root}_{self.working_axis}_projection{ext}"
+        spectrum = LoadedSpectrum(path, data, color=LIGHT_COLOR_CYCLE[0])
         spectrum.active = True
         self.spectra = [spectrum]
 
