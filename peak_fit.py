@@ -634,8 +634,11 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
             n_M3 = mom3_raw / abs(net_sum)
 
         term = dlt * (dlt2 - 3.0 * n_M2) - n_M3
-        # CONFIRMED TV QUIRK: net's M2 again, but bg's OWN M3 here.
-        termb = dltb * (dltb2 - 3.0 * n_M2) - bg_M3
+        # vsFitInt.c:303 uses the background's OWN M2 here (unlike the
+        # DM2 term above at vsFitInt.c:281, which genuinely does cross-use
+        # net's M2 -- the two lines are NOT the same quirk, despite an
+        # earlier design-spec draft citing them together).
+        termb = dltb * (dltb2 - 3.0 * bg_M2) - bg_M3
         dMom3 = float(np.sum((term ** 2) * (ds + db)))
         dBgMom3 = float(np.sum((termb ** 2) * db))
         if bg_sum != 0.0:

@@ -1196,6 +1196,81 @@ def test_integrate_region_background_moment_uncertainty_reuses_net_second_moment
     assert result.background_fwhm_err == pytest.approx(0.3305131157646951)
 
 
+def _hand_compute_background_skewness_err(x, y, left_bg_region, right_bg_region, fit_region):
+    """Independent re-derivation of integrate_region()'s background
+    3rd-moment uncertainty (background_skewness_err), NOT a call into
+    integrate_region() itself. Mirrors that function's own mask
+    construction, bg_density/bg_M1/dltb/dltb2 machinery exactly, but
+    deliberately uses the background's OWN 2nd moment (bg_M2) in the
+    `termb` line -- matching tv-1.9.13/lib/tv/vsFitInt.c:303 (`dltb =
+    dltb * (dltb2 - 3.0 * bgMom2) - bgMom3;`), unlike the net-reusing
+    `n_M2` the pre-fix production code used there. If this helper's
+    result matches integrate_region()'s, the production code must
+    really be using bg_M2 (not n_M2) in that term."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    lo, hi = fit_region
+    mask = (x >= lo) & (x <= hi)
+    idx = x[mask]
+    s = y[mask]
+    n = idx.size
+
+    gross_sum = float(np.sum(s))
+
+    bg_chn = 0
+    bg_count = 0.0
+    bg_dcount = 0.0
+    for region in (left_bg_region, right_bg_region):
+        blo, bhi = region
+        bmask = (x >= blo) & (x <= bhi)
+        bg_chn += int(np.sum(bmask))
+        bg_y = y[bmask]
+        bg_count += float(np.sum(bg_y))
+        bg_dcount += float(np.sum(bg_y))
+
+    bg_density = bg_count / bg_chn
+    bg_density_var = bg_dcount / (bg_chn * bg_chn)
+    background_area = bg_density * n
+
+    b = bg_density
+    db = bg_density_var
+    bg_sum = background_area
+
+    bgmom1_raw = float(np.sum(idx * b))
+    bg_M1 = bgmom1_raw / abs(bg_sum)
+
+    dltb = idx - bg_M1
+    dltb2 = dltb ** 2
+    bgmom2_raw = float(np.sum(dltb2 * b))
+    bg_M2 = bgmom2_raw / abs(bg_sum)  # background's OWN 2nd moment
+    bgmom3_raw = float(np.sum((dltb2 * dltb) * b))
+    bg_M3 = bgmom3_raw / abs(bg_sum)
+
+    termb = dltb * (dltb2 - 3.0 * bg_M2) - bg_M3  # bg_M2, not n_M2 -- the fix
+    dBgMom3 = float(np.sum((termb ** 2) * db))
+    bg_DM3 = math.sqrt(dBgMom3) / abs(bg_sum)
+    return bg_DM3  # == background_skewness_err (DM3 passes through _to_reported unchanged)
+
+
+def test_background_skewness_err_uses_backgrounds_own_m2_not_nets():
+    # Constructed so bg_M2 and n_M2 are numerically different -- an
+    # asymmetric background window vs. a peak-dominated net region --
+    # so the bug (using n_M2 in termb) produces a different, wrong
+    # background_skewness_err than the fix (using bg_M2). Verified
+    # numerically before writing this test: bg_M2=850.0 vs n_M2=33.25
+    # for this exact fixture (a 96% relative difference), producing a
+    # ~29% difference in the final background_skewness_err between the
+    # buggy and fixed formula -- comfortably far from a coincidental
+    # match.
+    x = np.arange(300, dtype=float)
+    y = np.full(300, 3.0)
+    y[140:160] += 100.0  # a sharp peak, skews the NET moments a lot
+    result = integrate_region(x, y, (10, 15), (280, 295), (100, 200))
+    expected = _hand_compute_background_skewness_err(x, y, (10, 15), (280, 295), (100, 200))
+    assert result.background_skewness_err == pytest.approx(expected, rel=1e-9)
+
+
 def test_integrate_region_net_second_moment_uses_abs_net_area():
     """Regression test for a real port bug (found and fixed 2026-07-17):
     TV's own source (vsFitInt.c:264) normalizes the net layer's second
