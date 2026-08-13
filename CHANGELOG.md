@@ -4,6 +4,19 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [2.2.2] - 2026-08-13
+
+### Fixed
+
+- **The built-in Save/Home/Pan toolbar icons could get stuck on the wrong
+  color after switching theme**, most reliably visible on Windows.
+  matplotlib only colors those particular icons once, when the toolbar
+  is first built, so toggling dark theme afterward updated everything
+  else but silently left those three icons showing whichever color
+  matched the theme active at startup. They're now explicitly
+  re-rendered on every theme change, matching this app's own
+  zoom/calibration toolbar icons, which already did this correctly.
+
 ## [2.2.1] - 2026-08-12
 
 ### Added
