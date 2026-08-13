@@ -950,6 +950,72 @@ def test_marquardt_fit_clamps_tail_fraction_and_beta_to_bounds():
     assert popt[4] >= TAIL_BETA_MIN
 
 
+def test_marquardt_does_not_recompute_jacobian_for_rejected_trials():
+    """Task 7 (Important 2) regression guard for the audit's measured
+    12.4x evaluation blowup on multi-peak fits: the full numeric
+    central-difference Jacobian costs 2*n_params model evaluations, but
+    a rejected trial only ever needs the scalar measure for its
+    accept/reject test -- a rejected trial's Jacobian is thrown away
+    immediately and never feeds the next iteration, so computing it is
+    pure waste. An 8-peak, independent-width (24 free parameter)
+    overlapping multiplet with a modestly-off initial guess forces many
+    lambda-growth (rejected-trial) rounds -- this exact fixture produces
+    68 trials (16 accepted, 50 rejected, 1 give-up half-step) before the
+    fix, i.e. 68 * (2*24 + 1) = 3332 model calls. The ceiling below is a
+    generous 60% of that measured pre-fix count -- comfortably clears if
+    rejected trials stop paying for a Jacobian, comfortably fails if they
+    don't."""
+    n_peaks = 8
+
+    def raw_model(x, p):
+        total = np.zeros_like(x)
+        for i in range(n_peaks):
+            amp, pos, sigma = p[3 * i], p[3 * i + 1], p[3 * i + 2]
+            total = total + amp * np.exp(-((x - pos) ** 2) / (2 * sigma ** 2))
+        return total
+
+    call_count = {"n": 0}
+
+    def counting_model(xx, p):
+        call_count["n"] += 1
+        return raw_model(xx, p)
+
+    x = np.linspace(0.0, 100.0, 400)
+    true_sigma = 3.0
+    spacing = 2.9 * true_sigma  # overlapping, not fully resolved peaks
+    true_positions = [50.0 + (i - (n_peaks - 1) / 2.0) * spacing for i in range(n_peaks)]
+    true_p = []
+    for pos in true_positions:
+        true_p += [500.0, pos, true_sigma]
+    y = raw_model(x, true_p)
+    y_err = np.sqrt(np.maximum(y, 1.0))
+
+    # A modestly (not wildly) bad initial guess -- close enough to
+    # converge in 17 outer iterations, well under _CUR_MAX_ITERATIONS,
+    # but off enough that many individual steps need lambda-growth
+    # rounds first. Found by direct sweep against this exact fixture,
+    # not guessed.
+    p0 = []
+    for pos in true_positions:
+        p0 += [450.0, pos + 1.3, true_sigma * 1.2]
+
+    damping = []
+    for i in range(n_peaks):
+        sigma_index = 3 * i + 2
+        damping += [
+            _ParamDamping("amp"),
+            _ParamDamping("pos", sigma_index=sigma_index),
+            _ParamDamping("sigma"),
+        ]
+
+    popt, pcov = _marquardt_fit(
+        counting_model, x, y, y_err, p0, damping, fit_region_bounds=(0.0, 100.0)
+    )
+
+    assert np.all(np.isfinite(popt))  # sanity: this really is a working fit, not a crash
+    assert call_count["n"] < 3332 * 0.6
+
+
 from peak_fit import _measure_width
 
 

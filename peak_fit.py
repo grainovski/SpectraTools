@@ -862,12 +862,23 @@ def _marquardt_fit(model, x, y, y_err, p0, damping, fit_region_bounds=None):
     n = len(p)
     weights = 1.0 / y_err
 
-    def measure_and_jac(pt):
-        J = _numeric_jacobian(model, x, pt)
+    # A trial's accept/reject test (below) only needs the scalar measure,
+    # not the Jacobian -- and most trials in a damped Marquardt loop get
+    # rejected (that's what the lambda-growth retries are for). Splitting
+    # the two means a rejected trial costs one model evaluation instead of
+    # 2*n+1 (the numeric Jacobian's central differences), while an
+    # accepted step still gets its full Jacobian, computed once.
+    def measure_only(pt):
         r = (y - model(x, pt)) * weights
-        Jw = J * weights[:, None]
         measure = float(np.sum(r ** 2))
-        return measure, r, Jw
+        return measure, r
+
+    def jac_only(pt):
+        return _numeric_jacobian(model, x, pt) * weights[:, None]
+
+    def measure_and_jac(pt):
+        measure, r = measure_only(pt)
+        return measure, r, jac_only(pt)
 
     measure, r, J = measure_and_jac(p)
     lam = _CUR_LAMBDA_START
@@ -892,20 +903,20 @@ def _marquardt_fit(model, x, y, y_err, p0, damping, fit_region_bounds=None):
 
             delta = _apply_step_damping(p, raw_delta, damping, fit_region_bounds)
             p_try = _clamp_trial(p + delta, damping)
-            try_measure, try_r, try_J = measure_and_jac(p_try)
+            try_measure, try_r = measure_only(p_try)
 
             if try_measure < measure:
                 improvement = measure - try_measure
-                p, measure, r, J = p_try, try_measure, try_r, try_J
+                p, measure, r, J = p_try, try_measure, try_r, jac_only(p_try)
                 lam = max(0.001 * improvement, _CUR_MIN_LAMBDA)
                 accepted = True
             else:
                 lam *= _CUR_INC_LAMBDA
                 if lam > _CUR_MAX_LAMBDA:
                     p_try2 = _clamp_trial(p - 0.5 * delta, damping)
-                    try_measure2, try_r2, try_J2 = measure_and_jac(p_try2)
+                    try_measure2, try_r2 = measure_only(p_try2)
                     if try_measure2 < measure:
-                        p, measure, r, J = p_try2, try_measure2, try_r2, try_J2
+                        p, measure, r, J = p_try2, try_measure2, try_r2, jac_only(p_try2)
                     accepted = True
                     give_up = True
 
