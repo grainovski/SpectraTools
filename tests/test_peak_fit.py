@@ -1176,12 +1176,16 @@ def test_integrate_region_background_uncertainty_scales_linearly_with_region_wid
 
 def test_integrate_region_background_moment_uncertainty_reuses_net_second_moment():
     """Deliberately verifies another TV quirk: the background layer's own
-    width/skewness uncertainty terms reuse the *net* distribution's 2nd
-    moment rather than the background's own -- confirmed against TV's
-    source (vsFitInt.c:281,303) and cross-checked numerically against an
-    independently-coded "corrected" alternative during design (the two
-    differ by more than 30% for this fixture; this test pins the exact
-    TV-parity value so a future "fix" would fail loudly)."""
+    FWHM uncertainty term (background_fwhm_err) reuses the *net*
+    distribution's 2nd moment rather than the background's own --
+    confirmed against TV's source (vsFitInt.c:281) and cross-checked
+    numerically against an independently-coded "corrected" alternative
+    during design (the two differ by more than 30% for this fixture;
+    this test pins the exact TV-parity value so a future "fix" would
+    fail loudly). NOT the same quirk as background_skewness_err, a
+    DIFFERENT term (vsFitInt.c:303) that turned out to use the
+    background's own 2nd moment after all -- see
+    test_background_skewness_err_uses_backgrounds_own_m2_not_nets."""
     x = np.arange(60, dtype=float)
     y = np.full(60, 30.0)
     y[5] = 40.0
@@ -1215,8 +1219,6 @@ def _hand_compute_background_skewness_err(x, y, left_bg_region, right_bg_region,
     idx = x[mask]
     s = y[mask]
     n = idx.size
-
-    gross_sum = float(np.sum(s))
 
     bg_chn = 0
     bg_count = 0.0

@@ -494,8 +494,9 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
     conversion from ParseIntPeak (tv-1.9.13/lib/tv/vsFitFmt.c:340-392).
     Several arithmetic choices below look unusual (asymmetric plain-sum
     vs abs(sum) normalization between layers/moments; the background's
-    own higher-moment uncertainty terms reusing the *net* distribution's
-    2nd moment rather than its own; the background-sum uncertainty
+    own FWHM uncertainty term specifically -- not its skewness term --
+    reusing the *net* distribution's 2nd moment rather than its own;
+    the background-sum uncertainty
     scaling linearly rather than quadratically with region width) --
     these are deliberate, source-verified TV-parity choices, not bugs,
     per the design spec. Independently validated (hand-computed moments,
