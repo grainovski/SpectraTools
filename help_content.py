@@ -148,7 +148,9 @@ program supports.</p>
 <tr><th>Shortcut</th><th>Action</th></tr>
 <tr><td><kbd>C</kbd></td><td>Hold and click twice to mark the cut (signal) region</td></tr>
 <tr><td><kbd>G</kbd></td><td>Hold and click twice per region to mark a background region for the cut -- any number of regions allowed</td></tr>
-<tr><td><kbd>B</kbd> / <kbd>R</kbd> / <kbd>P</kbd></td><td>Mark the background regions / fit region / peaks for fitting the working projection -- same marking as the Fitting shortcuts above</td></tr>
+<tr><td><kbd>B</kbd></td><td>Hold and click twice per region (two regions needed, four clicks total) to mark the two background regions for fitting the working projection</td></tr>
+<tr><td><kbd>R</kbd></td><td>Hold and click twice (once on each end) to mark the fit region for the working projection</td></tr>
+<tr><td><kbd>P</kbd></td><td>Hold and click once per peak to mark a peak position on the working projection</td></tr>
 <tr><td><kbd>Ctrl+F</kbd></td><td>Fit</td></tr>
 <tr><td><kbd>Ctrl+I</kbd></td><td>Integrate</td></tr>
 <tr><td><kbd>Ctrl+B</kbd></td><td>Preview the background fit from the two background regions alone (no fit region or peaks needed); press again to hide</td></tr>
@@ -157,7 +159,7 @@ program supports.</p>
 <tr><td><kbd>Ctrl+E</kbd></td><td>Export the working projection's fits</td></tr>
 <tr><td><kbd>Ctrl+2</kbd></td><td>Toggle the Fit Results panel</td></tr>
 <tr><td><kbd>Ctrl+3</kbd></td><td>Toggle the Fit Parameters panel</td></tr>
-<tr><td><kbd>Ctrl+L</kbd></td><td>Calibrate... (shared with the main window -- see "11. Matrix analysis" below)</td></tr>
+<tr><td><kbd>Ctrl+L</kbd></td><td>Calibrate... (same calibration as the main window's Operations &gt; Calibration... -- see "11. Matrix analysis" below)</td></tr>
 <tr><td><kbd>Ctrl+=</kbd></td><td>Zoom in (X axis)</td></tr>
 <tr><td><kbd>Ctrl+-</kbd></td><td>Zoom out (X axis)</td></tr>
 <tr><td><kbd>Ctrl+0</kbd></td><td>Show full projection</td></tr>
@@ -332,7 +334,7 @@ pointed at the projection instead of a loaded spectrum. A Fit Results
 and Fit Parameters panel pair -- including the "Independent
 widths"/"Left tail" options and their own
 <kbd>Ctrl+Shift+C</kbd>/<kbd>Ctrl+E</kbd>/<kbd>Ctrl+2</kbd>/<kbd>Ctrl+3</kbd>
-shortcuts -- appear in this window too, working exactly like the main
+shortcuts -- appears in this window too, working exactly like the main
 window's. Cut/background marks (<kbd>C</kbd>/<kbd>G</kbd>) and fit
 marks (<kbd>B</kbd>/<kbd>R</kbd>/<kbd>P</kbd>) don't interfere with
 each other -- both can be in progress at once.</p>

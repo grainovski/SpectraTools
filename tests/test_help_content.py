@@ -455,7 +455,14 @@ def test_howto_html_documents_matrix_analysis():
 
 def test_howto_html_documents_matrix_panel_fit_integrate_calibrate():
     html = build_howto_html()
-    assert "hold <kbd>G</kbd>" in html or "<kbd>G</kbd>" in html
+    # Ctrl+F/Ctrl+I/Ctrl+L/Ctrl+= are also used elsewhere on the page (main
+    # window fit/calibrate/zoom), so a bare substring check on those alone
+    # would pass even if the matrix panel's own section were never written.
+    # <kbd>C</kbd>/<kbd>G</kbd> and the "Matrix panel" table heading are
+    # unique to the new content, so they're what actually prove it exists.
+    assert "<h3>Matrix panel</h3>" in html
+    assert "<kbd>C</kbd>" in html
+    assert "<kbd>G</kbd>" in html
     assert "<kbd>Ctrl+F</kbd>" in html
     assert "<kbd>Ctrl+I</kbd>" in html
     assert "<kbd>Ctrl+L</kbd>" in html
