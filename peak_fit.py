@@ -866,8 +866,9 @@ def _marquardt_fit(model, x, y, y_err, p0, damping, fit_region_bounds=None):
     # not the Jacobian -- and most trials in a damped Marquardt loop get
     # rejected (that's what the lambda-growth retries are for). Splitting
     # the two means a rejected trial costs one model evaluation instead of
-    # 2*n+1 (the numeric Jacobian's central differences), while an
-    # accepted step still gets its full Jacobian, computed once.
+    # 2*n+1 (2*n for the numeric Jacobian's central differences, +1 for
+    # the measure's own evaluation), while an accepted step still gets
+    # its full Jacobian, computed once.
     def measure_only(pt):
         r = (y - model(x, pt)) * weights
         measure = float(np.sum(r ** 2))

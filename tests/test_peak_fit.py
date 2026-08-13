@@ -960,9 +960,10 @@ def test_marquardt_does_not_recompute_jacobian_for_rejected_trials():
     pure waste. An 8-peak, independent-width (24 free parameter)
     overlapping multiplet with a modestly-off initial guess forces many
     lambda-growth (rejected-trial) rounds -- this exact fixture produces
-    68 trials (16 accepted, 50 rejected, 1 give-up half-step) before the
-    fix, i.e. 68 * (2*24 + 1) = 3332 model calls. The ceiling below is a
-    generous 60% of that measured pre-fix count -- comfortably clears if
+    68 evaluation-events (1 initial + 16 accepted + 50 rejected + 1
+    give-up half-step) before the fix, i.e. 68 * (2*24 + 1) = 3332 model
+    calls. The ceiling below is a generous 60% of that measured pre-fix
+    count -- comfortably clears if
     rejected trials stop paying for a Jacobian, comfortably fails if they
     don't."""
     n_peaks = 8
