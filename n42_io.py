@@ -7,7 +7,7 @@ from histogram_io import ParseError
 
 _NS = "{http://physics.nist.gov/N42/2011/N42}"
 
-_MAX_RUN_LENGTH = 1 << 20  # generous bound for a single CountedZeroes run; anything beyond this is corrupt, not a real spectrum
+_MAX_RUN_LENGTH = 1 << 16  # a CountedZeroes run can never legitimately exceed a spectrum's own channel count, which this app bounds to the same 65536 everywhere else (spk_io.MAT_COLMAX, mtx_io._DIM_MAX)
 
 
 def _decode_counted_zeroes(tokens, path):
