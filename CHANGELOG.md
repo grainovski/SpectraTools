@@ -4,6 +4,46 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [3.0.0] - 2026-08-13
+
+### Added
+
+- **Matrix analysis**: `File > Open Matrix...` (`Ctrl+Shift+O`) opens a 2D
+  gamma-gamma coincidence matrix (`.mtx`) in its own window. Both the X and Y
+  projections are computed up front; pick which one to work on from the
+  dropdown, displayed as a histogram like any ordinary spectrum. Hold `C` to
+  mark a cut (signal) region and `G` to mark one or more background regions,
+  then **Activate Cut** to compute a background-subtracted spectrum
+  (region-width-weighted, same convention as Integration) and add it to the
+  main window like any other loaded spectrum. **Show Heatmap...** opens a
+  separate, view-only 2D intensity map for visual reference. The Knowledge
+  Database gained a new section explaining 2D matrices, projections, and
+  cuts/gates for anyone unfamiliar with the technique.
+- **Full fit/integrate/calibrate/zoom parity for the matrix panel**: the
+  projection view now supports everything the main window's ordinary-spectrum
+  view does. Mark background/fit region/peaks (`B`/`R`/`P`) and fit
+  (`Ctrl+F`), integrate (`Ctrl+I`), or preview the background alone
+  (`Ctrl+B`) directly on the projection, with its own Fit Results and Fit
+  Parameters docks. Calibration (`Ctrl+L`) is shared with the main window --
+  calibrating from either window updates every open window's display.
+  `Ctrl+=`/`Ctrl+-`/`Ctrl+0` and the scroll wheel zoom the projection's X
+  axis. Switching between X and Y projection clears in-progress marks and
+  fits, since it's different underlying data.
+
+### Fixed
+
+- **Fits and integrations on a matrix projection, an activated cut, or an
+  Add/Subtract result could auto-log to the wrong location** (and default
+  "Export Fit Report" to the same wrong place). These spectra only ever had
+  a display label as their path (e.g. "gg.mtx x projection", "a.spe +
+  b.spe"), not a real one, so both features silently fell back to the
+  process's working directory instead of somewhere sensible. All three now
+  anchor to a real directory -- the source `.mtx` file's own directory for
+  projections and cuts, the first operand's directory for Add/Subtract --
+  while the spectrum's displayed name in the Loaded Spectra list is
+  unchanged. This bug affected Add/Subtract Spectra since its v2.1.0
+  introduction, not just the matrix features new in this release.
+
 ## [2.2.2] - 2026-08-13
 
 ### Fixed
