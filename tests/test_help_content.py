@@ -138,9 +138,9 @@ def test_knowledge_database_html_contains_parameter_names():
         assert term in html, f"missing term {term!r}"
 
 
-def test_knowledge_database_html_embeds_six_figures():
+def test_knowledge_database_html_embeds_seven_figures():
     html = build_knowledge_database_html()
-    assert html.count("data:image/png;base64,") == 6
+    assert html.count("data:image/png;base64,") == 7
 
 
 def test_knowledge_database_html_has_no_external_links():
@@ -467,3 +467,10 @@ def test_howto_html_documents_matrix_panel_fit_integrate_calibrate():
     assert "<kbd>Ctrl+I</kbd>" in html
     assert "<kbd>Ctrl+L</kbd>" in html
     assert "<kbd>Ctrl+=</kbd>" in html
+
+
+def test_knowledge_database_explains_2d_matrix_concepts():
+    html = build_knowledge_database_html()
+    assert "projection" in html.lower()
+    assert "cut" in html.lower() or "gate" in html.lower()
+    assert "coincidence" in html.lower()

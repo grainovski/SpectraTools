@@ -2,6 +2,7 @@ from help_figures import (
     anatomy_of_a_fit_figure,
     calibration_curve_figure,
     integration_background_figure,
+    matrix_projection_cut_figure,
     multiplet_figure,
     sigma_fwhm_figure,
     tail_effect_figure,
@@ -44,3 +45,9 @@ def test_integration_background_figure_returns_valid_png():
     data = integration_background_figure()
     assert data.startswith(_PNG_SIGNATURE)
     assert len(data) > 20000  # measured ~42KB
+
+
+def test_matrix_projection_cut_figure_returns_valid_png():
+    data = matrix_projection_cut_figure()
+    assert data.startswith(_PNG_SIGNATURE)
+    assert len(data) > 20000  # measured ~46.5KB

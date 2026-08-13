@@ -265,3 +265,50 @@ def calibration_curve_figure():
 
     fig.tight_layout()
     return _figure_to_png_bytes(fig)
+
+
+def matrix_projection_cut_figure():
+    """A small schematic 2D coincidence matrix with a cut (orange) and
+    background (purple) band marked on one axis, alongside the resulting
+    1D projection -- the reference figure the Knowledge Database's 2D
+    spectra section points back to. Same region colors as
+    anatomy_of_a_fit_figure's R/B marks (_REGION_FIT_COLOR /
+    _REGION_BG_COLOR), reused here for the analogous cut/background
+    concept."""
+    rng = np.random.default_rng(1)
+    size = 60
+    matrix = rng.poisson(3.0, size=(size, size)).astype(float)
+    # A diagonal ridge of coincidence counts, the kind of structure a
+    # real gamma-gamma matrix shows for genuinely correlated peaks.
+    for i in range(size):
+        j = min(size - 1, i + 5)
+        matrix[i, :] += 40 * np.exp(-((np.arange(size) - j) ** 2) / 8.0)
+
+    fig = Figure(figsize=(8.0, 4.2), dpi=110)
+    ax_matrix = fig.add_subplot(121)
+    ax_matrix.imshow(matrix, origin="lower", cmap="viridis", aspect="auto")
+    cut_lo, cut_hi = 20, 30
+    bg_lo, bg_hi = 40, 46
+    ax_matrix.axvspan(cut_lo, cut_hi, color=_REGION_FIT_COLOR, alpha=0.35)
+    ax_matrix.axvspan(bg_lo, bg_hi, color=_REGION_BG_COLOR, alpha=0.35)
+    ax_matrix.set_xlabel("X channel")
+    ax_matrix.set_ylabel("Y channel")
+    ax_matrix.set_title("2D matrix")
+
+    projection = matrix.sum(axis=0)
+    ax_proj = fig.add_subplot(122)
+    ax_proj.step(np.arange(size), projection, where="mid", color=_DATA_COLOR, linewidth=1.0)
+    ax_proj.axvspan(cut_lo, cut_hi, color=_REGION_FIT_COLOR, alpha=0.25)
+    ax_proj.axvspan(bg_lo, bg_hi, color=_REGION_BG_COLOR, alpha=0.25)
+    ax_proj.set_xlabel("X channel")
+    ax_proj.set_ylabel("Counts")
+    ax_proj.set_title("X projection")
+
+    fig.text(
+        0.5, 0.01,
+        "orange = cut region (the gate)   purple = background region -- "
+        "summing along Y gives the projection shown on the right",
+        ha="center", va="bottom", fontsize=8,
+    )
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
+    return _figure_to_png_bytes(fig)

@@ -19,6 +19,7 @@ from help_figures import (
     anatomy_of_a_fit_figure,
     calibration_curve_figure,
     integration_background_figure,
+    matrix_projection_cut_figure,
     multiplet_figure,
     sigma_fwhm_figure,
     tail_effect_figure,
@@ -359,7 +360,7 @@ back to an axis you'd already marked or fit before.</p>
 @functools.lru_cache(maxsize=1)
 def build_knowledge_database_html():
     """The fit model, parameter meanings, and calibration math, each
-    cross-referenced to one of help_figures.py's six annotated figures
+    cross-referenced to one of help_figures.py's seven annotated figures
     -- content verified against peak_fit.py/fit_mode.py's actual
     behavior through two rounds of correction after the first draft
     shipped wrong claims about area terminology and multiplet parameter
@@ -370,6 +371,7 @@ def build_knowledge_database_html():
     multiplet_src = _embed_png(multiplet_figure())
     integration_bg_src = _embed_png(integration_background_figure())
     calibration_src = _embed_png(calibration_curve_figure())
+    matrix_src = _embed_png(matrix_projection_cut_figure())
 
     body = f"""
 <h1>SpectraTools -- Knowledge Database</h1>
@@ -561,6 +563,55 @@ automatically -- FWHM (a width, not a position) scales by the
 calibration's local derivative evaluated at the peak's own position,
 since a width has no location on the calibration curve of its own.
 Uncertainties propagate through the same derivative.</p>
+
+<h2>2D matrices, projections, and cuts</h2>
+<figure>
+<img src="{matrix_src}" alt="2D matrix, cut, and projection">
+<figcaption>Figure 7. A schematic 2D coincidence matrix with a diagonal
+ridge of correlated counts, a cut region (orange) and a background
+region (purple) marked on the X axis, and the resulting X
+projection.</figcaption>
+</figure>
+<p>A <b>2D coincidence matrix</b> (<b>File &gt; Open Matrix...</b>, see
+the HowTo page's "11. Matrix analysis") records pairs of gamma rays
+detected close together in time -- typically one in each of two
+detectors watching the same source. Each coincident pair increments one
+cell of the matrix; X and Y are each detector's own channel axis, so a
+cell's (X, Y) position records which channel each detector saw for that
+event. A cascade of two genuinely correlated gamma rays -- the same two
+energies, detected together, over and over across many decays -- builds
+up as a streak of counts at a fixed (X, Y), the diagonal ridge shown in
+Figure 7. Uncorrelated counts, from unrelated gamma rays that merely
+arrived close together by chance, spread out across the matrix
+instead.</p>
+<p>A <b>projection</b> collapses the matrix into an ordinary 1D
+spectrum by summing counts along one axis: the X projection sums each
+column over its full Y range, and the Y projection sums each row over
+its full X range. The matrix panel computes both projections up front
+when a matrix is opened, and lets you pick which one to work on.</p>
+<p>A <b>cut</b> -- called a <b>gate</b> in the wider gamma-gamma
+coincidence literature -- restricts that sum to a narrow band on one
+axis instead of its full range (hold <kbd>C</kbd> and click twice to
+mark it). Summing only the rows or columns inside that band, instead of
+all of them, shows the distribution on the <i>other</i> axis among
+events specifically correlated with the gated band. This is how
+gamma-gamma coincidence spectroscopy isolates one decay cascade out of
+a whole matrix: gate on one member of the cascade, and the resulting
+spectrum comes out enriched in the other member(s), with unrelated
+gamma rays suppressed.</p>
+<p>A cut region alone still includes <b>random, uncorrelated</b>
+coincidences -- unrelated gamma rays that happened to land in that band
+anyway. Marking one or more background regions elsewhere on the same
+axis (hold <kbd>G</kbd>) and pressing "Activate Cut" subtracts them
+out: the background regions' counts are pooled and scaled by the ratio
+of the cut region's width to the total background width, then
+subtracted channel by channel from the cut -- the same
+region-width-weighted convention Integration applies for its own
+background subtraction (see "How integration computes gross,
+background, and net" above). Zero background regions means no
+subtraction happens at all, and the result can legitimately go negative
+where the scaled background outweighs the gated counts -- expected, not
+an error.</p>
 """
     return _page("SpectraTools -- Knowledge Database", body)
 
