@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from spectrum_operations import add, multiply, normalize_factors, rebin, reference_value, subtract
 
@@ -31,6 +32,19 @@ def test_multiply_by_one_is_a_no_op():
     data = np.array([1, 2, 3], dtype=np.int64)
     result = multiply(data, 1.0)
     assert list(result) == [1, 2, 3]
+
+
+def test_multiply_raises_instead_of_silently_wrapping_on_overflow():
+    # A large but perfectly finite, positive factor (passes the dialog's
+    # own isfinite/>0 validation) still overflows int64 when multiplied
+    # against real counts -- numpy's .astype(np.int64) doesn't raise on
+    # overflow at all, it silently wraps to the sentinel
+    # -9223372036854775808. Confirmed this really would happen absent
+    # the guard: np.round(np.array([100.0]) * 1e20).astype(np.int64)
+    # produces exactly that sentinel.
+    data = np.array([100, 200, 300], dtype=np.int64)
+    with pytest.raises(ValueError):
+        multiply(data, 1e20)
 
 
 def test_rebin_sums_evenly_divisible_groups():
@@ -163,3 +177,17 @@ def test_subtract_by_factor_one_is_plain_subtraction():
     b = np.array([3, 4], dtype=np.int64)
     result = subtract(a, b, 1.0)
     assert list(result) == [7, 16]
+
+
+def test_add_raises_instead_of_silently_wrapping_on_overflow():
+    a = np.array([1, 2], dtype=np.int64)
+    b = np.array([100, 200], dtype=np.int64)
+    with pytest.raises(ValueError):
+        add(a, b, 1e20)
+
+
+def test_subtract_raises_instead_of_silently_wrapping_on_overflow():
+    a = np.array([1, 2], dtype=np.int64)
+    b = np.array([100, 200], dtype=np.int64)
+    with pytest.raises(ValueError):
+        subtract(a, b, 1e20)

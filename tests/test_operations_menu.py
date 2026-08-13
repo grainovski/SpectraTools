@@ -188,6 +188,25 @@ def test_apply_multiply_leaves_other_spectra_untouched(qapp):
     assert list(spectrum_b.data) == list(original_b)
 
 
+def test_apply_multiply_shows_a_warning_instead_of_crashing_on_overflow(qapp, monkeypatch):
+    # A factor like 1e20 is finite and > 0, so it passes the dialog's
+    # own validation (see Task 4's Multiply-by-Factor tests above) --
+    # but still overflows int64 one layer down, in spectrum_operations.
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    original = spectrum.data.copy()
+    warnings = []
+    monkeypatch.setattr(
+        "main_window.QMessageBox.warning",
+        lambda *a, **k: warnings.append(a) or None,
+    )
+
+    main_window._apply_multiply(spectrum, 1e20)  # must not raise
+
+    assert len(warnings) == 1
+    assert list(spectrum.data) == list(original)  # left untouched, not corrupted
+
+
 def test_open_multiply_dialog_applies_the_entered_factor(qapp, monkeypatch):
     from factor_dialog import FactorDialog
     main_window = MainWindow()
@@ -691,6 +710,24 @@ def test_apply_add_names_result_with_factor_when_not_one(qapp):
     assert main_window.spectra[-1].path == os.path.join("/fake/dir", "a.spe + 2.5xb.spe")
 
 
+def test_apply_add_shows_a_warning_instead_of_crashing_on_overflow(qapp, monkeypatch):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_count_before = len(main_window.spectra)
+    warnings = []
+    monkeypatch.setattr(
+        "main_window.QMessageBox.warning",
+        lambda *a, **k: warnings.append(a) or None,
+    )
+
+    main_window._apply_add(spectrum_a, spectrum_b, 1e20)  # must not raise
+
+    assert len(warnings) == 1
+    # No garbage spectrum was added to the list on failure.
+    assert len(main_window.spectra) == spectrum_count_before
+
+
 def test_apply_subtract_produces_subtracted_data(qapp):
     main_window = MainWindow()
     spectrum_a = _make_active_spectrum(main_window)
@@ -736,6 +773,23 @@ def test_apply_subtract_names_result_with_factor_when_not_one(qapp):
     main_window._apply_subtract(spectrum_a, spectrum_b, 2.5)
 
     assert main_window.spectra[-1].path == os.path.join("/fake/dir", "a.spe - 2.5xb.spe")
+
+
+def test_apply_subtract_shows_a_warning_instead_of_crashing_on_overflow(qapp, monkeypatch):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_count_before = len(main_window.spectra)
+    warnings = []
+    monkeypatch.setattr(
+        "main_window.QMessageBox.warning",
+        lambda *a, **k: warnings.append(a) or None,
+    )
+
+    main_window._apply_subtract(spectrum_a, spectrum_b, 1e20)  # must not raise
+
+    assert len(warnings) == 1
+    assert len(main_window.spectra) == spectrum_count_before
 
 
 def test_apply_add_result_integration_auto_logs_next_to_spectrum_a_directory(qapp, tmp_path):
