@@ -1013,6 +1013,8 @@ git commit -m "fix: fully reset fit state (not just gate marks) when switching p
 
 **Context:** The design spec's testing approach calls for proving the duck-typed reuse produces identical results, not just "doesn't crash." Fit and integrate the same synthetic data through both `MainWindow` and `MatrixPanel` and confirm matching output.
 
+**Important — a color-format bug already caught once applies here too.** Task 7's code review found that `FitModeController.draw_committed_fits` unconditionally calls color-parsing code (`theme.fit_drawing_colors` → `_hex_to_rgb01`) requiring a strict `"#RRGGBB"` hex string — a matplotlib *named* color like `"tab:blue"` raises `ValueError`. `_rebuild_spectra` was fixed to use `LIGHT_COLOR_CYCLE[0]` instead. The test below, as originally drafted, constructs `LoadedSpectrum("synthetic.spe", data, color="tab:blue")` for `main_window`'s side — since `run_integration()` ends by calling `main_window._plot_data(preserve_view=True)`, which (unmodified, pre-existing behavior) calls `draw_committed_fits` for every visible spectrum, this would crash the test the same way, on the `main_window` side specifically (not `panel`, which already uses the fixed `LIGHT_COLOR_CYCLE[0]` via `_rebuild_spectra`). **Use `color=LIGHT_COLOR_CYCLE[0]` below, not `"tab:blue"`** — this is already how this codebase's own existing tests construct synthetic spectra (e.g. `tests/test_operations_menu.py`'s `_make_active_spectrum` uses the hex form `"#1f77b4"` directly, which is the same color `LIGHT_COLOR_CYCLE[0]` resolves to).
+
 **Files:**
 - Test: `tests/test_matrix_panel.py`
 
@@ -1029,8 +1031,8 @@ def test_matrix_panel_and_main_window_integrate_identically(qapp):
     panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
     data = panel.spectra[0].data
 
-    from spectrum import LoadedSpectrum
-    spectrum = LoadedSpectrum("synthetic.spe", data, color="tab:blue")
+    from spectrum import LIGHT_COLOR_CYCLE, LoadedSpectrum
+    spectrum = LoadedSpectrum("synthetic.spe", data, color=LIGHT_COLOR_CYCLE[0])
     spectrum.active = True
     main_window.spectra = [spectrum]
 
