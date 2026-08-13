@@ -927,13 +927,12 @@ with the unconditional version (safe now that `fit_controller` is always constru
         self.fit_controller.draw_committed_fits(spectrum)
 ```
 
-Update `_apply_calibration_change` to also refresh the parameters panel, matching `main_window.py:523`:
+Update `_apply_calibration_change` to also refresh the parameters panel, matching `main_window.py:523` — **keep the `self.main_window._apply_calibration_change(...)` delegation Task 5 already has** (do not replace it with direct `self._calibration = ...`/`self._calibration_active = ...` assignment; that would silently drop main_window's own redraw, its toolbar/menu sync, and the loop that refreshes every OTHER open matrix panel — exactly the bug Task 3's code review found and fixed):
 ```python
     def _apply_calibration_change(self, new_calibration, new_active):
         old_xlim = self.axes.get_xlim()
         channel_bounds = (self.display_to_channel(old_xlim[0]), self.display_to_channel(old_xlim[1]))
-        self._calibration = new_calibration
-        self._calibration_active = new_active
+        self.main_window._apply_calibration_change(new_calibration, new_active)
         new_xlim = (self.channel_to_display(channel_bounds[0]), self.channel_to_display(channel_bounds[1]))
         self._plot_data(xlim_override=new_xlim)
         self.fit_controller.refresh_parameters_panel_calibration()
