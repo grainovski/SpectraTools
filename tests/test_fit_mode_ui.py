@@ -942,7 +942,38 @@ def test_invalid_fixed_value_shows_a_status_message_instead_of_crashing(qapp):
     main_window.fit_controller.run_fit()  # must not raise
 
     assert len(spectrum.fits) == 1  # second fit did not commit
-    assert main_window.statusBar().currentMessage() != ""
+    message = main_window.statusBar().currentMessage()
+    # Exact wording locked down: fixed_params_from_panel()'s error names
+    # the row as a "Fixed value", distinct from the unchecked-row
+    # "Value" wording checked in
+    # test_invalid_initial_guess_value_shows_a_status_message_instead_of_crashing.
+    assert "Fixed value for 'Shared FWHM' is not a valid number: 'not a number'" in message
+
+
+def test_invalid_initial_guess_value_shows_a_status_message_instead_of_crashing(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+    table = main_window.fit_controller.parameters_table
+    table.item(0, 1).setText("not a number")  # "Peak 1 amplitude", left unchecked
+
+    main_window.fit_controller.run_fit()  # must not raise
+
+    assert len(spectrum.fits) == 1  # second fit did not commit
+    message = main_window.statusBar().currentMessage()
+    # Exact wording locked down: initial_guess_overrides_from_panel()'s
+    # error names the row as a plain "Value" (no "Fixed" prefix), since
+    # the row is an unchecked starting guess, not a fixed parameter.
+    assert "Value for 'Peak 1 amplitude' is not a valid number: 'not a number'" in message
 
 
 def test_stale_fixed_parameter_is_dropped_without_aborting_the_fit(qapp):
