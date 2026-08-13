@@ -258,16 +258,25 @@ class MatrixPanel(QMainWindow):
             self._apply_calibration_change(dialog.result_calibration, dialog.result_active)
 
     def _apply_calibration_change(self, new_calibration, new_active):
-        self._calibration = new_calibration
-        self._calibration_active = new_active
+        # Delegates to main_window's own _apply_calibration_change rather
+        # than reimplementing a subset of it. That method already: (a)
+        # round-trips the current view through channel space computed
+        # from the OLD calibration before overwriting it, so the SAME
+        # detector region stays in view under the new calibration --
+        # naively reusing main_window.axes.get_xlim()'s raw numbers
+        # verbatim (as an earlier version of this method did) would
+        # silently show the wrong region once the axis units change,
+        # since those numbers carry no memory of what they meant before;
+        # (b) updates its own toolbar/menu calibration indicators and
+        # refreshes its Fit Parameters panel; (c) redraws every panel in
+        # main_window._matrix_panels -- which includes this one, in real
+        # usage (MatrixPanel is only ever constructed via
+        # main_window._open_matrix_panel, which registers it there).
+        # The explicit self._plot_projection() below is a deliberate,
+        # cheap belt-and-suspenders redraw of this panel's own canvas,
+        # not reliant on that registration for correctness.
+        self.main_window._apply_calibration_change(new_calibration, new_active)
         self._plot_projection()
-        # Calibration is shared with main_window (see the _calibration
-        # property above) -- redraw its plot too, the same way its own
-        # _apply_calibration_change redraws every open MatrixPanel.
-        # Without this, a calibration change made here would leave
-        # main_window's already-drawn plot showing the old units until
-        # something unrelated happened to trigger its own redraw.
-        self.main_window._plot_data(preserve_view=True)
 
     def _on_axis_changed(self, index):
         self.working_axis = self.axis_selector.itemData(index)

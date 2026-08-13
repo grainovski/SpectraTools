@@ -299,15 +299,35 @@ def test_matrix_panel_calibrate_button_opens_dialog_and_applies_result(qapp, mon
     assert main_window._calibration_active is True
 
 
-def test_matrix_panel_calibration_change_refreshes_main_window_display(qapp):
+def test_matrix_panel_calibration_change_correctly_updates_main_window_view(qapp):
+    # Regression guard: an earlier version of MatrixPanel._apply_calibration_change
+    # called main_window._plot_data(preserve_view=True) directly, which reuses
+    # main_window.axes.get_xlim()'s raw numbers verbatim -- captured AFTER the
+    # calibration had already been overwritten, so those numbers carry no memory
+    # of what they meant under the OLD calibration. That silently shows the wrong
+    # region once the axis units change (identity-calibration tests couldn't catch
+    # this, since naive reuse is coincidentally correct when b=1.0). The fix
+    # delegates to main_window's own _apply_calibration_change, which round-trips
+    # the view through channel space computed from the OLD calibration before
+    # overwriting it -- this test uses a non-identity calibration and a real,
+    # specific zoom to actually prove the round-trip, not just that a redraw
+    # happened.
     from calibration import Calibration
+    from spectrum import LoadedSpectrum
 
     main_window = MainWindow()
-    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    data = np.full(200, 20, dtype=np.int64)
+    spectrum = LoadedSpectrum("synthetic.txt", data, "#1f77b4")
+    spectrum.active = True
+    main_window.spectra.append(spectrum)
+    main_window._plot_data()
+    main_window.axes.set_xlim(20.0, 40.0)
 
-    panel._apply_calibration_change(Calibration(kind="linear", a=0.0, b=1.0, c=0.0), True)
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    panel._apply_calibration_change(Calibration(kind="linear", a=0.0, b=3.0, c=0.0), True)
 
     assert main_window.axes.get_xlabel() == "Energy (keV)"
+    assert main_window.axes.get_xlim() == pytest.approx((60.0, 120.0))
 
 
 def test_main_window_calibration_change_refreshes_open_matrix_panels(qapp):
@@ -324,3 +344,20 @@ def test_main_window_calibration_change_refreshes_open_matrix_panels(qapp):
     main_window._apply_calibration_change(Calibration(kind="linear", a=0.0, b=1.0, c=0.0), True)
 
     assert panel.axes.get_xlabel() != "stale label"
+
+
+def test_matrix_panel_calibration_change_propagates_to_sibling_panels(qapp):
+    # main_window._apply_calibration_change (which MatrixPanel now delegates
+    # to) redraws every panel in main_window._matrix_panels, not just the one
+    # that initiated the change -- a second, sibling matrix panel must also
+    # pick up the update.
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    panel_a = main_window._open_matrix_panel(os.path.join(FIXTURES, "gg.mtx"))
+    panel_b = main_window._open_matrix_panel(os.path.join(FIXTURES, "gg.mtx"))
+    panel_b.axes.set_xlabel("stale label")
+
+    panel_a._apply_calibration_change(Calibration(kind="linear", a=0.0, b=1.0, c=0.0), True)
+
+    assert panel_b.axes.get_xlabel() != "stale label"
