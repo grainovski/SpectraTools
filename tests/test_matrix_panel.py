@@ -1,6 +1,7 @@
 import functools
 import os
 
+import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseEvent
 from PySide6.QtCore import Qt
@@ -228,3 +229,25 @@ def test_matrix_panel_projection_displayed_as_histogram(qapp):
 
     line = panel.axes.lines[0]
     assert line.get_drawstyle() == "steps-mid"
+
+
+def test_matrix_panel_wraps_projection_as_single_spectrum(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    assert len(panel.spectra) == 1
+    wrapped = panel.spectra[0]
+    assert wrapped.active is True
+    assert wrapped.visible is True
+    assert wrapped.fits == []
+    np.testing.assert_array_equal(wrapped.data, panel.projections["x"])
+
+
+def test_matrix_panel_rebuilds_spectra_on_axis_switch(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    panel.axis_selector.setCurrentIndex(1)
+
+    assert len(panel.spectra) == 1
+    np.testing.assert_array_equal(panel.spectra[0].data, panel.projections["y"])

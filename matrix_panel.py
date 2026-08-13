@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from matrix_cut import compute_projection
 from mtx_io import load_mtx
+from spectrum import LoadedSpectrum
 from theme import style_axes
 
 CUT_REGION_COLOR = "tab:red"
@@ -151,6 +152,7 @@ class MatrixPanel(QMainWindow):
             "y": compute_projection(self.matrix, "y"),
         }
         self.working_axis = "x"
+        self._rebuild_spectra()
         # A list, not a single attribute -- MatrixHeatmapWindow is a
         # parentless, non-modal top-level window, so under Qt's ownership
         # rules the Python-side reference is what keeps it alive. A
@@ -202,8 +204,22 @@ class MatrixPanel(QMainWindow):
 
         self._plot_projection()
 
+    def _rebuild_spectra(self):
+        """Wraps the current working-axis projection as a single
+        LoadedSpectrum so FitModeController (duck-typed against this
+        window, see the fit-integration task) can operate on it exactly
+        as it does on MainWindow's own spectra list. Always exactly one
+        entry, always active and visible -- there is no concept of
+        multiple or hidden "spectra" in this window."""
+        data = self.projections[self.working_axis]
+        label = f"{os.path.basename(self.path)} {self.working_axis} projection"
+        spectrum = LoadedSpectrum(label, data, color="tab:blue")
+        spectrum.active = True
+        self.spectra = [spectrum]
+
     def _on_axis_changed(self, index):
         self.working_axis = self.axis_selector.itemData(index)
+        self._rebuild_spectra()
         self.cut_controller.clear()
         self._plot_projection()
 
