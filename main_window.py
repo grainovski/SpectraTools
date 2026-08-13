@@ -760,6 +760,8 @@ class MainWindow(QMainWindow):
                 self._open_matrix_panel(path)
             except ParseError as exc:
                 QMessageBox.warning(self, "Could not open matrix", str(exc))
+            else:
+                self.settings.set_last_folder(os.path.dirname(path))
 
     def _open_matrix_panel(self, path):
         panel = MatrixPanel(self, path)

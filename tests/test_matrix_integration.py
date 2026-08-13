@@ -38,3 +38,13 @@ def test_closing_matrix_panel_reenables_main_window(qapp):
     panel.close()
 
     assert main_window.isEnabled() is True
+
+
+def test_open_matrix_dialog_remembers_last_folder(qapp, monkeypatch):
+    main_window = MainWindow()
+    path = os.path.join(FIXTURES, "gg.mtx")
+    monkeypatch.setattr("main_window.QFileDialog.getOpenFileName", lambda *a, **k: (path, ""))
+
+    main_window._open_matrix_dialog()
+
+    assert main_window.settings.last_folder() == os.path.dirname(path)
