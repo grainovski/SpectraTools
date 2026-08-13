@@ -143,6 +143,26 @@ program supports.</p>
 <tr><td><kbd>Ctrl+I</kbd></td><td>Integrate</td></tr>
 </table>
 
+<h3>Matrix panel</h3>
+<table>
+<tr><th>Shortcut</th><th>Action</th></tr>
+<tr><td><kbd>C</kbd></td><td>Hold and click twice to mark the cut (signal) region</td></tr>
+<tr><td><kbd>G</kbd></td><td>Hold and click twice per region to mark a background region for the cut -- any number of regions allowed</td></tr>
+<tr><td><kbd>B</kbd> / <kbd>R</kbd> / <kbd>P</kbd></td><td>Mark the background regions / fit region / peaks for fitting the working projection -- same marking as the Fitting shortcuts above</td></tr>
+<tr><td><kbd>Ctrl+F</kbd></td><td>Fit</td></tr>
+<tr><td><kbd>Ctrl+I</kbd></td><td>Integrate</td></tr>
+<tr><td><kbd>Ctrl+B</kbd></td><td>Preview the background fit from the two background regions alone (no fit region or peaks needed); press again to hide</td></tr>
+<tr><td><kbd>Ctrl+C</kbd></td><td>Clear in-progress marks and hide committed fits (not delete)</td></tr>
+<tr><td><kbd>Ctrl+Shift+C</kbd></td><td>Permanently delete the working projection's committed fits (in-progress marks untouched)</td></tr>
+<tr><td><kbd>Ctrl+E</kbd></td><td>Export the working projection's fits</td></tr>
+<tr><td><kbd>Ctrl+2</kbd></td><td>Toggle the Fit Results panel</td></tr>
+<tr><td><kbd>Ctrl+3</kbd></td><td>Toggle the Fit Parameters panel</td></tr>
+<tr><td><kbd>Ctrl+L</kbd></td><td>Calibrate... (shared with the main window -- see "11. Matrix analysis" below)</td></tr>
+<tr><td><kbd>Ctrl+=</kbd></td><td>Zoom in (X axis)</td></tr>
+<tr><td><kbd>Ctrl+-</kbd></td><td>Zoom out (X axis)</td></tr>
+<tr><td><kbd>Ctrl+0</kbd></td><td>Show full projection</td></tr>
+</table>
+
 <h3>Help menu</h3>
 <table>
 <tr><th>Shortcut</th><th>Action</th></tr>
@@ -291,7 +311,7 @@ current view, and <kbd>Ctrl+0</kbd> resets to the full spectrum.</p>
 histogram is read -- there's no way to save a matrix back out. The
 matrix panel computes both its X and Y projections up front; pick
 which one to work on from the dropdown. Hold <kbd>C</kbd> and click
-twice to mark the cut (signal) region, and hold <kbd>B</kbd> and click
+twice to mark the cut (signal) region, and hold <kbd>G</kbd> and click
 twice for each background region -- any number of background regions
 are allowed, and more background generally means better statistics.
 <b>Activate Cut</b> computes a background-subtracted spectrum
@@ -303,6 +323,33 @@ Heatmap...</b> opens a separate, view-only 2D intensity map of the
 matrix with its own zoom/pan controls -- purely for visual reference;
 marking and cutting always happens on the projection, not the
 heatmap.</p>
+<p>The working projection can also be fit or integrated directly, with
+no need to activate a cut first -- the same <kbd>B</kbd>/<kbd>R</kbd>/<kbd>P</kbd>
+marking and <kbd>Ctrl+F</kbd>/<kbd>Ctrl+I</kbd>/<kbd>Ctrl+B</kbd>/<kbd>Ctrl+C</kbd>
+shortcuts described in "7. Performing a fit" and "8. Integration"
+above, run by the exact same fitting engine as the main window's, just
+pointed at the projection instead of a loaded spectrum. A Fit Results
+and Fit Parameters panel pair -- including the "Independent
+widths"/"Left tail" options and their own
+<kbd>Ctrl+Shift+C</kbd>/<kbd>Ctrl+E</kbd>/<kbd>Ctrl+2</kbd>/<kbd>Ctrl+3</kbd>
+shortcuts -- appear in this window too, working exactly like the main
+window's. Cut/background marks (<kbd>C</kbd>/<kbd>G</kbd>) and fit
+marks (<kbd>B</kbd>/<kbd>R</kbd>/<kbd>P</kbd>) don't interfere with
+each other -- both can be in progress at once.</p>
+<p><kbd>Ctrl+L</kbd> opens the same Calibrate dialog as the main
+window's own Calibration..., because it <i>is</i> the main window's
+calibration -- there's only one calibration per session, not a
+separate one per window. Calibrating from a matrix panel updates the
+main window's plot (and any other open matrix panel) immediately, and
+calibrating from the main window updates every open matrix panel the
+same way. <kbd>Ctrl+=</kbd>/<kbd>Ctrl+-</kbd>/<kbd>Ctrl+0</kbd> (or the
+scroll wheel) zoom the projection's X axis, matching the main window's
+own zoom.</p>
+<p>Switching the dropdown between X and Y projection clears any
+in-progress cut/background marks, and discards any in-progress or
+committed fit marks for the projection you're leaving -- it's
+different underlying data, so nothing carries over, even switching
+back to an axis you'd already marked or fit before.</p>
 """
     return _page("SpectraTools -- HowTo", body)
 

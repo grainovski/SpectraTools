@@ -451,3 +451,12 @@ def test_howto_html_documents_matrix_analysis():
     assert "<h3>11. Matrix analysis</h3>" in html
     assert "Open Matrix" in html
     assert "Ctrl+Shift+O" in html.replace("&#43;", "+")
+
+
+def test_howto_html_documents_matrix_panel_fit_integrate_calibrate():
+    html = build_howto_html()
+    assert "hold <kbd>G</kbd>" in html or "<kbd>G</kbd>" in html
+    assert "<kbd>Ctrl+F</kbd>" in html
+    assert "<kbd>Ctrl+I</kbd>" in html
+    assert "<kbd>Ctrl+L</kbd>" in html
+    assert "<kbd>Ctrl+=</kbd>" in html
