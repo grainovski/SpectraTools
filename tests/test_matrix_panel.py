@@ -6,6 +6,7 @@ import pytest
 from matplotlib.backend_bases import MouseEvent
 from PySide6.QtCore import Qt
 
+import fit_mode
 import matrix_panel
 from main_window import MainWindow
 from matrix_panel import MatrixPanel
@@ -643,12 +644,21 @@ def test_matrix_panel_switching_axis_clears_fit_state(qapp):
     assert panel.fit_controller.state.fit_region is None
 
 
-def test_matrix_panel_and_main_window_integrate_identically(qapp):
+def test_matrix_panel_and_main_window_integrate_identically(qapp, monkeypatch):
     """Loads the identical numpy array as an ordinary spectrum in
     MainWindow and as a matrix projection in MatrixPanel, integrates
     the same region on both, and confirms matching gross/background/net
     -- proving the duck-typed FitModeController reuse produces
     identical results, not just that it runs without crashing."""
+    # run_integration() unavoidably calls the real append_auto_log as a
+    # side effect -- both spectra's "paths" here are bare labels, not
+    # real file locations, so left unpatched this writes stray
+    # *_fits.jsonl files into the repo root on every test run. Same
+    # technique test_fit_mode_ui.py already uses to keep this class of
+    # side effect out of the repo; this test only reads the in-memory
+    # FitResult objects, never the log file, so a no-op is safe.
+    monkeypatch.setattr(fit_mode.fit_export, "append_auto_log", lambda *a, **k: None)
+
     main_window = MainWindow()
     panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
     data = panel.spectra[0].data
