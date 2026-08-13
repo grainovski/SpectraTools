@@ -283,6 +283,25 @@ toggles dark theme. <kbd>Ctrl+1</kbd>/<kbd>Ctrl+2</kbd>/<kbd>Ctrl+3</kbd>
 show or hide the Spectra, Fit Results, and Fit Parameters panels.
 <kbd>Ctrl+=</kbd>/<kbd>Ctrl+-</kbd> zoom the X axis in/out around the
 current view, and <kbd>Ctrl+0</kbd> resets to the full spectrum.</p>
+
+<h3>11. Matrix analysis</h3>
+<p><b>File &gt; Open Matrix...</b> (<kbd>Ctrl+Shift+O</kbd>) opens a
+2D coincidence matrix (<b>.mtx</b>) in its own window. Only the raw
+histogram is read -- there's no way to save a matrix back out. The
+matrix panel computes both its X and Y projections up front; pick
+which one to work on from the dropdown. Hold <kbd>C</kbd> and click
+twice to mark the cut (signal) region, and hold <kbd>B</kbd> and click
+twice for each background region -- any number of background regions
+are allowed, and more background generally means better statistics.
+<b>Activate Cut</b> computes a background-subtracted spectrum
+(weighted automatically by region width, same convention TV uses) and
+adds it to the main window like any other loaded spectrum -- you can
+fit, calibrate, or export it exactly the same way. Negative counts can
+appear in the result and are expected, not an error. <b>Show
+Heatmap...</b> opens a separate, view-only 2D intensity map of the
+matrix with its own zoom/pan controls -- purely for visual reference;
+marking and cutting always happens on the projection, not the
+heatmap.</p>
 """
     return _page("SpectraTools -- HowTo", body)
 

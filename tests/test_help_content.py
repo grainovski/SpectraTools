@@ -444,3 +444,10 @@ def test_howto_saving_section_notes_n42_is_read_only():
     # saving no longer supports "the same" formats as reading now that
     # reading also accepts the (write-unsupported) .n42 format.
     assert "the same three formats" not in html
+
+
+def test_howto_html_documents_matrix_analysis():
+    html = build_howto_html()
+    assert "<h3>11. Matrix analysis</h3>" in html
+    assert "Open Matrix" in html
+    assert "Ctrl+Shift+O" in html.replace("&#43;", "+")
