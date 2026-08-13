@@ -528,7 +528,7 @@ class MainWindow(QMainWindow):
         # their already-drawn plot showing the old units until something
         # else happens to trigger a redraw.
         for panel in self._matrix_panels:
-            panel._plot_projection()
+            panel._plot_data()
 
     def _open_multiply_dialog(self):
         active = next((s for s in self.spectra if s.active), None)

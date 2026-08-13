@@ -1,5 +1,6 @@
 import os
 
+import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from PySide6.QtCore import QEvent, QObject, Qt
@@ -238,7 +239,7 @@ class MatrixPanel(QMainWindow):
 
         self.cut_controller = MatrixCutController(self)
 
-        self._plot_projection()
+        self._plot_data()
 
     def _rebuild_spectra(self):
         """Wraps the current working-axis projection as a single
@@ -289,38 +290,74 @@ class MatrixPanel(QMainWindow):
     def _apply_calibration_change(self, new_calibration, new_active):
         # Delegates to main_window's own _apply_calibration_change rather
         # than reimplementing a subset of it. That method already: (a)
-        # round-trips the current view through channel space computed
-        # from the OLD calibration before overwriting it, so the SAME
-        # detector region stays in view under the new calibration --
-        # naively reusing main_window.axes.get_xlim()'s raw numbers
-        # verbatim (as an earlier version of this method did) would
-        # silently show the wrong region once the axis units change,
-        # since those numbers carry no memory of what they meant before;
+        # round-trips ITS OWN view through channel space computed from
+        # the OLD calibration before overwriting it, so the same
+        # detector region stays in view there under the new calibration;
         # (b) updates its own toolbar/menu calibration indicators and
         # refreshes its Fit Parameters panel; (c) redraws every panel in
         # main_window._matrix_panels -- which includes this one, in real
         # usage (MatrixPanel is only ever constructed via
         # main_window._open_matrix_panel, which registers it there).
-        # The explicit self._plot_projection() below is a deliberate,
-        # cheap belt-and-suspenders redraw of this panel's own canvas,
-        # not reliant on that registration for correctness.
+        #
+        # But that delegated call knows nothing about THIS panel's own
+        # zoom state, so this panel's own view is captured and
+        # round-tripped here, following the exact same pattern -- and for
+        # the exact same reason: channel_bounds MUST be computed from
+        # old_xlim BEFORE main_window._apply_calibration_change runs,
+        # since that call is what overwrites the shared calibration state
+        # (self._calibration/_calibration_active are properties
+        # delegating straight to main_window's) that display_to_channel
+        # reads. Computing channel_bounds after that call would silently
+        # interpret old_xlim's numbers under the NEW calibration instead
+        # of the OLD one they actually came from -- the exact bug already
+        # found and fixed once in Task 3's code review (see
+        # main_window._apply_calibration_change's own docstring/comment).
+        # The final self._plot_data(xlim_override=...) is a deliberate,
+        # cheap belt-and-suspenders redraw of this panel's own canvas at
+        # the round-tripped bounds, not reliant on the
+        # main_window._matrix_panels registration loop for correctness.
+        old_xlim = self.axes.get_xlim()
+        channel_bounds = (self.display_to_channel(old_xlim[0]), self.display_to_channel(old_xlim[1]))
         self.main_window._apply_calibration_change(new_calibration, new_active)
-        self._plot_projection()
+        new_xlim = (self.channel_to_display(channel_bounds[0]), self.channel_to_display(channel_bounds[1]))
+        self._plot_data(xlim_override=new_xlim)
 
     def _on_axis_changed(self, index):
         self.working_axis = self.axis_selector.itemData(index)
         self._rebuild_spectra()
         self.cut_controller.clear()
-        self._plot_projection()
+        self._plot_data()
 
-    def _plot_projection(self):
+    def _plot_data(self, preserve_view=False, xlim_override=None):
+        saved_xlim = self.axes.get_xlim() if preserve_view else None
         self.axes.clear()
         style_axes(self.axes, self.main_window._theme)
-        data = self.projections[self.working_axis]
-        self.axes.plot(range(len(data)), data, drawstyle="steps-mid", linewidth=0.8)
-        self.axes.set_xlabel(f"{self.working_axis.upper()} channel")
+        spectrum = self.spectra[0]
+        channels = np.arange(len(spectrum.data))
+        x = self.channel_to_display(channels)
+        self.axes.plot(x, spectrum.data, drawstyle="steps-mid", linewidth=0.8, color=spectrum.color)
+        if hasattr(self, "fit_controller"):
+            self.fit_controller.draw_committed_fits(spectrum)
+        self.axes.set_xlabel("Energy (keV)" if self._calibration_active else f"{self.working_axis.upper()} channel")
         self.axes.set_ylabel("Counts")
+        if xlim_override is not None:
+            xlim = xlim_override
+        elif saved_xlim is not None:
+            xlim = saved_xlim
+        else:
+            xlim = (self.channel_to_display(0), self.channel_to_display(len(spectrum.data) - 1))
+        self.axes.set_xlim(xlim)
         self.canvas.draw()
+        self._update_fit_mode_availability()
+
+    def _update_fit_mode_availability(self):
+        # Temporary scaffolding: fit_controller isn't constructed until a
+        # later task wires fit-mode integration into MatrixPanel. This
+        # stub exists solely so _plot_data (called from __init__, before
+        # fit_controller exists) has something safe to call. A later task
+        # removes this stub and the "hasattr(self, 'fit_controller')"
+        # guard above, replacing both with the real implementation.
+        pass
 
     def _clear_marks(self):
         self.cut_controller.clear()

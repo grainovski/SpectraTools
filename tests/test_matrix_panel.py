@@ -398,3 +398,42 @@ def test_matrix_panel_pending_gate_bg_click_shows_dashed_preview_line(qapp):
 
     lines = [a for a in panel.cut_controller._artists if hasattr(a, "get_linestyle")]
     assert any(line.get_linestyle() == "--" for line in lines)
+
+
+def test_matrix_panel_plot_data_draws_histogram_with_calibration_aware_axis(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    panel._calibration = Calibration(kind="linear", a=0.0, b=2.0, c=0.0)
+    panel._calibration_active = True
+
+    panel._plot_data()
+
+    line = panel.axes.lines[0]
+    assert line.get_drawstyle() == "steps-mid"
+    assert panel.axes.get_xlabel() == "Energy (keV)"
+
+
+def test_matrix_panel_plot_data_preserves_view_when_requested(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    panel.axes.set_xlim(100, 500)
+
+    panel._plot_data(preserve_view=True)
+
+    assert panel.axes.get_xlim() == pytest.approx((100, 500))
+
+
+def test_matrix_panel_calibrating_preserves_the_current_view(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    panel.axes.set_xlim(100, 500)
+
+    panel._apply_calibration_change(Calibration(kind="linear", a=0.0, b=2.0, c=0.0), True)
+
+    # View was (100, 500) in channel space; after a b=2.0 calibration
+    # the same channel window should now read as (200, 1000) in keV.
+    assert panel.axes.get_xlim() == pytest.approx((200.0, 1000.0))
