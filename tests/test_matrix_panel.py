@@ -251,3 +251,49 @@ def test_matrix_panel_rebuilds_spectra_on_axis_switch(qapp):
 
     assert len(panel.spectra) == 1
     np.testing.assert_array_equal(panel.spectra[0].data, panel.projections["y"])
+
+
+def test_matrix_panel_calibration_shared_with_main_window(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    cal = Calibration(kind="linear", a=1.0, b=2.0, c=0.0)
+
+    panel._calibration = cal
+    panel._calibration_active = True
+
+    assert main_window._calibration is cal
+    assert main_window._calibration_active is True
+    assert panel.channel_to_display(100) == pytest.approx(cal.apply(100))
+    assert panel.display_to_channel(201.0) == pytest.approx(cal.invert(201.0))
+
+
+def test_matrix_panel_channel_to_display_passthrough_when_uncalibrated(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    assert panel.channel_to_display(150) == 150
+    assert panel.display_to_channel(150) == 150
+
+
+def test_matrix_panel_calibrate_button_opens_dialog_and_applies_result(qapp, monkeypatch):
+    from calibration import Calibration
+    from calibration_dialog import CalibrationDialog
+    from PySide6.QtWidgets import QDialog
+
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    result = Calibration(kind="linear", a=0.0, b=1.5, c=0.0)
+
+    def fake_exec(self):
+        self.result_calibration = result
+        self.result_active = True
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(CalibrationDialog, "exec", fake_exec)
+
+    panel._open_calibration_dialog()
+
+    assert main_window._calibration is result
+    assert main_window._calibration_active is True

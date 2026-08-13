@@ -5,6 +5,7 @@ from matplotlib.figure import Figure
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from calibration_dialog import CalibrationDialog
 from matrix_cut import compute_projection
 from mtx_io import load_mtx
 from spectrum import LoadedSpectrum
@@ -185,11 +187,16 @@ class MatrixPanel(QMainWindow):
         self.clear_marks_button = QPushButton("Clear Marks")
         self.clear_marks_button.clicked.connect(self._clear_marks)
 
+        self.calibrate_button = QPushButton("Calibrate...")
+        self.calibrate_button.setShortcut("Ctrl+L")
+        self.calibrate_button.clicked.connect(self._open_calibration_dialog)
+
         top_bar = QHBoxLayout()
         top_bar.addWidget(QLabel("Working on:"))
         top_bar.addWidget(self.axis_selector)
         top_bar.addStretch()
         top_bar.addWidget(self.clear_marks_button)
+        top_bar.addWidget(self.calibrate_button)
         top_bar.addWidget(self.activate_cut_button)
         top_bar.addWidget(self.heatmap_button)
 
@@ -216,6 +223,44 @@ class MatrixPanel(QMainWindow):
         spectrum = LoadedSpectrum(label, data, color="tab:blue")
         spectrum.active = True
         self.spectra = [spectrum]
+
+    @property
+    def _calibration(self):
+        return self.main_window._calibration
+
+    @_calibration.setter
+    def _calibration(self, value):
+        self.main_window._calibration = value
+
+    @property
+    def _calibration_active(self):
+        return self.main_window._calibration_active
+
+    @_calibration_active.setter
+    def _calibration_active(self, value):
+        self.main_window._calibration_active = value
+
+    def channel_to_display(self, channel):
+        if not self._calibration_active or self._calibration is None:
+            return channel
+        return self._calibration.apply(channel)
+
+    def display_to_channel(self, display_x):
+        if not self._calibration_active or self._calibration is None:
+            return display_x
+        return self._calibration.invert(display_x)
+
+    def _open_calibration_dialog(self):
+        dialog = CalibrationDialog(
+            self, initial=self._calibration, initially_active=self._calibration_active
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._apply_calibration_change(dialog.result_calibration, dialog.result_active)
+
+    def _apply_calibration_change(self, new_calibration, new_active):
+        self._calibration = new_calibration
+        self._calibration_active = new_active
+        self._plot_projection()
 
     def _on_axis_changed(self, index):
         self.working_axis = self.axis_selector.itemData(index)
