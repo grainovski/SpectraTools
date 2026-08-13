@@ -2501,6 +2501,28 @@ def test_run_integration_with_no_background_produces_a_backgroundless_result(qap
     assert result.net_area == result.gross_area
 
 
+def test_reintegrating_same_marks_hides_the_earlier_result(qapp):
+    # Mirrors test_refitting_same_marks_hides_the_earlier_result, but
+    # through run_integration()'s call to the same shared _commit_result
+    # -- and with zero background regions, so left_bg_region/
+    # right_bg_region are both None on both results. None == None is
+    # True in Python, so the exact-tuple-equality supersede comparison
+    # in _commit_result must still match here, not just for the
+    # real-float region tuples run_fit() always produces.
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    main_window.fit_controller.run_integration()
+    main_window.fit_controller.run_integration()
+
+    assert len(spectrum.fits) == 2
+    assert spectrum.fits[0].left_bg_region is None
+    assert spectrum.fits[0].visible is False
+    assert spectrum.fits[1].visible is True
+
+
 def test_results_table_shows_a_region_row_for_an_integration_result(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)

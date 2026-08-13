@@ -1130,12 +1130,16 @@ class FitModeController(QObject):
         self.main_window._update_fit_mode_availability()
 
     def _commit_result(self, active, result):
-        # Re-fitting/re-integrating the exact same marks (e.g. after
-        # toggling a checkbox) is a supported workflow, not a mistake --
-        # but drawing every attempt at the identical region on top of
-        # the others is just visual clutter. Only the latest attempt at
-        # a given region is drawn; every attempt stays listed in Fit
-        # Results.
+        """Shared by run_fit/run_integration. Re-fitting/re-integrating
+        the exact same marks (e.g. after toggling a checkbox) is a
+        supported workflow, not a mistake -- but drawing every attempt
+        at the identical region on top of the others is just visual
+        clutter. Only the latest attempt at a given region is drawn;
+        every attempt stays listed in Fit Results. Marks are read from
+        self.state unchanged between re-fits of the same region, so
+        exact tuple equality is reliable here -- no float-tolerance
+        comparison needed (see the 2026-07-15 spec's "Fit Visibility
+        Model")."""
         for earlier in active.fits:
             if (
                 earlier.left_bg_region == result.left_bg_region
