@@ -17,9 +17,10 @@ from PySide6.QtWidgets import (
 )
 
 from calibration_dialog import CalibrationDialog
+from fit_mode import FitModeController
 from matrix_cut import compute_projection
 from mtx_io import load_mtx
-from spectrum import LoadedSpectrum
+from spectrum import LIGHT_COLOR_CYCLE, LoadedSpectrum
 from theme import style_axes
 
 CUT_REGION_COLOR = "tab:red"
@@ -261,6 +262,45 @@ class MatrixPanel(QMainWindow):
 
         self.cut_controller = MatrixCutController(self)
 
+        self.fit_controller = FitModeController(self)
+        self.fit_controller.build_results_panel()
+        self.fit_controller.build_parameters_panel()
+
+        self.fit_button = QAction("Fit", self)
+        self.fit_button.setShortcut("Ctrl+F")
+        self.fit_button.setEnabled(False)
+        self.fit_button.triggered.connect(self.fit_controller.run_fit)
+        self.addAction(self.fit_button)
+
+        self.clear_fit_button = QAction("Clear", self)
+        self.clear_fit_button.setShortcut("Ctrl+C")
+        self.clear_fit_button.triggered.connect(self.fit_controller.clear)
+        self.addAction(self.clear_fit_button)
+
+        self.integrate_button = QAction("Integrate", self)
+        self.integrate_button.setShortcut("Ctrl+I")
+        self.integrate_button.setEnabled(False)
+        self.integrate_button.triggered.connect(self.fit_controller.run_integration)
+        self.addAction(self.integrate_button)
+
+        self.background_preview_button = QAction("Preview Background Fit", self)
+        self.background_preview_button.setShortcut("Ctrl+B")
+        self.background_preview_button.triggered.connect(self.fit_controller.toggle_background_preview)
+        self.addAction(self.background_preview_button)
+
+        # FitModeController.__init__ only wires up the canvas's keyboard
+        # (held-key) event filter -- it deliberately leaves connecting its
+        # on_click to the canvas's button_press_event to the owning
+        # window, exactly as main_window.py itself does
+        # (self.canvas.mpl_connect("button_press_event", self._on_canvas_click),
+        # where _on_canvas_click just delegates to fit_controller.on_click).
+        # Without this, b/r/p marking would silently do nothing: MatrixCutController's
+        # own on_click (connected above, in its own __init__) only handles its
+        # "cut"/"gate_bg" held-key states and returns immediately for anything
+        # else, so nothing else on this canvas would ever route a click to
+        # fit_controller.on_click.
+        self.canvas.mpl_connect("button_press_event", self.fit_controller.on_click)
+
         self._plot_data()
 
     def _rebuild_spectra(self):
@@ -269,10 +309,23 @@ class MatrixPanel(QMainWindow):
         window, see the fit-integration task) can operate on it exactly
         as it does on MainWindow's own spectra list. Always exactly one
         entry, always active and visible -- there is no concept of
-        multiple or hidden "spectra" in this window."""
+        multiple or hidden "spectra" in this window.
+
+        color=LIGHT_COLOR_CYCLE[0], not the matplotlib named color
+        "tab:blue" this used to read (same rendered color either way --
+        "tab:blue" IS "#1f77b4", matplotlib's tab10 palette entry 0,
+        verbatim LIGHT_COLOR_CYCLE[0]) -- FitModeController.draw_committed_fits
+        unconditionally derives its fit/background-line colors from
+        spectrum.color via theme.fit_drawing_colors, which parses it as a
+        strict "#RRGGBB" hex string (_hex_to_rgb01) and raises ValueError
+        on a named color. That call was never reached before fit-mode
+        integration (Task 7) since draw_committed_fits was never invoked
+        for this panel until now -- a plain color= tab:blue value was
+        harmless as long as it only ever reached matplotlib's own
+        axes.plot(color=...), which accepts named colors fine."""
         data = self.projections[self.working_axis]
         label = f"{os.path.basename(self.path)} {self.working_axis} projection"
-        spectrum = LoadedSpectrum(label, data, color="tab:blue")
+        spectrum = LoadedSpectrum(label, data, color=LIGHT_COLOR_CYCLE[0])
         spectrum.active = True
         self.spectra = [spectrum]
 
@@ -343,6 +396,7 @@ class MatrixPanel(QMainWindow):
         self.main_window._apply_calibration_change(new_calibration, new_active)
         new_xlim = (self.channel_to_display(channel_bounds[0]), self.channel_to_display(channel_bounds[1]))
         self._plot_data(xlim_override=new_xlim)
+        self.fit_controller.refresh_parameters_panel_calibration()
 
     def _on_scroll(self, event):
         if event.inaxes != self.axes or event.xdata is None:
@@ -408,8 +462,7 @@ class MatrixPanel(QMainWindow):
         channels = np.arange(len(spectrum.data))
         x = self.channel_to_display(channels)
         self.axes.plot(x, spectrum.data, drawstyle="steps-mid", linewidth=0.8, color=spectrum.color)
-        if hasattr(self, "fit_controller"):
-            self.fit_controller.draw_committed_fits(spectrum)
+        self.fit_controller.draw_committed_fits(spectrum)
         self.axes.set_xlabel("Energy (keV)" if self._calibration_active else f"{self.working_axis.upper()} channel")
         self.axes.set_ylabel("Counts")
         if xlim_override is not None:
@@ -432,13 +485,8 @@ class MatrixPanel(QMainWindow):
         self._update_fit_mode_availability()
 
     def _update_fit_mode_availability(self):
-        # Temporary scaffolding: fit_controller isn't constructed until a
-        # later task wires fit-mode integration into MatrixPanel. This
-        # stub exists solely so _plot_data (called from __init__, before
-        # fit_controller exists) has something safe to call. A later task
-        # removes this stub and the "hasattr(self, 'fit_controller')"
-        # guard above, replacing both with the real implementation.
-        pass
+        self.fit_button.setEnabled(self.fit_controller.state.ready_to_fit())
+        self.integrate_button.setEnabled(self.fit_controller.state.ready_to_integrate())
 
     def _clear_marks(self):
         self.cut_controller.clear()

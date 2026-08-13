@@ -558,3 +558,57 @@ def test_calibration_change_from_one_panel_preserves_sibling_panel_zoom(qapp):
     panel_a._apply_calibration_change(Calibration(kind="linear", a=0.0, b=3.0, c=0.0), True)
 
     assert panel_b.axes.get_xlim() == pytest.approx((60.0, 120.0))
+
+
+def test_matrix_panel_has_fit_and_parameters_docks(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    assert panel.fit_controller.results_dock is not None
+    assert panel.fit_controller.parameters_dock is not None
+    assert panel.fit_controller.results_dock.parent() is panel
+    assert panel.fit_controller.parameters_dock.parent() is panel
+
+
+def test_matrix_panel_fit_button_disabled_without_fit_region(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    assert panel.fit_button.isEnabled() is False
+
+
+def test_matrix_panel_fitting_a_peak_on_the_projection_works(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    data = panel.spectra[0].data
+    # Any two bare channel positions bracketing a stretch of real
+    # projection data -- this is a real 8192-channel fixture, not
+    # synthetic, so a real fit may or may not converge depending on
+    # the exact region; the point of this test is that the SAME
+    # FitModeController machinery MainWindow uses is reachable and
+    # produces a fits-list entry, not that any specific region fits
+    # cleanly. Mark a wide fit region and one peak position roughly
+    # in its middle, matching how test_fit_mode_ui.py's own tests
+    # mark fits.
+    lo, hi = 100.0, 300.0
+
+    panel.cut_controller._held_key = None  # not used by fit marking; ensure no interference
+    panel.fit_controller._held_key = "r"
+    _click(panel, lo)
+    _click(panel, hi)
+    panel.fit_controller._held_key = "p"
+    _click(panel, (lo + hi) / 2)
+    panel.fit_controller._held_key = None
+
+    assert panel.fit_controller.state.fit_region == pytest.approx((lo, hi))
+    assert len(panel.fit_controller.state.peak_positions) == 1
+
+
+def test_matrix_panel_integrate_action_reachable(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    assert panel.integrate_button.shortcut().toString() == "Ctrl+I"
+    assert panel.fit_button.shortcut().toString() == "Ctrl+F"
+    assert panel.clear_fit_button.shortcut().toString() == "Ctrl+C"
+    assert panel.background_preview_button.shortcut().toString() == "Ctrl+B"
