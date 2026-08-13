@@ -56,7 +56,7 @@ def test_howto_html_contains_every_shortcut():
     # a prefix of "Ctrl+Shift+C"), so a bare `shortcut in html` check can
     # pass even if the shorter shortcut's own row was deleted entirely.
     for shortcut in [
-        "Ctrl+O", "Ctrl+S", "Ctrl+W", "Ctrl+Q",
+        "Ctrl+O", "Ctrl+Shift+O", "Ctrl+S", "Ctrl+W", "Ctrl+Q",
         "Ctrl+G", "Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+D",
         "Ctrl+L", "Ctrl+T", "Ctrl+M", "Ctrl+R", "Ctrl+N", "Ctrl+A", "Ctrl+Shift+A",
         "Ctrl+=", "Ctrl+-", "Ctrl+0",

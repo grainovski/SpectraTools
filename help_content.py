@@ -93,6 +93,7 @@ program supports.</p>
 <table>
 <tr><th>Shortcut</th><th>Action</th></tr>
 <tr><td><kbd>Ctrl+O</kbd></td><td>Open a spectrum file</td></tr>
+<tr><td><kbd>Ctrl+Shift+O</kbd></td><td>Open Matrix...</td></tr>
 <tr><td><kbd>Ctrl+S</kbd></td><td>Save Spectrum...</td></tr>
 <tr><td><kbd>Ctrl+W</kbd></td><td>Close Spectrum (remove the active spectrum from the program)</td></tr>
 <tr><td><kbd>Ctrl+Q</kbd></td><td>Exit</td></tr>
