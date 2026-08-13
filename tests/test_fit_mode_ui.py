@@ -1238,6 +1238,113 @@ def test_draw_committed_fits_draws_one_component_line_per_peak(qapp):
     assert len(main_window.axes.lines) == lines_before + 6
 
 
+def _two_peak_fit_result(tail_fraction=None, tail_beta=None):
+    return FitResult(
+        left_bg_region=(10.0, 20.0), right_bg_region=(180.0, 190.0),
+        fit_region=(90.0, 130.0), background_slope=0.05, background_intercept=20.0,
+        peaks=[
+            PeakResult(
+                position=100.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                area=1000.0, area_err=50.0, amplitude=200.0, sigma=2.0,
+            ),
+            PeakResult(
+                position=115.0, position_err=0.1, fwhm=5.0, fwhm_err=0.2,
+                area=800.0, area_err=40.0, amplitude=160.0, sigma=3.0,
+            ),
+        ],
+        tail_fraction=tail_fraction, tail_beta=tail_beta,
+    )
+
+
+def test_draw_committed_fits_total_curve_equals_background_plus_sum_of_gaussian_peaks(qapp):
+    """Task 10 regression guard: draw_committed_fits's total-curve
+    accumulation and its peak-decomposition overlay now share one
+    _peak_component helper. This numerically pins down the total curve
+    (companion to test_draw_committed_fits_draws_one_component_line_per_peak
+    above, which only checked line *counts*) against an expected array
+    computed independently here -- not by calling fit_mode's own
+    _peak_component -- so a formula regression in the shared helper would
+    actually be caught rather than trivially matching itself."""
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    fit_result = _two_peak_fit_result()
+    spectrum.fits.append(fit_result)
+
+    main_window.axes.clear()
+    main_window.fit_controller.draw_committed_fits(spectrum)
+
+    total_curve = [
+        line for line in main_window.axes.lines if line.get_linewidth() == 1.5
+    ][0]
+
+    x_dense = np.linspace(90.0, 130.0, 200)
+    expected_total = 0.05 * x_dense + 20.0
+    for peak in fit_result.peaks:
+        expected_total = expected_total + peak.amplitude * np.exp(
+            -((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2)
+        )
+    np.testing.assert_allclose(total_curve.get_ydata(), expected_total, rtol=1e-12)
+
+
+def test_draw_committed_fits_decomposition_overlay_matches_background_plus_single_gaussian_peak(qapp):
+    """No prior test checked the decomposition overlay's actual y-data, only
+    line counts -- this is exactly the invariant Task 10's dedup exists to
+    protect (total curve and its own decomposition silently diverging).
+    Each dashed component line must equal background + that one peak's own
+    Gaussian, computed independently here so drift in the shared
+    _peak_component helper would be caught rather than trivially match."""
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    fit_result = _two_peak_fit_result()
+    spectrum.fits.append(fit_result)
+
+    main_window.axes.clear()
+    main_window.fit_controller.draw_committed_fits(spectrum)
+
+    component_lines = [
+        line for line in main_window.axes.lines
+        if line.get_linewidth() == 0.75 and line.get_linestyle() == "--"
+    ]
+    assert len(component_lines) == 2
+
+    x_dense = np.linspace(90.0, 130.0, 200)
+    expected_background = 0.05 * x_dense + 20.0
+    for peak, line in zip(fit_result.peaks, component_lines):
+        expected_component = expected_background + peak.amplitude * np.exp(
+            -((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2)
+        )
+        np.testing.assert_allclose(line.get_ydata(), expected_component, rtol=1e-12)
+
+
+def test_draw_committed_fits_decomposition_overlay_matches_background_plus_hypermet_peak(qapp):
+    """Hypermet-tail companion to the Gaussian check above.
+    test_plot_data_draws_committed_fit_overlay_with_left_tail (elsewhere in
+    this file) verifies the *total* curve's numeric data for the tail
+    formula, but never the decomposition overlay -- this closes that gap
+    on the other formula branch _peak_component now shares."""
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    fit_result = _two_peak_fit_result(tail_fraction=0.1, tail_beta=3.0)
+    spectrum.fits.append(fit_result)
+
+    main_window.axes.clear()
+    main_window.fit_controller.draw_committed_fits(spectrum)
+
+    component_lines = [
+        line for line in main_window.axes.lines
+        if line.get_linewidth() == 0.75 and line.get_linestyle() == "--"
+    ]
+    assert len(component_lines) == 2
+
+    x_dense = np.linspace(90.0, 130.0, 200)
+    expected_background = 0.05 * x_dense + 20.0
+    for peak, line in zip(fit_result.peaks, component_lines):
+        expected_component = expected_background + peak.amplitude * hypermet_left_tail(
+            x_dense, peak.position, peak.sigma, fit_result.tail_fraction, fit_result.tail_beta,
+        )
+        np.testing.assert_allclose(line.get_ydata(), expected_component, rtol=1e-12)
+
+
 def test_draw_committed_fits_draws_region_shading_and_annotation_for_integration(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
