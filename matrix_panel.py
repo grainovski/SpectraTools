@@ -235,6 +235,7 @@ class MatrixPanel(QMainWindow):
 
         self.activate_cut_button = QPushButton("Activate Cut")
         self.activate_cut_button.setEnabled(False)
+        self.activate_cut_button.setShortcut("Ctrl+Alt+C")
         self.activate_cut_button.clicked.connect(self._activate_cut)
 
         self.clear_marks_button = QPushButton("Clear Marks")

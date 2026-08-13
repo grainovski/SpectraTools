@@ -61,6 +61,7 @@ def test_howto_html_contains_every_shortcut():
         "Ctrl+L", "Ctrl+T", "Ctrl+M", "Ctrl+R", "Ctrl+N", "Ctrl+A", "Ctrl+Shift+A",
         "Ctrl+=", "Ctrl+-", "Ctrl+0",
         "Ctrl+F", "Ctrl+B", "Ctrl+C", "Ctrl+Shift+C", "Ctrl+E", "Ctrl+I",
+        "Ctrl+Alt+C",
         "B", "R", "P", "F1",
     ]:
         assert f"<kbd>{shortcut}</kbd>" in html, f"missing shortcut {shortcut!r}"

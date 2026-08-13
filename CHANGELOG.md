@@ -13,12 +13,13 @@ when individual pieces of work happened.
   projections are computed up front; pick which one to work on from the
   dropdown, displayed as a histogram like any ordinary spectrum. Hold `C` to
   mark a cut (signal) region and `G` to mark one or more background regions,
-  then **Activate Cut** to compute a background-subtracted spectrum
-  (region-width-weighted, same convention as Integration) and add it to the
-  main window like any other loaded spectrum. **Show Heatmap...** opens a
-  separate, view-only 2D intensity map for visual reference. The Knowledge
-  Database gained a new section explaining 2D matrices, projections, and
-  cuts/gates for anyone unfamiliar with the technique.
+  then **Activate Cut** (`Ctrl+Alt+C`) to compute a background-subtracted
+  spectrum (region-width-weighted, same convention as Integration) and add
+  it to the main window like any other loaded spectrum. **Show
+  Heatmap...** opens a separate, view-only 2D intensity map for visual
+  reference. The Knowledge Database gained a new section explaining 2D
+  matrices, projections, and cuts/gates for anyone unfamiliar with the
+  technique.
 - **Full fit/integrate/calibrate/zoom parity for the matrix panel**: the
   projection view now supports everything the main window's ordinary-spectrum
   view does. Mark background/fit region/peaks (`B`/`R`/`P`) and fit

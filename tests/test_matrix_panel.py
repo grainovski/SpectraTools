@@ -630,6 +630,13 @@ def test_matrix_panel_integrate_action_reachable(qapp):
     assert panel.background_preview_button.shortcut().toString() == "Ctrl+B"
 
 
+def test_matrix_panel_activate_cut_shortcut(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    assert panel.activate_cut_button.shortcut().toString() == "Ctrl+Alt+C"
+
+
 def test_matrix_panel_switching_axis_clears_fit_state(qapp):
     main_window = MainWindow()
     panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))

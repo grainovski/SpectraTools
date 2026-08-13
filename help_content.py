@@ -149,6 +149,7 @@ program supports.</p>
 <tr><th>Shortcut</th><th>Action</th></tr>
 <tr><td><kbd>C</kbd></td><td>Hold and click twice to mark the cut (signal) region</td></tr>
 <tr><td><kbd>G</kbd></td><td>Hold and click twice per region to mark a background region for the cut -- any number of regions allowed</td></tr>
+<tr><td><kbd>Ctrl+Alt+C</kbd></td><td>Activate Cut (same as clicking the button; needs a cut region marked first)</td></tr>
 <tr><td><kbd>B</kbd></td><td>Hold and click twice per region (two regions needed, four clicks total) to mark the two background regions for fitting the working projection</td></tr>
 <tr><td><kbd>R</kbd></td><td>Hold and click twice (once on each end) to mark the fit region for the working projection</td></tr>
 <tr><td><kbd>P</kbd></td><td>Hold and click once per peak to mark a peak position on the working projection</td></tr>
@@ -317,8 +318,8 @@ which one to work on from the dropdown. Hold <kbd>C</kbd> and click
 twice to mark the cut (signal) region, and hold <kbd>G</kbd> and click
 twice for each background region -- any number of background regions
 are allowed, and more background generally means better statistics.
-<b>Activate Cut</b> computes a background-subtracted spectrum
-(weighted automatically by region width, same convention TV uses) and
+<b>Activate Cut</b> (<kbd>Ctrl+Alt+C</kbd>) computes a background-subtracted
+spectrum (weighted automatically by region width, same convention TV uses) and
 adds it to the main window like any other loaded spectrum -- you can
 fit, calibrate, or export it exactly the same way. Negative counts can
 appear in the result and are expected, not an error. <b>Show
