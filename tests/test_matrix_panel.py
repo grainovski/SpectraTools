@@ -297,3 +297,30 @@ def test_matrix_panel_calibrate_button_opens_dialog_and_applies_result(qapp, mon
 
     assert main_window._calibration is result
     assert main_window._calibration_active is True
+
+
+def test_matrix_panel_calibration_change_refreshes_main_window_display(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    panel._apply_calibration_change(Calibration(kind="linear", a=0.0, b=1.0, c=0.0), True)
+
+    assert main_window.axes.get_xlabel() == "Energy (keV)"
+
+
+def test_main_window_calibration_change_refreshes_open_matrix_panels(qapp):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    # Construct via _open_matrix_panel, not MatrixPanel(...) directly --
+    # that's what actually registers the panel in main_window._matrix_panels,
+    # which is what MainWindow._apply_calibration_change iterates over to
+    # decide which panels to refresh.
+    panel = main_window._open_matrix_panel(os.path.join(FIXTURES, "gg.mtx"))
+    panel.axes.set_xlabel("stale label")
+
+    main_window._apply_calibration_change(Calibration(kind="linear", a=0.0, b=1.0, c=0.0), True)
+
+    assert panel.axes.get_xlabel() != "stale label"

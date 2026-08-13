@@ -521,6 +521,14 @@ class MainWindow(QMainWindow):
             )
             self._plot_data(xlim_override=new_xlim)
         self.fit_controller.refresh_parameters_panel_calibration()
+        # Calibration is shared with any open MatrixPanel (its
+        # _calibration/_calibration_active are properties delegating to
+        # these exact attributes, not a separate copy) -- a change made
+        # here needs to visibly redraw those windows too, not just leave
+        # their already-drawn plot showing the old units until something
+        # else happens to trigger a redraw.
+        for panel in self._matrix_panels:
+            panel._plot_projection()
 
     def _open_multiply_dialog(self):
         active = next((s for s in self.spectra if s.active), None)

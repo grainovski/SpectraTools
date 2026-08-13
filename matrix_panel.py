@@ -261,6 +261,13 @@ class MatrixPanel(QMainWindow):
         self._calibration = new_calibration
         self._calibration_active = new_active
         self._plot_projection()
+        # Calibration is shared with main_window (see the _calibration
+        # property above) -- redraw its plot too, the same way its own
+        # _apply_calibration_change redraws every open MatrixPanel.
+        # Without this, a calibration change made here would leave
+        # main_window's already-drawn plot showing the old units until
+        # something unrelated happened to trigger its own redraw.
+        self.main_window._plot_data(preserve_view=True)
 
     def _on_axis_changed(self, index):
         self.working_axis = self.axis_selector.itemData(index)
