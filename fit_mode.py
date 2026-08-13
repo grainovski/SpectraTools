@@ -880,7 +880,7 @@ class FitModeController(QObject):
         if self._parameter_names_shown:
             self.update_parameters_panel(self._parameter_names_shown, self._parameters_panel_values_shown)
 
-    def _read_panel_values(self, want_checked, label_verb):
+    def _read_panel_values(self, want_checked, error_label):
         """Shared by fixed_params_from_panel/initial_guess_overrides_from_panel:
         reads every row's current Value cell, filtered to rows whose Fix
         checkbox matches `want_checked` (True for fixed_params_from_panel's
@@ -891,7 +891,7 @@ class FitModeController(QObject):
         sigma-family row's Value cell holds FWHM; a position/FWHM row's
         Value cell holds keV when calibration is active --
         _panel_value_to_internal converts either back to the sigma-space
-        channel value fit_peaks() expects. `label_verb` ("Fixed value" or
+        channel value fit_peaks() expects. `error_label` ("Fixed value" or
         "Value") distinguishes the two callers' error-message wording.
         Raises FitError if a selected row's Value cell isn't a valid
         number."""
@@ -905,7 +905,7 @@ class FitModeController(QObject):
                     value = float(text)
                 except ValueError:
                     raise FitError(
-                        f"{label_verb} for '{_parameter_label(name, calibrated)}' is not a valid number: {text!r}"
+                        f"{error_label} for '{_parameter_label(name, calibrated)}' is not a valid number: {text!r}"
                     )
                 result[name] = _panel_value_to_internal(
                     self.main_window, name, value, self._parameters_panel_values_shown
@@ -917,7 +917,7 @@ class FitModeController(QObject):
         Parameters panel into a {name: value} dict for the next
         fit_peaks() call. See _read_panel_values for the shared
         conversion/error-message logic."""
-        return self._read_panel_values(want_checked=True, label_verb="Fixed value")
+        return self._read_panel_values(want_checked=True, error_label="Fixed value")
 
     def initial_guess_overrides_from_panel(self):
         """Mirrors fixed_params_from_panel for unchecked rows: reads
@@ -925,7 +925,7 @@ class FitModeController(QObject):
         that parameter in the next fit (the parameter stays free -- the
         optimizer can still move it). See _read_panel_values for the
         shared conversion/error-message logic."""
-        return self._read_panel_values(want_checked=False, label_verb="Value")
+        return self._read_panel_values(want_checked=False, error_label="Value")
 
     def update_results_list(self):
         calibrated = self.main_window._calibration_active and self.main_window._calibration is not None
