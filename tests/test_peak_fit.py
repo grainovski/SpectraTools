@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import pytest
 
@@ -274,6 +276,28 @@ def test_fit_peaks_reports_full_and_net_region_areas():
     # counts, so the full (gross) total must exceed the net (peak-only)
     # total by roughly that background contribution.
     assert result.gross_area > result.net_area
+
+
+def test_fit_peaks_gross_area_err_finite_for_negative_region():
+    """fit_peaks' own gross_area_err sibling to the integrate_region fix:
+    gross_area is the raw (background-still-included) sum over the fit
+    region. np.sqrt() on a negative scalar doesn't crash like math.sqrt
+    does, but it silently produces NaN -- a deeply negative flat
+    background dominating a real, well-defined Gaussian peak's
+    contribution forces gross_area negative here, exactly what a
+    Subtract Spectra result can look like feeding into a fit."""
+    x, y = _make_spectrum(
+        channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=-50.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(0.0, 5.0),
+        right_bg_region=(195.0, 199.0),
+        fit_region=(10.0, 190.0),
+        peak_positions=[100.0],
+    )
+    assert result.gross_area < 0.0  # sanity: this really exercises the negative branch
+    assert math.isfinite(result.gross_area_err)
 
 
 def test_fit_peaks_reports_full_area_per_peak():
@@ -1195,3 +1219,36 @@ def test_integrate_region_net_second_moment_uses_abs_net_area():
     assert result.net_area == pytest.approx(-380.0)
     assert result.net_fwhm == pytest.approx(-68.34051289398487)
     assert result.net_fwhm_err == pytest.approx(5.338971539536898)
+
+
+def test_integrate_region_does_not_crash_on_negative_counts():
+    # Simulates a Subtract-Spectra-derived spectrum: unclamped negative
+    # counts in and around the fit region.
+    x = np.arange(200, dtype=float)
+    y = np.full(200, -5.0)
+    y[90:110] += 40.0  # a "peak" sitting on a negative background
+    result = integrate_region(x, y, (10, 30), (150, 170), (60, 140))
+    assert math.isfinite(result.gross_area_err)
+    assert math.isfinite(result.background_area_err)
+    assert math.isfinite(result.net_area_err)
+
+
+def test_integrate_region_negative_counts_errors_are_nonnegative_magnitudes():
+    x = np.arange(200, dtype=float)
+    y = np.full(200, -5.0)
+    y[90:110] += 40.0
+    result = integrate_region(x, y, (10, 30), (150, 170), (60, 140))
+    assert result.gross_area_err >= 0.0
+    assert result.background_area_err >= 0.0
+    assert result.net_area_err >= 0.0
+
+
+def test_integrate_region_positive_counts_unaffected_by_abs_guard():
+    # Regression guard: for ordinary non-negative data, abs() around the
+    # sqrt argument must be a true no-op -- same result as before the fix.
+    x = np.linspace(0, 200, 201)
+    y = np.zeros(201)
+    y[90:110] = 40.0
+    y += 5.0
+    result_before_style = integrate_region(x, y, (10, 30), (150, 170), (60, 140))
+    assert result_before_style.gross_area_err == pytest.approx(math.sqrt(sum(y[(x >= 60) & (x <= 140)])))

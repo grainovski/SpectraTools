@@ -432,7 +432,7 @@ def fit_peaks(
     # by this fit path is a deterministic two-point line, not a
     # statistically-fit quantity with its own propagated uncertainty.
     gross_area = float(np.sum(y_fit))
-    gross_area_err = float(np.sqrt(gross_area))
+    gross_area_err = float(np.sqrt(abs(gross_area)))
     net_area = float(sum(peak.area for peak in peaks))
     net_area_err = float(np.sqrt(sum(peak.area_err ** 2 for peak in peaks)))
 
@@ -512,7 +512,7 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
     gross_sum = float(np.sum(s))
     gross_dsum = float(np.sum(ds))
     gross_area = gross_sum
-    gross_area_err = math.sqrt(gross_dsum)
+    gross_area_err = math.sqrt(abs(gross_dsum))
 
     # ---- gross moments (vsFitInt.c:45-83) ----
     g_M1 = g_DM1 = g_M2 = g_DM2 = g_M3 = g_DM3 = 0.0
@@ -523,19 +523,19 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
         dlt2 = dlt ** 2
         dMom1 = float(np.sum(dlt2 * ds))
         mom2_raw = float(np.sum(dlt2 * s))
-        g_DM1 = math.sqrt(dMom1) / abs(gross_sum)
+        g_DM1 = math.sqrt(abs(dMom1)) / abs(gross_sum)
         g_M2 = mom2_raw / gross_sum  # plain sum, not abs
 
         dlt3 = dlt2 * dlt
         dDlt_m2 = dlt2 - g_M2
         dMom2 = float(np.sum((dDlt_m2 ** 2) * ds))
         mom3_raw = float(np.sum(dlt3 * s))
-        g_DM2 = math.sqrt(dMom2) / abs(gross_sum)
+        g_DM2 = math.sqrt(abs(dMom2)) / abs(gross_sum)
         g_M3 = mom3_raw / abs(gross_sum)  # abs this time
 
         term = dlt * (dlt2 - 3.0 * g_M2) - g_M3
         dMom3 = float(np.sum((term ** 2) * ds))
-        g_DM3 = math.sqrt(dMom3) / abs(gross_sum)
+        g_DM3 = math.sqrt(abs(dMom3)) / abs(gross_sum)
 
     # ---- background: pooled flat density across BOTH bg regions ----
     # TV's own branch has no trailing `else` (vsFitInt.c:85,194) -- when
@@ -562,12 +562,12 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
 
     background_area = bg_density * n
     background_area_var = bg_density_var * n  # linear, not squared (TV quirk, kept)
-    background_area_err = math.sqrt(background_area_var)
+    background_area_err = math.sqrt(abs(background_area_var))
 
     net_sum = gross_sum - background_area
     net_dsum = gross_dsum + background_area_var
     net_area = net_sum
-    net_area_err = math.sqrt(net_dsum)
+    net_area_err = math.sqrt(abs(net_dsum))
 
     # ---- background & net moments (vsFitInt.c:223-309) ----
     bg_M1 = bg_DM1 = bg_M2 = bg_DM2 = bg_M3 = bg_DM3 = 0.0
@@ -591,10 +591,10 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
         dBgMom1 = float(np.sum((dltb ** 2) * db))
         bgmom2_raw = float(np.sum((dltb ** 2) * b))
         if bg_sum != 0.0:
-            bg_DM1 = math.sqrt(dBgMom1) / abs(bg_sum)
+            bg_DM1 = math.sqrt(abs(dBgMom1)) / abs(bg_sum)
             bg_M2 = bgmom2_raw / abs(bg_sum)  # abs (unlike gross's plain-sum M2)
         if net_sum != 0.0:
-            n_DM1 = math.sqrt(dMom1) / abs(net_sum)
+            n_DM1 = math.sqrt(abs(dMom1)) / abs(net_sum)
             n_M2 = mom2_raw / abs(net_sum)  # abs, like every other bg/net moment (vsFitInt.c:264)
 
         dlt2 = dlt ** 2
@@ -606,10 +606,10 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
         dBgMom2 = float(np.sum((dDltb_m2 ** 2) * db))
         bgmom3_raw = float(np.sum((dltb2 * dltb) * b))
         if bg_sum != 0.0:
-            bg_DM2 = math.sqrt(dBgMom2) / abs(bg_sum)
+            bg_DM2 = math.sqrt(abs(dBgMom2)) / abs(bg_sum)
             bg_M3 = bgmom3_raw / abs(bg_sum)
         if net_sum != 0.0:
-            n_DM2 = math.sqrt(dMom2) / abs(net_sum)
+            n_DM2 = math.sqrt(abs(dMom2)) / abs(net_sum)
             n_M3 = mom3_raw / abs(net_sum)
 
         term = dlt * (dlt2 - 3.0 * n_M2) - n_M3
@@ -618,9 +618,9 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
         dMom3 = float(np.sum((term ** 2) * (ds + db)))
         dBgMom3 = float(np.sum((termb ** 2) * db))
         if bg_sum != 0.0:
-            bg_DM3 = math.sqrt(dBgMom3) / abs(bg_sum)
+            bg_DM3 = math.sqrt(abs(dBgMom3)) / abs(bg_sum)
         if net_sum != 0.0:
-            n_DM3 = math.sqrt(dMom3) / abs(net_sum)
+            n_DM3 = math.sqrt(abs(dMom3)) / abs(net_sum)
 
     def _to_reported(M1, DM1, M2, DM2, M3, DM3):
         centroid, centroid_err = M1, DM1
