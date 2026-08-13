@@ -345,6 +345,17 @@ class MatrixPanel(QMainWindow):
     def _calibration_active(self, value):
         self.main_window._calibration_active = value
 
+    @property
+    def _theme(self):
+        # FitModeController.draw_committed_fits reads self.main_window._theme
+        # via getattr(..., "light") -- without this property, that always
+        # silently falls back to "light" when "main_window" is actually this
+        # panel (MatrixPanel has no _theme attribute of its own), regardless
+        # of the app's real active theme. Delegating, same pattern as
+        # _calibration/_calibration_active above, keeps fit/integration
+        # overlay colors correctly matched to the real theme in dark mode.
+        return self.main_window._theme
+
     def channel_to_display(self, channel):
         if not self._calibration_active or self._calibration is None:
             return channel

@@ -560,6 +560,21 @@ def test_calibration_change_from_one_panel_preserves_sibling_panel_zoom(qapp):
     assert panel_b.axes.get_xlim() == pytest.approx((60.0, 120.0))
 
 
+def test_matrix_panel_theme_delegates_to_main_window(qapp):
+    # Regression guard: FitModeController.draw_committed_fits reads
+    # self.main_window._theme via getattr(..., "light") -- without a
+    # _theme property on MatrixPanel, that always silently fell back to
+    # "light" (MatrixPanel has no _theme attribute of its own), so every
+    # committed fit/integration overlay in a dark-theme matrix panel was
+    # drawn with light-theme colors tuned for the wrong background.
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    main_window._theme = "dark"
+
+    assert panel._theme == "dark"
+
+
 def test_matrix_panel_has_fit_and_parameters_docks(qapp):
     main_window = MainWindow()
     panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
