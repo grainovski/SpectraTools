@@ -1,3 +1,4 @@
+import math
 import os
 import time
 
@@ -557,7 +558,7 @@ class MainWindow(QMainWindow):
         dialog = FactorDialog(
             self, "Multiply by Factor", "Factor:",
             parse=float,
-            validate=lambda v: None if v > 0 else "Factor must be greater than zero.",
+            validate=lambda v: None if (math.isfinite(v) and v > 0) else "Factor must be a finite number greater than zero.",
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._apply_multiply(active, dialog.result_factor)

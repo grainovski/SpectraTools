@@ -224,6 +224,27 @@ def test_open_multiply_dialog_does_nothing_with_no_active_spectrum(qapp):
     main_window._open_multiply_dialog()  # must not raise
 
 
+def test_open_multiply_dialog_validator_rejects_infinite_factor(qapp, monkeypatch):
+    from factor_dialog import FactorDialog
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    captured = {}
+
+    def fake_exec(self):
+        captured["validate"] = self._validate
+        self.result_factor = None
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(FactorDialog, "exec", fake_exec)
+    main_window._open_multiply_dialog()
+
+    validate = captured["validate"]
+    assert validate(float("inf")) is not None
+    assert validate(float("-inf")) is not None
+    assert validate(1e20) is None  # still a legal finite factor, even if large -- only inf/nan are rejected
+
+
 def test_multiply_action_disabled_with_no_active_spectrum(qapp):
     main_window = MainWindow()
     assert main_window.multiply_action.isEnabled() is False

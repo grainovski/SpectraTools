@@ -124,6 +124,22 @@ def test_rejects_nan_factor(qapp, monkeypatch):
     assert len(warned) == 1
 
 
+def test_rejects_infinite_factor(qapp, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **kw: warned.append(a)))
+    a = _spectrum("a.txt", 10)
+    b = _spectrum("b.txt", 10)
+    dialog = CombineDialog(None, "Add Spectra", [a, b], a)
+    dialog._factor_field.setText("inf")
+    dialog._on_accept()
+    assert dialog.result_factor is None
+    assert dialog.result_spectrum_a is None
+    assert dialog.result_spectrum_b is None
+    assert len(warned) == 1
+
+
 def test_rejects_mismatched_lengths_and_names_both_channel_counts(qapp, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
 
