@@ -72,6 +72,20 @@ def test_raises_parse_error_on_truncated_spe(tmp_path):
         load_spe(str(file_path))
 
 
+def test_load_spe_raises_parse_error_not_silent_corruption_on_extreme_value(tmp_path):
+    # np.round(channels).astype(np.int64) does not raise on overflow --
+    # a value this far outside int64 range silently casts to the int64
+    # sentinel (-9223372036854775808) with only an invisible
+    # RuntimeWarning. Must raise ParseError instead. save_spe is used
+    # purely as a convenient, already-correct way to build a valid .spe
+    # file whose one channel value is 1e30 (well within float32 range,
+    # so it round-trips through the file format unchanged).
+    path = tmp_path / "extreme.spe"
+    save_spe(str(path), [1e30])
+    with pytest.raises(ParseError):
+        load_spe(str(path))
+
+
 def test_save_spe_round_trips_through_load_spe(tmp_path):
     data = np.array([4, 0, 1, 0, 1, 7, 200], dtype=np.int64)
     path = tmp_path / "out.spe"

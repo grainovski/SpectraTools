@@ -58,7 +58,13 @@ def load_spe(path: str) -> np.ndarray:
 
     dtype = np.dtype(endian + "f4")
     channels = np.frombuffer(data, dtype=dtype, count=idim1, offset=data_start)
-    return np.round(channels).astype(np.int64)
+    rounded = np.round(channels)
+    if np.any(np.abs(rounded) > np.iinfo(np.int64).max):
+        # .astype(np.int64) does not raise on overflow -- it silently
+        # wraps to the int64 sentinel (-9223372036854775808) with only
+        # an invisible RuntimeWarning. Reject explicitly instead.
+        raise ParseError(f"File contains an out-of-range channel value: {path}")
+    return rounded.astype(np.int64)
 
 
 def save_spe(path: str, data) -> None:

@@ -362,6 +362,24 @@ def test_oldmat_rejects_malformed_trailer(tmp_path):
         load_spk(str(file_path))
 
 
+def test_load_spk_raises_parse_error_not_silent_corruption_on_extreme_oldmat_float(tmp_path):
+    # oldmat's floating-point (lf4/hf4) path does
+    # np.round(channels).astype(np.int64) with no range check, same bug
+    # class as test_lc_rejects_value_overflowing_int64 above but on the
+    # oldmat path instead of LC. .astype() doesn't raise on overflow --
+    # it silently casts to the int64 sentinel (-9223372036854775808)
+    # with only an invisible RuntimeWarning. Must raise ParseError
+    # instead. 1e30 is well within float32 range (max ~3.4e38) so it
+    # survives the file round-trip unchanged, but is far outside int64
+    # range (~9.2e18).
+    payload = struct.pack("<1f", 1e30)
+    file_path = tmp_path / "oldmat_extreme.spk"
+    file_path.write_bytes(_oldmat_bytes("1.lf4:2", payload))
+
+    with pytest.raises(ParseError):
+        load_spk(str(file_path))
+
+
 def test_zigzag_encode_matches_decode_for_various_values():
     for value in [-1000, -3, -2, -1, 0, 1, 2, 3, 1000, 158]:
         assert _zigzag_decode(_zigzag_encode(value)) == value
