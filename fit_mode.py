@@ -315,6 +315,18 @@ def _integration_tooltip(main_window, result):
     return "\n".join(lines)
 
 
+def _peak_component(x_dense, peak, result):
+    """One peak's own shape (Gaussian or hypermet-tail, matching
+    result.tail_fraction), evaluated over x_dense -- shared by the
+    total-curve accumulation and the per-peak decomposition overlay
+    in draw_committed_fits, so the two can never silently diverge."""
+    if result.tail_fraction is not None:
+        return peak.amplitude * hypermet_left_tail(
+            x_dense, peak.position, peak.sigma, result.tail_fraction, result.tail_beta,
+        )
+    return peak.amplitude * np.exp(-((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2))
+
+
 def _is_sigma_name(name):
     return name == "sigma" or name.startswith("sigma_")
 
@@ -609,18 +621,6 @@ class FitModeController(QObject):
             return
         self.main_window._update_fit_mode_availability()
 
-    @staticmethod
-    def _peak_component(x_dense, peak, result):
-        """One peak's own shape (Gaussian or hypermet-tail, matching
-        result.tail_fraction), evaluated over x_dense -- shared by the
-        total-curve accumulation and the per-peak decomposition overlay
-        in draw_committed_fits, so the two can never silently diverge."""
-        if result.tail_fraction is not None:
-            return peak.amplitude * hypermet_left_tail(
-                x_dense, peak.position, peak.sigma, result.tail_fraction, result.tail_beta,
-            )
-        return peak.amplitude * np.exp(-((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2))
-
     def draw_committed_fits(self, spectrum):
         axes = self.main_window.axes
         # x in data coordinates, y in axes-fraction -- keeps peak labels
@@ -695,14 +695,14 @@ class FitModeController(QObject):
             background_dense = result.background_slope * x_dense + result.background_intercept
             total = background_dense.copy()
             for peak in result.peaks:
-                total = total + self._peak_component(x_dense, peak, result)
+                total = total + _peak_component(x_dense, peak, result)
             axes.plot(to_display(x_dense), total, color=fit_color, linewidth=1.5)
 
             # Peak decomposition: each peak's own contribution (background
             # + that single peak), so a multi-peak fit visually shows how
             # the total curve above decomposes into its components.
             for peak in result.peaks:
-                component = self._peak_component(x_dense, peak, result)
+                component = _peak_component(x_dense, peak, result)
                 axes.plot(
                     to_display(x_dense), background_dense + component,
                     color=fit_color, linewidth=0.75, linestyle="--", alpha=0.6,
