@@ -14,22 +14,28 @@ def _bucket_channel_count(n: int) -> int:
 
 def load_histogram(path: str) -> np.ndarray:
     values = []
-    with open(path, "r") as f:
-        for line in f:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                values.append(int(stripped))
-            except ValueError:
-                continue
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    values.append(int(stripped))
+                except ValueError:
+                    continue
+    except UnicodeDecodeError as exc:
+        raise ParseError(f"File is not valid UTF-8 text: {path}") from exc
 
     if not values:
         raise ParseError(f"No histogram data found in file: {path}")
 
     channel_count = _bucket_channel_count(len(values))
     data = np.zeros(channel_count, dtype=np.int64)
-    data[: len(values)] = values
+    try:
+        data[: len(values)] = values
+    except OverflowError as exc:
+        raise ParseError(f"File contains an out-of-range integer value: {path}") from exc
     return data
 
 

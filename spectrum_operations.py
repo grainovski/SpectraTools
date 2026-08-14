@@ -4,12 +4,26 @@ dialog layer. main_window.py is the thin UI layer on top of this."""
 
 import numpy as np
 
+from int64_cast import checked_round_to_int64
+
+
+def _checked_int64(rounded):
+    """A validated-positive-finite UI factor can still overflow here:
+    e.g. a factor like 1e20 is finite and > 0, so it passes the dialog's
+    own validation, but still overflows for any spectrum with
+    non-trivial counts. See int64_cast.checked_round_to_int64 for why
+    this needs numpy's own cast machinery rather than a hand-written
+    magnitude check."""
+    return checked_round_to_int64(
+        rounded, lambda: ValueError("Result is out of range -- try a smaller factor.")
+    )
+
 
 def multiply(data, factor):
     """Every channel's count scaled by `factor` and rounded to the
     nearest integer (numpy's round-half-to-even). `factor` is assumed
     already validated (> 0) by the caller."""
-    return np.round(data * factor).astype(np.int64)
+    return _checked_int64(np.round(data * factor))
 
 
 def rebin(data, factor):
@@ -71,10 +85,10 @@ def add(data_a, data_b, factor):
     already validated as equal length by the caller. Unlike multiply()/
     rebin(), negative results are NOT clamped -- matches TV's own
     SpcAdd, which never clamps (tv-1.9.13/lib/tv/vsSpectra.c)."""
-    return np.round(data_a + factor * data_b).astype(np.int64)
+    return _checked_int64(np.round(data_a + factor * data_b))
 
 
 def subtract(data_a, data_b, factor):
     """result[i] = A[i] - factor * B[i], rounded to nearest integer.
     Same assumptions and TV-parity notes as add() above."""
-    return np.round(data_a - factor * data_b).astype(np.int64)
+    return _checked_int64(np.round(data_a - factor * data_b))

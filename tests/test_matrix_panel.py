@@ -630,6 +630,49 @@ def test_matrix_panel_integrate_action_reachable(qapp):
     assert panel.background_preview_button.shortcut().toString() == "Ctrl+B"
 
 
+def test_matrix_panel_fit_results_table_populates_after_fit(qapp, monkeypatch):
+    # Regression guard: MatrixPanel._plot_data() never called
+    # fit_controller.update_results_list(), so the Fit Results table
+    # silently never populated after a fit or integration, contradicting
+    # the HowTo page's claim that it "works exactly like the main
+    # window's." The underlying fit data was always correct (appended to
+    # the spectrum's own .fits list by run_fit() below) -- only the
+    # table-refresh wiring was missing. Same append_auto_log side-effect
+    # dodge test_matrix_panel_and_main_window_integrate_identically above
+    # already uses.
+    monkeypatch.setattr(fit_mode.fit_export, "append_auto_log", lambda *a, **k: None)
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    # A real fit (not just Integration's direct sum) needs marks
+    # ready_to_fit() actually requires: two background regions AND a
+    # fit region AND at least one peak -- test_matrix_panel_fitting_a_peak_on_the_projection_works
+    # above only marks region+peak (it never calls run_fit(), so it
+    # never needs bg regions), and test_matrix_panel_and_main_window_integrate_identically
+    # marks b+r but no peak (Integration doesn't need one). This test
+    # needs all three, so it combines both: b+r+p, same fixed-constant
+    # style as test_matrix_panel_and_main_window_integrate_identically,
+    # with region bounds chosen to bracket the real, dominant peak in
+    # gg.mtx's x-projection (verified to actually converge, not just
+    # reach ready_to_fit()).
+    left_bg, right_bg, fit_region, peak = (60.0, 90.0), (310.0, 340.0), (100.0, 300.0), 200.0
+
+    panel.fit_controller._held_key = "b"
+    _click(panel, left_bg[0]); _click(panel, left_bg[1])
+    _click(panel, right_bg[0]); _click(panel, right_bg[1])
+    panel.fit_controller._held_key = "r"
+    _click(panel, fit_region[0]); _click(panel, fit_region[1])
+    panel.fit_controller._held_key = "p"
+    _click(panel, peak)
+    panel.fit_controller._held_key = None
+
+    assert panel.fit_controller.state.ready_to_fit()
+    panel.fit_controller.run_fit()
+
+    assert len(panel.spectra[0].fits) == 1  # confirms the fit itself really did succeed
+    assert panel.fit_controller.results_table.rowCount() == 1
+
+
 def test_matrix_panel_activate_cut_shortcut(qapp):
     main_window = MainWindow()
     panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
@@ -768,3 +811,49 @@ def test_matrix_panel_activate_cut_integration_auto_logs_next_to_source_matrix_f
 
     assert len(added.fits) == 1
     assert os.path.exists(log_path)
+
+
+def test_activate_cut_auto_log_filename_is_not_truncated_by_embedded_dots(qapp, tmp_path, monkeypatch):
+    """Regression guard: _activate_cut's label used to embed the cut
+    region bounds as raw .1f-formatted floats right after a literal
+    ".mtx" (e.g. "gpff.mtx y cut [3004.4, 3859.9]"). fit_export.auto_log_path's
+    os.path.splitext(os.path.basename(...)) truncates at the LAST '.' in
+    that basename, which was always one of the region bounds' own
+    decimal points -- silently dropping everything from there onward
+    (confirmed by two stray files this exact bug left in the repo root:
+    "gpff.mtx y cut [3004.4, 3859_fits.jsonl" and
+    "gpff.mtx y cut [3019.0, 3766_fits.jsonl"). The auto-log path derived
+    from an activated cut's spectrum must retain both region bounds in
+    full, and two differently-bounded cuts on the same matrix must not
+    collide onto the same auto-log file (rounding the bounds to remove
+    their decimal points alone is not sufficient -- it merely unmasks
+    self.path's own ".mtx" dot as the new last dot, which would make
+    every cut on the same matrix resolve to the identical auto-log
+    file)."""
+    small_matrix = np.zeros((50, 50))
+    small_matrix[10:40, 10:40] = 100.0
+    monkeypatch.setattr(matrix_panel, "load_mtx", lambda path: small_matrix)
+
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, str(tmp_path / "gpff.mtx"))
+
+    panel.cut_controller.state.cut_region = (3004.4, 3859.9)
+    panel._activate_cut()
+    first = main_window.spectra[-1]
+    first_log = fit_mode.fit_export.auto_log_path(first.path)
+    first_name = os.path.basename(first_log)
+
+    # Both rounded bounds must survive in full -- the old .1f format
+    # truncated everything from the second bound's decimal point onward.
+    assert "3004" in first_name
+    assert "3860" in first_name  # round(3859.9) == 3860
+    assert first_name.endswith("_fits.jsonl")
+
+    # A second, differently-bounded cut on the same matrix must resolve
+    # to a DIFFERENT auto-log file, not collide onto the same one.
+    panel.cut_controller.state.cut_region = (100.0, 200.0)
+    panel._activate_cut()
+    second = main_window.spectra[-1]
+    second_log = fit_mode.fit_export.auto_log_path(second.path)
+
+    assert second_log != first_log

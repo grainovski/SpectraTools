@@ -432,6 +432,12 @@ def fit_peaks(
     # by this fit path is a deterministic two-point line, not a
     # statistically-fit quantity with its own propagated uncertainty.
     gross_area = float(np.sum(y_fit))
+    # Deliberately no guard here, matching TV's own lack of one: unlike
+    # integrate_region() (which now rejects a negative-count region
+    # outright, see the FitError raised above `ds = s.copy()`), this is
+    # one auxiliary summary field on an ALREADY-SUCCESSFUL fit -- a
+    # negative gross_area (e.g. fitting a Subtract Spectra result)
+    # produces a NaN here without discarding the rest of a valid fit.
     gross_area_err = float(np.sqrt(gross_area))
     net_area = float(sum(peak.area for peak in peaks))
     net_area_err = float(np.sqrt(sum(peak.area_err ** 2 for peak in peaks)))
@@ -488,8 +494,9 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
     conversion from ParseIntPeak (tv-1.9.13/lib/tv/vsFitFmt.c:340-392).
     Several arithmetic choices below look unusual (asymmetric plain-sum
     vs abs(sum) normalization between layers/moments; the background's
-    own higher-moment uncertainty terms reusing the *net* distribution's
-    2nd moment rather than its own; the background-sum uncertainty
+    own FWHM uncertainty term specifically -- not its skewness term --
+    reusing the *net* distribution's 2nd moment rather than its own;
+    the background-sum uncertainty
     scaling linearly rather than quadratically with region width) --
     these are deliberate, source-verified TV-parity choices, not bugs,
     per the design spec. Independently validated (hand-computed moments,
@@ -503,10 +510,17 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
     mask = (x >= lo) & (x <= hi)
     idx = x[mask]
     s = y[mask]
-    ds = s.copy()  # Poisson variance per channel = the count itself
     n = idx.size
     if n == 0:
         raise FitError(f"Fit region {fit_region} contains no data")
+    if np.any(s < 0.0):
+        raise FitError(
+            "Cannot integrate a region containing negative counts (e.g. "
+            "from a Subtract Spectra result) -- the uncertainty "
+            "calculation used here assumes non-negative Poisson counts, "
+            "matching TV's own convention."
+        )
+    ds = s.copy()  # Poisson variance per channel = the count itself
 
     # ---- gross sum & variance (vsFitInt.c:41-43) ----
     gross_sum = float(np.sum(s))
@@ -550,6 +564,14 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
             bmask = (x >= blo) & (x <= bhi)
             bg_chn += int(np.sum(bmask))
             bg_y = y[bmask]
+            if np.any(bg_y < 0.0):
+                raise FitError(
+                    "Cannot integrate a region containing negative counts "
+                    "(e.g. from a Subtract Spectra result) -- the "
+                    "uncertainty calculation used here assumes "
+                    "non-negative Poisson counts, matching TV's own "
+                    "convention."
+                )
             bg_count += float(np.sum(bg_y))
             bg_dcount += float(np.sum(bg_y))
 
@@ -613,8 +635,11 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
             n_M3 = mom3_raw / abs(net_sum)
 
         term = dlt * (dlt2 - 3.0 * n_M2) - n_M3
-        # CONFIRMED TV QUIRK: net's M2 again, but bg's OWN M3 here.
-        termb = dltb * (dltb2 - 3.0 * n_M2) - bg_M3
+        # vsFitInt.c:303 uses the background's OWN M2 here (unlike the
+        # DM2 term above at vsFitInt.c:281, which genuinely does cross-use
+        # net's M2 -- the two lines are NOT the same quirk, despite an
+        # earlier design-spec draft citing them together).
+        termb = dltb * (dltb2 - 3.0 * bg_M2) - bg_M3
         dMom3 = float(np.sum((term ** 2) * (ds + db)))
         dBgMom3 = float(np.sum((termb ** 2) * db))
         if bg_sum != 0.0:
@@ -837,12 +862,24 @@ def _marquardt_fit(model, x, y, y_err, p0, damping, fit_region_bounds=None):
     n = len(p)
     weights = 1.0 / y_err
 
-    def measure_and_jac(pt):
-        J = _numeric_jacobian(model, x, pt)
+    # A trial's accept/reject test (below) only needs the scalar measure,
+    # not the Jacobian -- and most trials in a damped Marquardt loop get
+    # rejected (that's what the lambda-growth retries are for). Splitting
+    # the two means a rejected trial costs one model evaluation instead of
+    # 2*n+1 (2*n for the numeric Jacobian's central differences, +1 for
+    # the measure's own evaluation), while an accepted step still gets
+    # its full Jacobian, computed once.
+    def measure_only(pt):
         r = (y - model(x, pt)) * weights
-        Jw = J * weights[:, None]
         measure = float(np.sum(r ** 2))
-        return measure, r, Jw
+        return measure, r
+
+    def jac_only(pt):
+        return _numeric_jacobian(model, x, pt) * weights[:, None]
+
+    def measure_and_jac(pt):
+        measure, r = measure_only(pt)
+        return measure, r, jac_only(pt)
 
     measure, r, J = measure_and_jac(p)
     lam = _CUR_LAMBDA_START
@@ -867,20 +904,20 @@ def _marquardt_fit(model, x, y, y_err, p0, damping, fit_region_bounds=None):
 
             delta = _apply_step_damping(p, raw_delta, damping, fit_region_bounds)
             p_try = _clamp_trial(p + delta, damping)
-            try_measure, try_r, try_J = measure_and_jac(p_try)
+            try_measure, try_r = measure_only(p_try)
 
             if try_measure < measure:
                 improvement = measure - try_measure
-                p, measure, r, J = p_try, try_measure, try_r, try_J
+                p, measure, r, J = p_try, try_measure, try_r, jac_only(p_try)
                 lam = max(0.001 * improvement, _CUR_MIN_LAMBDA)
                 accepted = True
             else:
                 lam *= _CUR_INC_LAMBDA
                 if lam > _CUR_MAX_LAMBDA:
                     p_try2 = _clamp_trial(p - 0.5 * delta, damping)
-                    try_measure2, try_r2, try_J2 = measure_and_jac(p_try2)
+                    try_measure2, try_r2 = measure_only(p_try2)
                     if try_measure2 < measure:
-                        p, measure, r, J = p_try2, try_measure2, try_r2, try_J2
+                        p, measure, r, J = p_try2, try_measure2, try_r2, jac_only(p_try2)
                     accepted = True
                     give_up = True
 

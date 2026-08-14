@@ -5,6 +5,7 @@ extension of FactorDialog, which is deliberately kept simple and shared
 verbatim by Multiply/Rebin; bolting spectrum-pickers onto it would
 compromise that reusability."""
 
+import math
 import os
 
 from PySide6.QtWidgets import (
@@ -71,8 +72,8 @@ class CombineDialog(QDialog):
         except ValueError:
             QMessageBox.warning(self, self.windowTitle(), "Please enter a valid number.")
             return
-        if not (factor > 0):
-            QMessageBox.warning(self, self.windowTitle(), "Factor must be greater than zero.")
+        if not (math.isfinite(factor) and factor > 0):
+            QMessageBox.warning(self, self.windowTitle(), "Factor must be a finite number greater than zero.")
             return
         spectrum_a = self._spectra[self._combo_a.currentIndex()]
         spectrum_b = self._spectra[self._combo_b.currentIndex()]

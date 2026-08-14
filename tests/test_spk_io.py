@@ -216,6 +216,25 @@ def test_lc_rejects_stream_that_runs_out_of_bytes(tmp_path):
         load_spk(str(file_path))
 
 
+def test_lc_decode_error_message_names_spk_not_matrix(tmp_path):
+    # lc_codec.decode_row is shared with mtx_io.py's matrix-row decoder
+    # and defaults to matrix-flavored wording ("lc matrix file: ...").
+    # _lc2_uncompress must pass its own `kind` so a corrupt .spk
+    # (single-spectrum) file's error doesn't tell the user their
+    # problem is in a "matrix file" -- confirmed via the real load_spk
+    # path, not just calling _lc2_uncompress directly, since that's
+    # what a user actually sees in the "could not be loaded" dialog.
+    header = _lc_header(version=2, levels=1, lines=1, columns=3, poslentablepos=44)
+    poslen = struct.pack("<2I", 44 + 8, 1)
+    file_path = tmp_path / "lc_short_stream.spk"
+    file_path.write_bytes(header + poslen + bytes([0x53]))
+
+    with pytest.raises(ParseError) as excinfo:
+        load_spk(str(file_path))
+    assert "lc matrix file" not in str(excinfo.value)
+    assert ".spk file" in str(excinfo.value)
+
+
 def test_lc_rejects_value_overflowing_int64(tmp_path):
     # LC1's extended-tag continuation loop has no cap on the number of
     # continuation bytes, so a handful of crafted bytes can build a
@@ -357,6 +376,43 @@ def test_oldmat_rejects_malformed_trailer(tmp_path):
     trailer = (b"\nMatFmt: 3.le4" + b"\x00" * 50)[:64]
     file_path = tmp_path / "oldmat_malformed.spk"
     file_path.write_bytes(payload + trailer)
+
+    with pytest.raises(ParseError):
+        load_spk(str(file_path))
+
+
+def test_load_spk_raises_parse_error_not_silent_corruption_on_extreme_oldmat_float(tmp_path):
+    # oldmat's floating-point (lf4/hf4) path does
+    # np.round(channels).astype(np.int64) with no range check -- same
+    # out-of-int64-range failure mode as
+    # test_lc_rejects_value_overflowing_int64 above, but a different
+    # underlying cause: LC decoding raises a real OverflowError building
+    # an oversized Python int, while this path has no exception at all
+    # without a guard -- numpy's cast just wraps silently to the int64
+    # sentinel (-9223372036854775808) with only an invisible
+    # RuntimeWarning. Must raise ParseError instead. 1e30 is well within
+    # float32 range (max ~3.4e38) so it survives the file round-trip
+    # unchanged, but is far outside int64 range (~9.2e18).
+    payload = struct.pack("<1f", 1e30)
+    file_path = tmp_path / "oldmat_extreme.spk"
+    file_path.write_bytes(_oldmat_bytes("1.lf4:2", payload))
+
+    with pytest.raises(ParseError):
+        load_spk(str(file_path))
+
+
+def test_load_spk_raises_parse_error_on_exactly_int64_max_plus_one_oldmat_float(tmp_path):
+    # 2**63 sits exactly on the boundary a naive guard gets wrong:
+    # np.iinfo(np.int64).max (2**63 - 1) isn't exactly representable in
+    # float32/float64, so a bare `> np.iinfo(np.int64).max` comparison
+    # rounds that bound UP to 2**63 and silently lets this exact
+    # out-of-range value slip through to the sentinel instead of
+    # raising. 2**63 itself IS exactly representable in float32 (a pure
+    # power of two only needs exponent range), so it survives the file
+    # round-trip unchanged.
+    payload = struct.pack("<1f", 2.0**63)
+    file_path = tmp_path / "oldmat_boundary.spk"
+    file_path.write_bytes(_oldmat_bytes("1.lf4:2", payload))
 
     with pytest.raises(ParseError):
         load_spk(str(file_path))

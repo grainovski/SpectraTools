@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import pytest
 
@@ -274,6 +276,34 @@ def test_fit_peaks_reports_full_and_net_region_areas():
     # counts, so the full (gross) total must exceed the net (peak-only)
     # total by roughly that background contribution.
     assert result.gross_area > result.net_area
+
+
+def test_fit_peaks_gross_area_err_is_nan_not_crash_for_negative_region():
+    """fit_peaks' own gross_area_err sibling to the integrate_region fix:
+    gross_area is the raw (background-still-included) sum over the fit
+    region. np.sqrt() on a negative scalar doesn't crash like math.sqrt
+    does -- it silently produces NaN, matching TV's own lack of a guard
+    here. Deliberately different resolution from integrate_region()'s
+    FitError: gross_area_err is one auxiliary summary field on an
+    otherwise-valid, already-successful fit (the fit itself doesn't
+    care about the sign of y_sub), so this fit is allowed to succeed
+    with a NaN in that one field rather than being rejected outright."""
+    x, y = _make_spectrum(
+        channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=-50.0,
+    )
+    result = fit_peaks(
+        x, y,
+        left_bg_region=(0.0, 5.0),
+        right_bg_region=(195.0, 199.0),
+        fit_region=(10.0, 190.0),
+        peak_positions=[100.0],
+    )
+    assert result.gross_area < 0.0  # sanity: this really exercises the negative branch
+    assert math.isnan(result.gross_area_err)
+    # The rest of the fit is unaffected -- a real, well-defined peak was
+    # still found and reported normally.
+    assert len(result.peaks) == 1
+    assert math.isfinite(result.peaks[0].area)
 
 
 def test_fit_peaks_reports_full_area_per_peak():
@@ -920,6 +950,73 @@ def test_marquardt_fit_clamps_tail_fraction_and_beta_to_bounds():
     assert popt[4] >= TAIL_BETA_MIN
 
 
+def test_marquardt_does_not_recompute_jacobian_for_rejected_trials():
+    """Task 7 (Important 2) regression guard for the audit's measured
+    12.4x evaluation blowup on multi-peak fits: the full numeric
+    central-difference Jacobian costs 2*n_params model evaluations, but
+    a rejected trial only ever needs the scalar measure for its
+    accept/reject test -- a rejected trial's Jacobian is thrown away
+    immediately and never feeds the next iteration, so computing it is
+    pure waste. An 8-peak, independent-width (24 free parameter)
+    overlapping multiplet with a modestly-off initial guess forces many
+    lambda-growth (rejected-trial) rounds -- this exact fixture produces
+    68 evaluation-events (1 initial + 16 accepted + 50 rejected + 1
+    give-up half-step) before the fix, i.e. 68 * (2*24 + 1) = 3332 model
+    calls. The ceiling below is a generous 60% of that measured pre-fix
+    count -- comfortably clears if
+    rejected trials stop paying for a Jacobian, comfortably fails if they
+    don't."""
+    n_peaks = 8
+
+    def raw_model(x, p):
+        total = np.zeros_like(x)
+        for i in range(n_peaks):
+            amp, pos, sigma = p[3 * i], p[3 * i + 1], p[3 * i + 2]
+            total = total + amp * np.exp(-((x - pos) ** 2) / (2 * sigma ** 2))
+        return total
+
+    call_count = {"n": 0}
+
+    def counting_model(xx, p):
+        call_count["n"] += 1
+        return raw_model(xx, p)
+
+    x = np.linspace(0.0, 100.0, 400)
+    true_sigma = 3.0
+    spacing = 2.9 * true_sigma  # overlapping, not fully resolved peaks
+    true_positions = [50.0 + (i - (n_peaks - 1) / 2.0) * spacing for i in range(n_peaks)]
+    true_p = []
+    for pos in true_positions:
+        true_p += [500.0, pos, true_sigma]
+    y = raw_model(x, true_p)
+    y_err = np.sqrt(np.maximum(y, 1.0))
+
+    # A modestly (not wildly) bad initial guess -- close enough to
+    # converge in 17 outer iterations, well under _CUR_MAX_ITERATIONS,
+    # but off enough that many individual steps need lambda-growth
+    # rounds first. Found by direct sweep against this exact fixture,
+    # not guessed.
+    p0 = []
+    for pos in true_positions:
+        p0 += [450.0, pos + 1.3, true_sigma * 1.2]
+
+    damping = []
+    for i in range(n_peaks):
+        sigma_index = 3 * i + 2
+        damping += [
+            _ParamDamping("amp"),
+            _ParamDamping("pos", sigma_index=sigma_index),
+            _ParamDamping("sigma"),
+        ]
+
+    popt, pcov = _marquardt_fit(
+        counting_model, x, y, y_err, p0, damping, fit_region_bounds=(0.0, 100.0)
+    )
+
+    assert np.all(np.isfinite(popt))  # sanity: this really is a working fit, not a crash
+    assert call_count["n"] < 3332 * 0.6
+
+
 from peak_fit import _measure_width
 
 
@@ -1146,12 +1243,16 @@ def test_integrate_region_background_uncertainty_scales_linearly_with_region_wid
 
 def test_integrate_region_background_moment_uncertainty_reuses_net_second_moment():
     """Deliberately verifies another TV quirk: the background layer's own
-    width/skewness uncertainty terms reuse the *net* distribution's 2nd
-    moment rather than the background's own -- confirmed against TV's
-    source (vsFitInt.c:281,303) and cross-checked numerically against an
-    independently-coded "corrected" alternative during design (the two
-    differ by more than 30% for this fixture; this test pins the exact
-    TV-parity value so a future "fix" would fail loudly)."""
+    FWHM uncertainty term (background_fwhm_err) reuses the *net*
+    distribution's 2nd moment rather than the background's own --
+    confirmed against TV's source (vsFitInt.c:281) and cross-checked
+    numerically against an independently-coded "corrected" alternative
+    during design (the two differ by more than 30% for this fixture;
+    this test pins the exact TV-parity value so a future "fix" would
+    fail loudly). NOT the same quirk as background_skewness_err, a
+    DIFFERENT term (vsFitInt.c:303) that turned out to use the
+    background's own 2nd moment after all -- see
+    test_background_skewness_err_uses_backgrounds_own_m2_not_nets."""
     x = np.arange(60, dtype=float)
     y = np.full(60, 30.0)
     y[5] = 40.0
@@ -1164,6 +1265,79 @@ def test_integrate_region_background_moment_uncertainty_reuses_net_second_moment
         fit_region=(20.0, 36.0),
     )
     assert result.background_fwhm_err == pytest.approx(0.3305131157646951)
+
+
+def _hand_compute_background_skewness_err(x, y, left_bg_region, right_bg_region, fit_region):
+    """Independent re-derivation of integrate_region()'s background
+    3rd-moment uncertainty (background_skewness_err), NOT a call into
+    integrate_region() itself. Mirrors that function's own mask
+    construction, bg_density/bg_M1/dltb/dltb2 machinery exactly, but
+    deliberately uses the background's OWN 2nd moment (bg_M2) in the
+    `termb` line -- matching tv-1.9.13/lib/tv/vsFitInt.c:303 (`dltb =
+    dltb * (dltb2 - 3.0 * bgMom2) - bgMom3;`), unlike the net-reusing
+    `n_M2` the pre-fix production code used there. If this helper's
+    result matches integrate_region()'s, the production code must
+    really be using bg_M2 (not n_M2) in that term."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    lo, hi = fit_region
+    mask = (x >= lo) & (x <= hi)
+    idx = x[mask]
+    s = y[mask]
+    n = idx.size
+
+    bg_chn = 0
+    bg_count = 0.0
+    bg_dcount = 0.0
+    for region in (left_bg_region, right_bg_region):
+        blo, bhi = region
+        bmask = (x >= blo) & (x <= bhi)
+        bg_chn += int(np.sum(bmask))
+        bg_y = y[bmask]
+        bg_count += float(np.sum(bg_y))
+        bg_dcount += float(np.sum(bg_y))
+
+    bg_density = bg_count / bg_chn
+    bg_density_var = bg_dcount / (bg_chn * bg_chn)
+    background_area = bg_density * n
+
+    b = bg_density
+    db = bg_density_var
+    bg_sum = background_area
+
+    bgmom1_raw = float(np.sum(idx * b))
+    bg_M1 = bgmom1_raw / abs(bg_sum)
+
+    dltb = idx - bg_M1
+    dltb2 = dltb ** 2
+    bgmom2_raw = float(np.sum(dltb2 * b))
+    bg_M2 = bgmom2_raw / abs(bg_sum)  # background's OWN 2nd moment
+    bgmom3_raw = float(np.sum((dltb2 * dltb) * b))
+    bg_M3 = bgmom3_raw / abs(bg_sum)
+
+    termb = dltb * (dltb2 - 3.0 * bg_M2) - bg_M3  # bg_M2, not n_M2 -- the fix
+    dBgMom3 = float(np.sum((termb ** 2) * db))
+    bg_DM3 = math.sqrt(dBgMom3) / abs(bg_sum)
+    return bg_DM3  # == background_skewness_err (DM3 passes through _to_reported unchanged)
+
+
+def test_background_skewness_err_uses_backgrounds_own_m2_not_nets():
+    # Constructed so bg_M2 and n_M2 are numerically different -- an
+    # asymmetric background window vs. a peak-dominated net region --
+    # so the bug (using n_M2 in termb) produces a different, wrong
+    # background_skewness_err than the fix (using bg_M2). Verified
+    # numerically before writing this test: bg_M2=850.0 vs n_M2=33.25
+    # for this exact fixture (a 96% relative difference), producing a
+    # ~29% difference in the final background_skewness_err between the
+    # buggy and fixed formula -- comfortably far from a coincidental
+    # match.
+    x = np.arange(300, dtype=float)
+    y = np.full(300, 3.0)
+    y[140:160] += 100.0  # a sharp peak, skews the NET moments a lot
+    result = integrate_region(x, y, (10, 15), (280, 295), (100, 200))
+    expected = _hand_compute_background_skewness_err(x, y, (10, 15), (280, 295), (100, 200))
+    assert result.background_skewness_err == pytest.approx(expected, rel=1e-9)
 
 
 def test_integrate_region_net_second_moment_uses_abs_net_area():
@@ -1195,3 +1369,52 @@ def test_integrate_region_net_second_moment_uses_abs_net_area():
     assert result.net_area == pytest.approx(-380.0)
     assert result.net_fwhm == pytest.approx(-68.34051289398487)
     assert result.net_fwhm_err == pytest.approx(5.338971539536898)
+
+
+def test_integrate_region_raises_clear_error_on_negative_counts_in_fit_region():
+    # Simulates a Subtract-Spectra-derived spectrum: unclamped negative
+    # counts in the fit region itself. TV's own uncertainty formulas have
+    # no guard for this case (confirmed directly against vsFitInt.c --
+    # ABS() there wraps only the sum/divisor, never the sqrt argument),
+    # so rather than manufacturing a number TV was never designed to
+    # produce, this is rejected outright with a clear, actionable message
+    # -- matching this file's own existing precedent of raising FitError
+    # for an analogous negative-covariance case (see the pcov check
+    # above in fit_peaks).
+    #
+    # Background regions are kept entirely positive here (unlike the fit
+    # region) so this test genuinely isolates the fit-region check from
+    # its sibling test below -- a regression that dropped the fit-region
+    # check but kept the background one must NOT be able to pass this
+    # test by accident.
+    x = np.arange(200, dtype=float)
+    y = np.full(200, 5.0)  # positive baseline everywhere...
+    y[60:140] = -5.0  # ...except made negative specifically inside the fit region...
+    y[90:110] += 40.0  # ...with a "peak" sitting on top of that negative background
+    with pytest.raises(FitError, match="negative counts"):
+        integrate_region(x, y, (150, 155), (160, 165), (60, 140))
+
+
+def test_integrate_region_raises_clear_error_on_negative_counts_in_background_region():
+    # Same rejection, but triggered by a background region alone -- the
+    # fit region itself is entirely non-negative here, proving the check
+    # on the background data path is independent of the one on the fit
+    # region.
+    x = np.arange(200, dtype=float)
+    y = np.full(200, 5.0)
+    y[90:110] += 40.0
+    y[150:155] = -3.0  # only the left background region goes negative
+    with pytest.raises(FitError, match="negative counts"):
+        integrate_region(x, y, (150, 155), (170, 175), (60, 140))
+
+
+def test_integrate_region_positive_counts_unaffected_by_negative_count_guard():
+    # Regression guard: for ordinary non-negative data (the overwhelming
+    # majority of real usage), the new negative-count check must never
+    # fire -- same result as before this fix existed.
+    x = np.linspace(0, 200, 201)
+    y = np.zeros(201)
+    y[90:110] = 40.0
+    y += 5.0
+    result = integrate_region(x, y, (10, 30), (150, 170), (60, 140))
+    assert result.gross_area_err == pytest.approx(math.sqrt(sum(y[(x >= 60) & (x <= 140)])))

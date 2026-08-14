@@ -1,3 +1,4 @@
+import math
 import os
 import time
 
@@ -557,13 +558,17 @@ class MainWindow(QMainWindow):
         dialog = FactorDialog(
             self, "Multiply by Factor", "Factor:",
             parse=float,
-            validate=lambda v: None if v > 0 else "Factor must be greater than zero.",
+            validate=lambda v: None if (math.isfinite(v) and v > 0) else "Factor must be a finite number greater than zero.",
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._apply_multiply(active, dialog.result_factor)
 
     def _apply_multiply(self, spectrum, factor):
-        spectrum.data = multiply(spectrum.data, factor)
+        try:
+            spectrum.data = multiply(spectrum.data, factor)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Multiply by Factor", f"Could not multiply: {exc}")
+            return
         self.fit_controller.reset_marks()
         spectrum.fits.clear()
         self._plot_data(preserve_view=True)
@@ -671,7 +676,11 @@ class MainWindow(QMainWindow):
             self._apply_add(dialog.result_spectrum_a, dialog.result_spectrum_b, dialog.result_factor)
 
     def _apply_add(self, spectrum_a, spectrum_b, factor):
-        data = add(spectrum_a.data, spectrum_b.data, factor)
+        try:
+            data = add(spectrum_a.data, spectrum_b.data, factor)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Add Spectra", f"Could not add: {exc}")
+            return
         name_a = os.path.basename(spectrum_a.path)
         name_b = os.path.basename(spectrum_b.path)
         label = f"{name_a} + {name_b}" if factor == 1 else f"{name_a} + {factor}x{name_b}"
@@ -694,7 +703,11 @@ class MainWindow(QMainWindow):
             self._apply_subtract(dialog.result_spectrum_a, dialog.result_spectrum_b, dialog.result_factor)
 
     def _apply_subtract(self, spectrum_a, spectrum_b, factor):
-        data = subtract(spectrum_a.data, spectrum_b.data, factor)
+        try:
+            data = subtract(spectrum_a.data, spectrum_b.data, factor)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Subtract Spectra", f"Could not subtract: {exc}")
+            return
         name_a = os.path.basename(spectrum_a.path)
         name_b = os.path.basename(spectrum_b.path)
         label = f"{name_a} - {name_b}" if factor == 1 else f"{name_a} - {factor}x{name_b}"
@@ -983,7 +996,7 @@ class MainWindow(QMainWindow):
 
     def _on_log_scale_toggled(self, checked):
         if self.spectra:
-            self._plot_data()
+            self._plot_data(preserve_view=True)
 
     def _update_recent_menu(self):
         self.recent_menu.clear()
@@ -1073,7 +1086,7 @@ class MainWindow(QMainWindow):
             if spectrum.path == path:
                 spectrum.visible = checked
                 break
-        self._plot_data()
+        self._plot_data(preserve_view=True)
 
     def _on_active_toggled(self, path, checked):
         if not checked:
@@ -1101,7 +1114,7 @@ class MainWindow(QMainWindow):
         if removed_was_active and self.spectra:
             self.spectra[0].active = True
         self._update_spectrum_list()
-        self._plot_data()
+        self._plot_data(preserve_view=True)
 
     def _close_active_spectrum(self):
         active = next((s for s in self.spectra if s.active), None)

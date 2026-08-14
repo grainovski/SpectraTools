@@ -315,6 +315,18 @@ def _integration_tooltip(main_window, result):
     return "\n".join(lines)
 
 
+def _peak_component(x_dense, peak, result):
+    """One peak's own shape (Gaussian or hypermet-tail, matching
+    result.tail_fraction), evaluated over x_dense -- shared by the
+    total-curve accumulation and the per-peak decomposition overlay
+    in draw_committed_fits, so the two can never silently diverge."""
+    if result.tail_fraction is not None:
+        return peak.amplitude * hypermet_left_tail(
+            x_dense, peak.position, peak.sigma, result.tail_fraction, result.tail_beta,
+        )
+    return peak.amplitude * np.exp(-((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2))
+
+
 def _is_sigma_name(name):
     return name == "sigma" or name.startswith("sigma_")
 
@@ -680,33 +692,17 @@ class FitModeController(QObject):
             # x-coordinates are converted, via to_display(x_dense),
             # never the values used in the model math itself.
             x_dense = np.linspace(lo, hi, 200)
-            total = result.background_slope * x_dense + result.background_intercept
+            background_dense = result.background_slope * x_dense + result.background_intercept
+            total = background_dense.copy()
             for peak in result.peaks:
-                if result.tail_fraction is not None:
-                    total = total + peak.amplitude * hypermet_left_tail(
-                        x_dense, peak.position, peak.sigma,
-                        result.tail_fraction, result.tail_beta,
-                    )
-                else:
-                    total = total + peak.amplitude * np.exp(
-                        -((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2)
-                    )
+                total = total + _peak_component(x_dense, peak, result)
             axes.plot(to_display(x_dense), total, color=fit_color, linewidth=1.5)
 
             # Peak decomposition: each peak's own contribution (background
             # + that single peak), so a multi-peak fit visually shows how
             # the total curve above decomposes into its components.
-            background_dense = result.background_slope * x_dense + result.background_intercept
             for peak in result.peaks:
-                if result.tail_fraction is not None:
-                    component = peak.amplitude * hypermet_left_tail(
-                        x_dense, peak.position, peak.sigma,
-                        result.tail_fraction, result.tail_beta,
-                    )
-                else:
-                    component = peak.amplitude * np.exp(
-                        -((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2)
-                    )
+                component = _peak_component(x_dense, peak, result)
                 axes.plot(
                     to_display(x_dense), background_dense + component,
                     color=fit_color, linewidth=0.75, linestyle="--", alpha=0.6,
@@ -880,57 +876,52 @@ class FitModeController(QObject):
         if self._parameter_names_shown:
             self.update_parameters_panel(self._parameter_names_shown, self._parameters_panel_values_shown)
 
-    def fixed_params_from_panel(self):
-        """Reads the current Fix checkboxes/values from the Fit
-        Parameters panel into a {name: value} dict for the next
-        fit_peaks() call. Empty when nothing is fixed (including the
-        first fit for a fresh set of marks, before the panel has ever
-        been populated). A sigma-family row's Value cell holds FWHM;
-        a position/FWHM row's Value cell holds keV when calibration is
-        active -- _panel_value_to_internal converts either back to the
-        sigma-space channel value fit_peaks() expects. Raises FitError
-        if a checked row's Value cell isn't a valid number."""
-        fixed = {}
+    def _read_panel_values(self, want_checked, error_label):
+        """Shared by fixed_params_from_panel/initial_guess_overrides_from_panel:
+        reads every row's current Value cell, filtered to rows whose Fix
+        checkbox matches `want_checked` (True for fixed_params_from_panel's
+        checked rows, False for initial_guess_overrides_from_panel's
+        unchecked rows), into a {name: value} dict. Empty when nothing
+        matches `want_checked` (including the first fit for a fresh set
+        of marks, before the panel has ever been populated). A
+        sigma-family row's Value cell holds FWHM; a position/FWHM row's
+        Value cell holds keV when calibration is active --
+        _panel_value_to_internal converts either back to the sigma-space
+        channel value fit_peaks() expects. `error_label` ("Fixed value" or
+        "Value") distinguishes the two callers' error-message wording.
+        Raises FitError if a selected row's Value cell isn't a valid
+        number."""
+        result = {}
         calibrated = self.main_window._calibration_active and self.main_window._calibration is not None
         for row, name in enumerate(self._parameter_names_shown):
             fix_checkbox = self.parameters_table.cellWidget(row, 2)
-            if fix_checkbox is not None and fix_checkbox.isChecked():
+            if fix_checkbox is not None and fix_checkbox.isChecked() == want_checked:
                 text = self.parameters_table.item(row, 1).text()
                 try:
                     value = float(text)
                 except ValueError:
                     raise FitError(
-                        f"Fixed value for '{_parameter_label(name, calibrated)}' is not a valid number: {text!r}"
+                        f"{error_label} for '{_parameter_label(name, calibrated)}' is not a valid number: {text!r}"
                     )
-                fixed[name] = _panel_value_to_internal(
+                result[name] = _panel_value_to_internal(
                     self.main_window, name, value, self._parameters_panel_values_shown
                 )
-        return fixed
+        return result
+
+    def fixed_params_from_panel(self):
+        """Reads the current Fix checkboxes/values from the Fit
+        Parameters panel into a {name: value} dict for the next
+        fit_peaks() call. See _read_panel_values for the shared
+        conversion/error-message logic."""
+        return self._read_panel_values(want_checked=True, error_label="Fixed value")
 
     def initial_guess_overrides_from_panel(self):
         """Mirrors fixed_params_from_panel for unchecked rows: reads
         each unfixed row's current Value cell as the starting guess for
         that parameter in the next fit (the parameter stays free -- the
-        optimizer can still move it). Converts back to a channel-space
-        sigma value the same way fixed_params_from_panel does. Raises
-        FitError if an unchecked row's Value cell isn't a valid
-        number."""
-        overrides = {}
-        calibrated = self.main_window._calibration_active and self.main_window._calibration is not None
-        for row, name in enumerate(self._parameter_names_shown):
-            fix_checkbox = self.parameters_table.cellWidget(row, 2)
-            if fix_checkbox is not None and not fix_checkbox.isChecked():
-                text = self.parameters_table.item(row, 1).text()
-                try:
-                    value = float(text)
-                except ValueError:
-                    raise FitError(
-                        f"Value for '{_parameter_label(name, calibrated)}' is not a valid number: {text!r}"
-                    )
-                overrides[name] = _panel_value_to_internal(
-                    self.main_window, name, value, self._parameters_panel_values_shown
-                )
-        return overrides
+        optimizer can still move it). See _read_panel_values for the
+        shared conversion/error-message logic."""
+        return self._read_panel_values(want_checked=False, error_label="Value")
 
     def update_results_list(self):
         calibrated = self.main_window._calibration_active and self.main_window._calibration is not None
@@ -1134,6 +1125,31 @@ class FitModeController(QObject):
         self._redraw_progress()
         self.main_window._update_fit_mode_availability()
 
+    def _commit_result(self, active, result):
+        """Shared by run_fit/run_integration. Re-fitting/re-integrating
+        the exact same marks (e.g. after toggling a checkbox) is a
+        supported workflow, not a mistake -- but drawing every attempt
+        at the identical region on top of the others is just visual
+        clutter. Only the latest attempt at a given region is drawn;
+        every attempt stays listed in Fit Results. Marks are read from
+        self.state unchanged between re-fits of the same region, so
+        exact tuple equality is reliable here -- no float-tolerance
+        comparison needed (see the 2026-07-15 spec's "Fit Visibility
+        Model")."""
+        for earlier in active.fits:
+            if (
+                earlier.left_bg_region == result.left_bg_region
+                and earlier.right_bg_region == result.right_bg_region
+                and earlier.fit_region == result.fit_region
+            ):
+                earlier.visible = False
+        active.fits.append(result)
+        calibration = self.main_window._calibration if self.main_window._calibration_active else None
+        try:
+            fit_export.append_auto_log(active.path, result, calibration)
+        except OSError as exc:
+            self._show_status_message(f"Could not write fit log: {exc}", 5000)
+
     def run_fit(self):
         if not self.state.ready_to_fit():
             self._show_status_message(self.state.fit_blocked_reason(), 5000)
@@ -1174,25 +1190,7 @@ class FitModeController(QObject):
             self._show_status_message(f"Fit failed: {exc}", 5000)
             return
         result.timestamp = datetime.now().isoformat(timespec="seconds")
-        # Re-fitting the exact same marks (e.g. after toggling a
-        # checkbox) is a supported workflow, not a mistake -- but
-        # drawing every attempt at the identical region on top of the
-        # others is just visual clutter. Only the latest attempt at a
-        # given region is drawn; every attempt stays listed in Fit
-        # Results.
-        for earlier in active.fits:
-            if (
-                earlier.left_bg_region == result.left_bg_region
-                and earlier.right_bg_region == result.right_bg_region
-                and earlier.fit_region == result.fit_region
-            ):
-                earlier.visible = False
-        active.fits.append(result)
-        calibration = self.main_window._calibration if self.main_window._calibration_active else None
-        try:
-            fit_export.append_auto_log(active.path, result, calibration)
-        except OSError as exc:
-            self._show_status_message(f"Could not write fit log: {exc}", 5000)
+        self._commit_result(active, result)
         names = parameter_names(len(result.peaks), result.link_widths, result.tail_fraction is not None)
         self.update_parameters_panel(names, fit_result_values_by_name(result))
         self.main_window._plot_data(preserve_view=True)
@@ -1213,19 +1211,7 @@ class FitModeController(QObject):
             self._show_status_message(f"Integration failed: {exc}", 5000)
             return
         result.timestamp = datetime.now().isoformat(timespec="seconds")
-        for earlier in active.fits:
-            if (
-                earlier.left_bg_region == result.left_bg_region
-                and earlier.right_bg_region == result.right_bg_region
-                and earlier.fit_region == result.fit_region
-            ):
-                earlier.visible = False
-        active.fits.append(result)
-        calibration = self.main_window._calibration if self.main_window._calibration_active else None
-        try:
-            fit_export.append_auto_log(active.path, result, calibration)
-        except OSError as exc:
-            self._show_status_message(f"Could not write fit log: {exc}", 5000)
+        self._commit_result(active, result)
         self.main_window._plot_data(preserve_view=True)
 
     def toggle_background_preview(self):

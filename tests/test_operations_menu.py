@@ -188,6 +188,25 @@ def test_apply_multiply_leaves_other_spectra_untouched(qapp):
     assert list(spectrum_b.data) == list(original_b)
 
 
+def test_apply_multiply_shows_a_warning_instead_of_crashing_on_overflow(qapp, monkeypatch):
+    # A factor like 1e20 is finite and > 0, so it passes the dialog's
+    # own validation (see Task 4's Multiply-by-Factor tests above) --
+    # but still overflows int64 one layer down, in spectrum_operations.
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    original = spectrum.data.copy()
+    warnings = []
+    monkeypatch.setattr(
+        "main_window.QMessageBox.warning",
+        lambda *a, **k: warnings.append(a) or None,
+    )
+
+    main_window._apply_multiply(spectrum, 1e20)  # must not raise
+
+    assert len(warnings) == 1
+    assert list(spectrum.data) == list(original)  # left untouched, not corrupted
+
+
 def test_open_multiply_dialog_applies_the_entered_factor(qapp, monkeypatch):
     from factor_dialog import FactorDialog
     main_window = MainWindow()
@@ -222,6 +241,27 @@ def test_open_multiply_dialog_does_nothing_when_cancelled(qapp, monkeypatch):
 def test_open_multiply_dialog_does_nothing_with_no_active_spectrum(qapp):
     main_window = MainWindow()
     main_window._open_multiply_dialog()  # must not raise
+
+
+def test_open_multiply_dialog_validator_rejects_infinite_factor(qapp, monkeypatch):
+    from factor_dialog import FactorDialog
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    captured = {}
+
+    def fake_exec(self):
+        captured["validate"] = self._validate
+        self.result_factor = None
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(FactorDialog, "exec", fake_exec)
+    main_window._open_multiply_dialog()
+
+    validate = captured["validate"]
+    assert validate(float("inf")) is not None
+    assert validate(float("-inf")) is not None
+    assert validate(1e20) is None  # still a legal finite factor, even if large -- only inf/nan are rejected
 
 
 def test_multiply_action_disabled_with_no_active_spectrum(qapp):
@@ -670,6 +710,24 @@ def test_apply_add_names_result_with_factor_when_not_one(qapp):
     assert main_window.spectra[-1].path == os.path.join("/fake/dir", "a.spe + 2.5xb.spe")
 
 
+def test_apply_add_shows_a_warning_instead_of_crashing_on_overflow(qapp, monkeypatch):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_count_before = len(main_window.spectra)
+    warnings = []
+    monkeypatch.setattr(
+        "main_window.QMessageBox.warning",
+        lambda *a, **k: warnings.append(a) or None,
+    )
+
+    main_window._apply_add(spectrum_a, spectrum_b, 1e20)  # must not raise
+
+    assert len(warnings) == 1
+    # No garbage spectrum was added to the list on failure.
+    assert len(main_window.spectra) == spectrum_count_before
+
+
 def test_apply_subtract_produces_subtracted_data(qapp):
     main_window = MainWindow()
     spectrum_a = _make_active_spectrum(main_window)
@@ -715,6 +773,23 @@ def test_apply_subtract_names_result_with_factor_when_not_one(qapp):
     main_window._apply_subtract(spectrum_a, spectrum_b, 2.5)
 
     assert main_window.spectra[-1].path == os.path.join("/fake/dir", "a.spe - 2.5xb.spe")
+
+
+def test_apply_subtract_shows_a_warning_instead_of_crashing_on_overflow(qapp, monkeypatch):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_count_before = len(main_window.spectra)
+    warnings = []
+    monkeypatch.setattr(
+        "main_window.QMessageBox.warning",
+        lambda *a, **k: warnings.append(a) or None,
+    )
+
+    main_window._apply_subtract(spectrum_a, spectrum_b, 1e20)  # must not raise
+
+    assert len(warnings) == 1
+    assert len(main_window.spectra) == spectrum_count_before
 
 
 def test_apply_add_result_integration_auto_logs_next_to_spectrum_a_directory(qapp, tmp_path):
@@ -1162,6 +1237,60 @@ def test_close_spectrum_action_in_file_menu_between_save_and_recent_files(qapp):
     close_index = actions.index(main_window.close_spectrum_action)
     recent_index = actions.index(main_window.recent_menu.menuAction())
     assert save_index < close_index < recent_index
+
+
+def test_toggling_spectrum_visibility_preserves_the_current_view(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    main_window.axes.set_xlim(10, 50)
+
+    main_window._on_show_toggled(spectrum_b.path, False)
+
+    assert main_window.axes.get_xlim() == (10.0, 50.0)
+
+
+def test_toggling_the_last_visible_spectrum_off_does_not_crash(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    main_window._on_show_toggled(spectrum.path, False)  # must not raise
+
+    assert spectrum.visible is False
+
+
+def test_remove_spectrum_preserves_the_current_view(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    _make_active_spectrum(main_window)
+    main_window.axes.set_xlim(10, 50)
+
+    main_window._remove_spectrum(spectrum_a.path)
+
+    assert main_window.axes.get_xlim() == (10.0, 50.0)
+
+
+def test_close_active_spectrum_preserves_the_current_view(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.active = False
+    spectrum_b.active = True
+    main_window.axes.set_xlim(10, 50)
+
+    main_window._close_active_spectrum()
+
+    assert main_window.axes.get_xlim() == (10.0, 50.0)
+
+
+def test_toggling_log_scale_preserves_the_current_view(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window.axes.set_xlim(10, 50)
+
+    main_window._on_log_scale_toggled(True)
+
+    assert main_window.axes.get_xlim() == (10.0, 50.0)
 
 
 def test_opening_n42_file_with_calibration_auto_activates_it(qapp):
