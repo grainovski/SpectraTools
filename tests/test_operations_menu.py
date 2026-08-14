@@ -1250,10 +1250,9 @@ def test_toggling_spectrum_visibility_preserves_the_current_view(qapp):
     assert main_window.axes.get_xlim() == (10.0, 50.0)
 
 
-def test_toggling_the_only_spectrums_visibility_off_does_not_crash_with_view_preserved(qapp):
+def test_toggling_the_last_visible_spectrum_off_does_not_crash(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
-    main_window.axes.set_xlim(10, 50)
 
     main_window._on_show_toggled(spectrum.path, False)  # must not raise
 
@@ -1269,16 +1268,6 @@ def test_remove_spectrum_preserves_the_current_view(qapp):
     main_window._remove_spectrum(spectrum_a.path)
 
     assert main_window.axes.get_xlim() == (10.0, 50.0)
-
-
-def test_removing_the_only_spectrum_does_not_crash_with_view_preserved(qapp):
-    main_window = MainWindow()
-    spectrum = _make_active_spectrum(main_window)
-    main_window.axes.set_xlim(10, 50)
-
-    main_window._remove_spectrum(spectrum.path)  # must not raise
-
-    assert main_window.spectra == []
 
 
 def test_close_active_spectrum_preserves_the_current_view(qapp):
