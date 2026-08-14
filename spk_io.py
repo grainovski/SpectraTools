@@ -3,6 +3,7 @@ import struct
 import numpy as np
 
 from histogram_io import ParseError
+from int64_cast import checked_round_to_int64
 
 LC_MAGIC = 0x80FFFF10
 LC_HEADER_SIZE = 44
@@ -372,16 +373,14 @@ def _load_oldmat(data: bytes, trailer: bytes, path: str) -> np.ndarray:
 
     channels = np.frombuffer(data, dtype=dtype, count=columns, offset=0)
     if np.issubdtype(dtype, np.floating):
+        # The non-floating branch below can't hit this: integer dtypes
+        # narrower than int64 can't produce out-of-range values on a
+        # same-or-widening cast.
         rounded = np.round(channels)
-        if np.any(np.abs(rounded) > np.iinfo(np.int64).max):
-            # .astype(np.int64) does not raise on overflow -- it silently
-            # wraps to the int64 sentinel (-9223372036854775808) with only
-            # an invisible RuntimeWarning. Reject explicitly instead. (The
-            # non-floating branch below can't hit this: integer dtypes
-            # narrower than int64 can't produce out-of-range values on a
-            # same-or-widening cast.)
-            raise ParseError(f"File contains an out-of-range channel value: {path}")
-        return rounded.astype(np.int64)
+        return checked_round_to_int64(
+            rounded,
+            lambda: ParseError(f"File contains an out-of-range channel value in .spk file: {path}"),
+        )
     return channels.astype(np.int64)
 
 

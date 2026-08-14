@@ -4,19 +4,19 @@ dialog layer. main_window.py is the thin UI layer on top of this."""
 
 import numpy as np
 
+from int64_cast import checked_round_to_int64
+
 
 def _checked_int64(rounded):
-    """Casts an already-rounded float array to int64, raising ValueError
-    instead of silently wrapping to a meaningless sentinel value (numpy's
-    .astype() does not raise on overflow -- confirmed: a value outside
-    int64 range casts to -9223372036854775808 with only an invisible
-    RuntimeWarning). A validated-positive-finite UI factor can still
-    reach this: e.g. a factor like 1e20 is finite and > 0, so it passes
-    the dialog's own validation, but still overflows here for any
-    spectrum with non-trivial counts."""
-    if np.any(np.abs(rounded) > np.iinfo(np.int64).max):
-        raise ValueError("Result is out of range -- try a smaller factor.")
-    return rounded.astype(np.int64)
+    """A validated-positive-finite UI factor can still overflow here:
+    e.g. a factor like 1e20 is finite and > 0, so it passes the dialog's
+    own validation, but still overflows for any spectrum with
+    non-trivial counts. See int64_cast.checked_round_to_int64 for why
+    this needs numpy's own cast machinery rather than a hand-written
+    magnitude check."""
+    return checked_round_to_int64(
+        rounded, lambda: ValueError("Result is out of range -- try a smaller factor.")
+    )
 
 
 def multiply(data, factor):

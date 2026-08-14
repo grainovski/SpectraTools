@@ -47,6 +47,21 @@ def test_multiply_raises_instead_of_silently_wrapping_on_overflow():
         multiply(data, 1e20)
 
 
+def test_multiply_raises_on_exactly_int64_max_plus_one():
+    # 2**63 sits exactly on the boundary a naive guard gets wrong:
+    # np.iinfo(np.int64).max (2**63 - 1) isn't exactly representable in
+    # float64, so a bare `> np.iinfo(np.int64).max` comparison rounds
+    # that bound UP to 2**63 and silently lets this exact out-of-range
+    # value slip through to the sentinel instead of raising. 2 * 2**62
+    # is exactly 2**63 in float64 (a pure power of two only needs
+    # exponent range) -- confirmed the old check really would miss it:
+    # np.abs(np.array([2.0**63])) > np.iinfo(np.int64).max evaluates to
+    # False.
+    data = np.array([2], dtype=np.int64)
+    with pytest.raises(ValueError):
+        multiply(data, 2.0**62)
+
+
 def test_rebin_sums_evenly_divisible_groups():
     data = np.array([1, 2, 3, 4, 5, 6], dtype=np.int64)
     result = rebin(data, 2)

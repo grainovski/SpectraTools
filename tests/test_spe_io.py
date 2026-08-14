@@ -86,6 +86,21 @@ def test_load_spe_raises_parse_error_not_silent_corruption_on_extreme_value(tmp_
         load_spe(str(path))
 
 
+def test_load_spe_raises_parse_error_on_exactly_int64_max_plus_one(tmp_path):
+    # 2**63 sits exactly on the boundary a naive guard gets wrong:
+    # np.iinfo(np.int64).max (2**63 - 1) isn't exactly representable in
+    # float32/float64, so a bare `> np.iinfo(np.int64).max` comparison
+    # rounds that bound UP to 2**63 and silently lets this exact
+    # out-of-range value slip through to the sentinel instead of
+    # raising. 2**63 itself IS exactly representable in float32 (a pure
+    # power of two only needs exponent range), so it survives the
+    # save_spe/load_spe round-trip unchanged.
+    path = tmp_path / "boundary.spe"
+    save_spe(str(path), [2.0**63])
+    with pytest.raises(ParseError):
+        load_spe(str(path))
+
+
 def test_save_spe_round_trips_through_load_spe(tmp_path):
     data = np.array([4, 0, 1, 0, 1, 7, 200], dtype=np.int64)
     path = tmp_path / "out.spe"
