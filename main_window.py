@@ -1024,7 +1024,7 @@ class MainWindow(QMainWindow):
 
     def _on_log_scale_toggled(self, checked):
         if self.spectra:
-            self._plot_data()
+            self._plot_data(preserve_view=True)
 
     def _update_recent_menu(self):
         self.recent_menu.clear()
