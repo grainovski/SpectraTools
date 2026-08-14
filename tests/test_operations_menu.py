@@ -1239,6 +1239,61 @@ def test_close_spectrum_action_in_file_menu_between_save_and_recent_files(qapp):
     assert save_index < close_index < recent_index
 
 
+def test_toggling_spectrum_visibility_preserves_the_current_view(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    main_window.axes.set_xlim(10, 50)
+
+    main_window._on_show_toggled(spectrum_b.path, False)
+
+    assert main_window.axes.get_xlim() == (10.0, 50.0)
+
+
+def test_toggling_the_only_spectrums_visibility_off_does_not_crash_with_view_preserved(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    main_window.axes.set_xlim(10, 50)
+
+    main_window._on_show_toggled(spectrum.path, False)  # must not raise
+
+    assert spectrum.visible is False
+
+
+def test_remove_spectrum_preserves_the_current_view(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    _make_active_spectrum(main_window)
+    main_window.axes.set_xlim(10, 50)
+
+    main_window._remove_spectrum(spectrum_a.path)
+
+    assert main_window.axes.get_xlim() == (10.0, 50.0)
+
+
+def test_removing_the_only_spectrum_does_not_crash_with_view_preserved(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    main_window.axes.set_xlim(10, 50)
+
+    main_window._remove_spectrum(spectrum.path)  # must not raise
+
+    assert main_window.spectra == []
+
+
+def test_close_active_spectrum_preserves_the_current_view(qapp):
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.active = False
+    spectrum_b.active = True
+    main_window.axes.set_xlim(10, 50)
+
+    main_window._close_active_spectrum()
+
+    assert main_window.axes.get_xlim() == (10.0, 50.0)
+
+
 def test_opening_n42_file_with_calibration_auto_activates_it(qapp):
     main_window = MainWindow()
     fixture = os.path.join(os.path.dirname(__file__), "fixtures", "316-2_160V_0785uA.n42")

@@ -1086,7 +1086,7 @@ class MainWindow(QMainWindow):
             if spectrum.path == path:
                 spectrum.visible = checked
                 break
-        self._plot_data()
+        self._plot_data(preserve_view=True)
 
     def _on_active_toggled(self, path, checked):
         if not checked:
@@ -1114,7 +1114,7 @@ class MainWindow(QMainWindow):
         if removed_was_active and self.spectra:
             self.spectra[0].active = True
         self._update_spectrum_list()
-        self._plot_data()
+        self._plot_data(preserve_view=True)
 
     def _close_active_spectrum(self):
         active = next((s for s in self.spectra if s.active), None)
