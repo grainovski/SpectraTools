@@ -751,15 +751,43 @@ class MainWindow(QMainWindow):
 
     def _write_spectrum(self, spectrum, path, chosen_filter):
         lower = path.lower()
+        if not lower.endswith((".spe", ".spk", ".txt")):
+            # QFileDialog.getSaveFileName() has no setDefaultSuffix
+            # equivalent, and unlike the native Windows/macOS Save dialogs,
+            # Qt's own cross-platform dialog -- what Linux gets without
+            # native GTK auto-suffixing -- does not append the chosen
+            # filter's extension to a bare filename on its own. Left alone,
+            # that file would stay extension-less on disk, and
+            # _try_load_spectrum dispatches purely by extension, so
+            # reloading it later would silently fall through to the
+            # plain-text histogram loader regardless of the binary format
+            # actually written. Append the extension implied by the chosen
+            # filter so the file is always loadable again afterward.
+            #
+            # "All files (*)" (and any other unrecognized filter string)
+            # falls back to .spe rather than .txt: SPE is both the
+            # first-listed filter in _open_save_spectrum_dialog's filter
+            # string and -- since getSaveFileName is never given a
+            # selectedFilter there -- the dialog's actual pre-selected
+            # default, so it's the more consistent "no clearly chosen
+            # format" default than an arbitrary second special case.
+            if chosen_filter.startswith("SPK"):
+                path += ".spk"
+            elif chosen_filter.startswith("Text"):
+                path += ".txt"
+            else:
+                path += ".spe"
+            lower = path.lower()
+        # By this point `lower` always ends in one of the three recognized
+        # extensions (either it already did, or the block above just
+        # appended one), so the writer is fully determined by the
+        # extension alone -- a path with a recognized-but-mismatched
+        # extension (e.g. "out.spe" saved with the SPK filter selected)
+        # deliberately keeps its own extension's writer and filename
+        # rather than being forced to match the chosen filter.
         if lower.endswith(".spe"):
             writer = save_spe
         elif lower.endswith(".spk"):
-            writer = save_spk
-        elif lower.endswith(".txt"):
-            writer = save_histogram
-        elif chosen_filter.startswith("SPE"):
-            writer = save_spe
-        elif chosen_filter.startswith("SPK"):
             writer = save_spk
         else:
             writer = save_histogram

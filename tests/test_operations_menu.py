@@ -1049,6 +1049,20 @@ def test_write_spectrum_extension_takes_priority_over_chosen_filter(qapp, tmp_pa
     assert list(load_histogram(str(txt_path))[:len(spectrum.data)]) == list(spectrum.data)
 
 
+def test_write_spectrum_matching_extension_is_not_doubled(qapp, tmp_path):
+    # Guards against a "foo.spe" + SPE filter turning into "foo.spe.spe":
+    # a path that already carries the extension the chosen filter implies
+    # must be written completely unchanged.
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    path = tmp_path / "out.spe"
+    main_window._write_spectrum(spectrum, str(path), "SPE files (*.spe)")
+
+    assert os.path.exists(str(path))
+    assert not os.path.exists(str(path) + ".spe")
+
+
 def test_write_spectrum_falls_back_to_the_chosen_filter_with_no_recognized_extension(qapp, tmp_path):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
@@ -1057,21 +1071,45 @@ def test_write_spectrum_falls_back_to_the_chosen_filter_with_no_recognized_exten
     main_window._write_spectrum(spectrum, str(path), "SPK files (*.spk)")
 
     from spk_io import load_spk
-    assert list(load_spk(str(path))) == list(spectrum.data)
+    assert not path.exists()
+    assert list(load_spk(str(path) + ".spk")) == list(spectrum.data)
 
 
-def test_write_spectrum_defaults_to_text_with_no_extension_or_recognized_filter(qapp, tmp_path):
+def test_write_spectrum_text_filter_fallback_appends_txt_extension(qapp, tmp_path):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    path = tmp_path / "out"
+    main_window._write_spectrum(spectrum, str(path), "Text files (*.txt)")
+
+    from histogram_io import load_histogram
+    assert not path.exists()
+    assert list(load_histogram(str(path) + ".txt")[:len(spectrum.data)]) == list(spectrum.data)
+
+
+def test_write_spectrum_defaults_to_spe_with_no_extension_or_recognized_filter(qapp, tmp_path):
+    # "All files (*)" (or any other unrecognized filter string) falls back
+    # to .spe rather than .txt: SPE is both the first-listed filter and
+    # -- since _open_save_spectrum_dialog never passes a selectedFilter --
+    # the Save dialog's actual pre-selected default, so it's the more
+    # consistent "no clearly chosen format" default than an arbitrary
+    # second special case for Text.
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
 
     path = tmp_path / "out"
     main_window._write_spectrum(spectrum, str(path), "All files (*)")
 
-    from histogram_io import load_histogram
-    assert list(load_histogram(str(path))[:len(spectrum.data)]) == list(spectrum.data)
+    from spe_io import load_spe
+    assert not path.exists()
+    assert list(load_spe(str(path) + ".spe")) == list(spectrum.data)
 
 
 def test_write_spectrum_spe_extension_dispatches_to_save_spe(qapp, tmp_path):
+    # A recognized-but-mismatched extension (path says .spe, filter says
+    # SPK) is left completely alone: the extension already on the path
+    # wins over the chosen filter, both for the writer used and for the
+    # filename itself (no forced rename to match the filter).
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
 
@@ -1090,7 +1128,31 @@ def test_write_spectrum_spe_filter_fallback_dispatches_to_save_spe(qapp, tmp_pat
     main_window._write_spectrum(spectrum, str(path), "SPE files (*.spe)")
 
     from spe_io import load_spe
-    assert list(load_spe(str(path))) == list(spectrum.data)
+    assert not path.exists()
+    assert list(load_spe(str(path) + ".spe")) == list(spectrum.data)
+
+
+def test_write_spectrum_with_bare_path_reloads_correctly_through_extension_dispatch(qapp, tmp_path):
+    # Regression test for the underlying bug: QFileDialog.getSaveFileName()
+    # has no setDefaultSuffix equivalent, so on Qt's own cross-platform
+    # Save dialog (what Linux gets without native GTK auto-suffixing) a
+    # bare filename previously stayed bare on disk. _try_load_spectrum
+    # dispatches purely by extension, so a bare binary SPE file would
+    # silently fall through to the plain-text histogram loader on the next
+    # open. Round-trip through the real write/load pair to prove the fix
+    # closes that gap end-to-end, not just at the file-naming level.
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    bare_path = str(tmp_path / "myspectrum")
+    main_window._write_spectrum(spectrum, bare_path, "SPE files (*.spe)")
+
+    assert not os.path.exists(bare_path)
+    assert os.path.exists(bare_path + ".spe")
+
+    reloaded, error = main_window._try_load_spectrum(bare_path + ".spe")
+    assert error is None
+    assert list(reloaded.data) == list(spectrum.data)
 
 
 def test_write_spectrum_shows_a_warning_instead_of_crashing_on_failure(qapp, monkeypatch, tmp_path):
