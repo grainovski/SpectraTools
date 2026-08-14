@@ -257,6 +257,12 @@ share one FWHM by default; see the Knowledge Database page for the
 panel; per-parameter values (with uncertainties) appear in the Fit
 Parameters panel.</li>
 </ol>
+<p>Every row's Value cell in the Fit Parameters panel stays editable
+after a fit -- edit one and press <kbd>Ctrl+F</kbd> again to re-fit
+from the new number. Check a row's "Fix" box to hold that parameter
+at its current Value for the next fit instead of letting the
+optimizer adjust it. Leave a row unchecked and its Value is used only
+as that parameter's starting guess -- the fit can still move it.</p>
 <p>Once both background regions are marked, <kbd>Ctrl+B</kbd> previews
 just the background line -- no fit region or peaks needed -- useful
 for sanity-checking the background before marking the rest. It's a
@@ -480,6 +486,11 @@ the diagonal of the fit's covariance matrix, the standard uncertainty
 estimate for a nonlinear least-squares fit. FWHM's own uncertainty
 follows the same conversion as FWHM itself (see "Sigma and FWHM"
 above): <code>fwhm_err = 2.3548 &middot; sigma_err</code>.</p>
+<p>A parameter checked "Fix" in the Fit Parameters panel (see the
+HowTo page's "7. Performing a fit") is excluded from this
+optimization entirely -- it's held at its Value cell's number rather
+than fit, so its own uncertainty is reported as exactly zero instead
+of coming from the covariance matrix.</p>
 <p>The Fit Results panel's Volume column shows one number per peak: its
 <b>net</b> volume -- the analytic integral of just that peak's Gaussian
 core (background excluded):</p>

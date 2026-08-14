@@ -852,6 +852,10 @@ class FitModeController(QObject):
                 self.parameters_table.setItem(row, 1, value_item)
 
                 fix_checkbox = QCheckBox()
+                fix_checkbox.setToolTip(
+                    "Lock this parameter at its current Value for the next fit. "
+                    "Leave unchecked to use the Value as a starting guess the fit can still adjust"
+                )
                 self.parameters_table.setCellWidget(row, 2, fix_checkbox)
         else:
             for row, name in enumerate(names):

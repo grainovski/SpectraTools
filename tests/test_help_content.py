@@ -116,6 +116,16 @@ def test_howto_html_documents_ctrl_b_preview():
     assert "no fit region or peaks needed" in html
 
 
+def test_howto_html_documents_fix_checkbox():
+    html = build_howto_html()
+    # "Fix" doesn't otherwise appear anywhere in the HowTo page, so these
+    # don't risk false-passing on unrelated text -- specific multi-word
+    # substrings, matching this file's established convention, so a
+    # partial revert can't hide behind generic wording either.
+    assert 'Check a row\'s "Fix" box to hold that parameter' in html
+    assert "as that parameter's starting guess" in html
+
+
 def test_howto_html_is_a_complete_html_document():
     html = build_howto_html()
     assert html.strip().startswith("<!doctype html>")
@@ -137,6 +147,12 @@ def test_knowledge_database_html_contains_parameter_names():
         "tail beta", "background slope", "Volume", "full", "net",
     ]:
         assert term in html, f"missing term {term!r}"
+
+
+def test_knowledge_database_html_documents_fix_checkbox_zero_uncertainty():
+    html = _strip_base64_images(build_knowledge_database_html())
+    assert 'checked "Fix" in the Fit Parameters panel' in html
+    assert "uncertainty is reported as exactly zero" in html
 
 
 def test_knowledge_database_html_embeds_seven_figures():
