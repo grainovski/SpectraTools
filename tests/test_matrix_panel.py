@@ -857,3 +857,175 @@ def test_activate_cut_auto_log_filename_is_not_truncated_by_embedded_dots(qapp, 
     second_log = fit_mode.fit_export.auto_log_path(second.path)
 
     assert second_log != first_log
+
+
+def _opaque_icon_colors(icon, size=24):
+    """Same technique as tests/test_theme.py's own helper of the same
+    name -- the set of distinct, non-transparent pixel colors an icon
+    actually renders. Sampling a single fixed coordinate is unreliable
+    since it can easily land on a transparent gap between glyph
+    strokes, and comparing QIcon objects for equality/identity would
+    not reliably catch a stale-palette bug either (Qt icon objects can
+    compare unequal for irrelevant reasons, or equal despite different
+    rendered pixels)."""
+    image = icon.pixmap(size, size).toImage()
+    colors = set()
+    for x in range(size):
+        for y in range(size):
+            color = image.pixelColor(x, y)
+            if color.alpha() > 10:
+                colors.add(color.name())
+    return colors
+
+
+def _save_icon(nav_toolbar):
+    return next(a for a in nav_toolbar.actions() if a.text() == "Save").icon()
+
+
+def _register_panel(main_window, path=None):
+    """Constructs a MatrixPanel and registers it in
+    main_window._matrix_panels -- the same registration
+    main_window._open_matrix_panel performs -- WITHOUT calling
+    panel.show(), unlike _open_matrix_panel itself.
+
+    Deliberately NOT reusing _open_matrix_panel for the theme-toggle
+    tests below: matplotlib 3.11's own toolbar icon implementation
+    (backend_qt.py's _IconEngine) re-reads its toolbar's *live*
+    palette on every single repaint rather than baking a fixed
+    pixmap once -- but a never-shown/never-polished widget's
+    .palette() does NOT yet reflect this app's QSS, so that dynamic
+    re-derivation only actually kicks in once Qt has painted the
+    toolbar for real at least once. A SHOWN panel's icons can
+    therefore end up looking theme-correct purely from matplotlib's
+    own dynamic re-derivation, regardless of whether this app's own
+    explicit MatrixPanel._refresh_theme ever ran -- confirmed
+    empirically: a shown-but-unfixed panel's icon still flipped to
+    white on a dark toggle. Never showing the panel here (matching
+    how tests/test_theme.py's own MainWindow-toolbar tests never call
+    main_window.show() either) keeps these tests honestly exercising
+    only this app's own explicit refresh path, not matplotlib's
+    independent one."""
+    panel = MatrixPanel(main_window, path or os.path.join(FIXTURES, "gg.mtx"))
+    main_window._matrix_panels.append(panel)
+    return panel
+
+
+def test_matrix_panel_toolbar_icons_follow_theme_toggle(qapp):
+    """Regression guard: matrix_panel.py builds its own separate
+    nav_toolbar, entirely independent of MainWindow's -- before this
+    fix, matplotlib's built-in Home/Pan/Save icons never re-rendered
+    when the app's theme was toggled after the panel was already open
+    (confirmed empirically, panel never shown so matplotlib's own
+    dynamic re-derivation -- see _register_panel above -- can't mask
+    the bug: same icon bytes before and after)."""
+    main_window = MainWindow()
+    original_theme = main_window.settings.theme()
+    try:
+        main_window.dark_theme_action.setChecked(False)  # start from a known light state
+        panel = _register_panel(main_window)
+        assert _opaque_icon_colors(_save_icon(panel.nav_toolbar)) == {"#000000"}
+
+        main_window.dark_theme_action.setChecked(True)
+        assert _opaque_icon_colors(_save_icon(panel.nav_toolbar)) == {"#ffffff"}
+
+        main_window.dark_theme_action.setChecked(False)
+        assert _opaque_icon_colors(_save_icon(panel.nav_toolbar)) == {"#000000"}
+    finally:
+        main_window.settings.set_theme(original_theme)
+
+
+def test_matrix_panel_opened_while_already_dark_gets_dark_toolbar_icons(qapp):
+    """The other realistic case besides a live toggle: a panel opened
+    while the app is ALREADY in dark theme must build its toolbar with
+    dark-correct icons from construction, not just eventually pick them
+    up on some LATER toggle."""
+    main_window = MainWindow()
+    original_theme = main_window.settings.theme()
+    try:
+        main_window.dark_theme_action.setChecked(True)
+        panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+        assert _opaque_icon_colors(_save_icon(panel.nav_toolbar)) == {"#ffffff"}
+    finally:
+        # Restoring the persisted setting is what matters (matching
+        # every sibling test's cleanup below) -- this main_window
+        # instance itself is discarded when the test ends, so there's
+        # no need to also toggle its own dark_theme_action back first.
+        main_window.settings.set_theme(original_theme)
+
+
+def test_matrix_panel_toolbar_palette_background_reflects_theme(qapp):
+    """Same regression guard as tests/test_theme.py's own
+    test_nav_toolbar_palette_background_reflects_theme, mirrored for
+    the matrix panel's own separate nav_toolbar: matplotlib's
+    NavigationToolbar2QT._icon() reads the toolbar's *QPalette*, which
+    this app's own QSS alone doesn't update (for a never-shown/
+    never-polished toolbar -- see _register_panel above)."""
+    main_window = MainWindow()
+    original_theme = main_window.settings.theme()
+    try:
+        main_window.dark_theme_action.setChecked(False)
+        panel = _register_panel(main_window)
+        light_value = panel.nav_toolbar.palette().color(panel.nav_toolbar.backgroundRole()).value()
+        assert light_value >= 128
+
+        main_window.dark_theme_action.setChecked(True)
+        dark_value = panel.nav_toolbar.palette().color(panel.nav_toolbar.backgroundRole()).value()
+        assert dark_value < 128
+    finally:
+        main_window.settings.set_theme(original_theme)
+
+
+def test_matrix_panel_axes_facecolor_follows_theme_toggle(qapp):
+    """Companion regression guard, one level beyond the toolbar icons
+    themselves: this panel's plot axes are ALSO styled via a one-shot
+    call from a separate Figure/Axes MainWindow never touches again,
+    so they never picked up a theme change made after the panel was
+    already open either (confirmed empirically: facecolor stayed
+    (1, 1, 1, 1) across a toggle to dark). Not subject to the
+    show()-dependent confound _register_panel documents above --
+    matplotlib's own icon engine is what dynamically re-derives icon
+    color from a live Qt palette, and axes facecolor has nothing to
+    do with either one -- but using _register_panel here too keeps
+    this test symmetric with its sibling tests above/below."""
+    main_window = MainWindow()
+    original_theme = main_window.settings.theme()
+    try:
+        main_window.dark_theme_action.setChecked(False)
+        panel = _register_panel(main_window)
+        assert panel.axes.get_facecolor() == (1.0, 1.0, 1.0, 1.0)
+
+        main_window.dark_theme_action.setChecked(True)
+        r, g, b, _a = panel.axes.get_facecolor()
+        assert round(r, 3) == round(30 / 255, 3)
+        assert round(g, 3) == round(30 / 255, 3)
+        assert round(b, 3) == round(30 / 255, 3)
+    finally:
+        main_window.settings.set_theme(original_theme)
+
+
+def test_matrix_panel_theme_toggle_also_refreshes_its_open_heatmap_window(qapp):
+    """End-to-end regression guard for the full chain: a MatrixHeatmapWindow
+    opened from a registered panel must be reachable from
+    main_window._apply_theme's loop (main_window._matrix_panels -> this
+    panel -> panel._heatmap_windows), not just MatrixHeatmapWindow's own
+    _refresh_theme in isolation (already covered directly in
+    tests/test_matrix_heatmap.py). Registers both the panel and the
+    heatmap window without showing either -- see _register_panel
+    above for why panel._open_heatmap()'s own window.show() call would
+    undermine this test the same way _open_matrix_panel's panel.show()
+    would."""
+    main_window = MainWindow()
+    original_theme = main_window.settings.theme()
+    try:
+        main_window.dark_theme_action.setChecked(False)
+        panel = _register_panel(main_window)
+        from matrix_heatmap import MatrixHeatmapWindow
+
+        heatmap_window = MatrixHeatmapWindow(panel.matrix, panel.path, main_window._theme, panel)
+        panel._heatmap_windows.append(heatmap_window)
+        assert _opaque_icon_colors(_save_icon(heatmap_window.nav_toolbar)) == {"#000000"}
+
+        main_window.dark_theme_action.setChecked(True)
+        assert _opaque_icon_colors(_save_icon(heatmap_window.nav_toolbar)) == {"#ffffff"}
+    finally:
+        main_window.settings.set_theme(original_theme)

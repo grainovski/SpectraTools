@@ -84,6 +84,87 @@ def test_matrix_heatmap_window_removes_itself_from_panel_on_close(qapp):
     assert window not in panel._heatmap_windows
 
 
+def _opaque_icon_colors(icon, size=24):
+    """Same technique as tests/test_theme.py's own helper of the same
+    name -- the set of distinct, non-transparent pixel colors an icon
+    actually renders. Sampling a single fixed coordinate is unreliable
+    since it can easily land on a transparent gap between glyph
+    strokes, and comparing QIcon objects for equality/identity would
+    not reliably catch a stale-palette bug either (Qt icon objects can
+    compare unequal for irrelevant reasons, or equal despite different
+    rendered pixels)."""
+    image = icon.pixmap(size, size).toImage()
+    colors = set()
+    for x in range(size):
+        for y in range(size):
+            color = image.pixelColor(x, y)
+            if color.alpha() > 10:
+                colors.add(color.name())
+    return colors
+
+
+def _save_icon(nav_toolbar):
+    return next(a for a in nav_toolbar.actions() if a.text() == "Save").icon()
+
+
+def test_heatmap_window_toolbar_icons_follow_theme_toggle(qapp):
+    """Regression guard: matrix_heatmap.py builds its own separate
+    nav_toolbar, entirely independent of MainWindow's -- before this
+    fix, matplotlib's built-in Home/Pan/Save icons never re-rendered
+    when the theme changed after the window was already open (there
+    was no refresh hook of any kind, since this window "never redrew
+    after construction")."""
+    matrix = np.arange(100, dtype=np.int64).reshape(10, 10)
+    window = MatrixHeatmapWindow(matrix, "test.mtx", "light", _fake_panel())
+    assert _opaque_icon_colors(_save_icon(window.nav_toolbar)) == {"#000000"}
+
+    window._refresh_theme("dark")
+    assert _opaque_icon_colors(_save_icon(window.nav_toolbar)) == {"#ffffff"}
+
+    window._refresh_theme("light")
+    assert _opaque_icon_colors(_save_icon(window.nav_toolbar)) == {"#000000"}
+
+
+def test_heatmap_window_constructed_already_dark_gets_dark_toolbar_icons(qapp):
+    """The other realistic case besides a live refresh: a heatmap
+    window opened while the app is ALREADY in dark theme must build
+    its toolbar with dark-correct icons from construction."""
+    matrix = np.arange(100, dtype=np.int64).reshape(10, 10)
+    window = MatrixHeatmapWindow(matrix, "test.mtx", "dark", _fake_panel())
+    assert _opaque_icon_colors(_save_icon(window.nav_toolbar)) == {"#ffffff"}
+
+
+def test_heatmap_window_toolbar_palette_background_reflects_theme(qapp):
+    """Same regression guard as tests/test_theme.py's own
+    test_nav_toolbar_palette_background_reflects_theme, mirrored for
+    the heatmap window's own separate nav_toolbar."""
+    matrix = np.arange(100, dtype=np.int64).reshape(10, 10)
+    window = MatrixHeatmapWindow(matrix, "test.mtx", "light", _fake_panel())
+    light_value = window.nav_toolbar.palette().color(window.nav_toolbar.backgroundRole()).value()
+    assert light_value >= 128
+
+    window._refresh_theme("dark")
+    dark_value = window.nav_toolbar.palette().color(window.nav_toolbar.backgroundRole()).value()
+    assert dark_value < 128
+
+
+def test_heatmap_window_refresh_theme_recolors_axes_and_colorbar(qapp):
+    """Companion regression guard, one level beyond the toolbar icons
+    themselves: _refresh_theme must also re-apply style_axes to both
+    the plot axes and the colorbar's own separate axes (exactly what
+    test_matrix_heatmap_window_applies_theme_to_plot_and_colorbar
+    already checks at construction time, mirrored here for a LATER
+    call)."""
+    matrix = np.arange(100, dtype=np.int64).reshape(10, 10)
+    window = MatrixHeatmapWindow(matrix, "test.mtx", "light", _fake_panel())
+    assert window.figure.get_facecolor() == to_rgba("white")
+
+    window._refresh_theme("dark")
+    assert window.figure.get_facecolor() == to_rgba(DARK_BG)
+    tick_colors = {t.get_color() for t in window.colorbar.ax.get_yticklabels()}
+    assert tick_colors == {DARK_TEXT}
+
+
 def test_downsample_for_display_block_sums_correctly():
     matrix = np.array(
         [

@@ -21,7 +21,7 @@ from fit_mode import FitModeController
 from matrix_cut import compute_projection
 from mtx_io import load_mtx
 from spectrum import LIGHT_COLOR_CYCLE, LoadedSpectrum
-from theme import style_axes
+from theme import refresh_builtin_toolbar_icons, style_axes, style_nav_toolbar_palette
 
 CUT_REGION_COLOR = "tab:red"
 CUT_REGION_ALPHA = 0.25
@@ -303,6 +303,15 @@ class MatrixPanel(QMainWindow):
         self.canvas.mpl_connect("button_press_event", self.fit_controller.on_click)
 
         self._plot_data()
+        # _plot_data() above already styles self.axes correctly via
+        # self.main_window._theme (see style_axes call in _plot_data),
+        # but this panel's own nav_toolbar has never had its palette or
+        # built-in icons touched at all up to this point -- without this
+        # call, a panel opened while the app is ALREADY in dark theme
+        # would still start out with light-mode Home/Pan/Save icons
+        # (Qt's untouched default palette) until the next theme toggle
+        # happened to sweep it up. See _refresh_theme below.
+        self._refresh_theme()
 
     def _rebuild_spectra(self):
         """Wraps the current working-axis projection as a single
@@ -363,6 +372,35 @@ class MatrixPanel(QMainWindow):
         # _calibration/_calibration_active above, keeps fit/integration
         # overlay colors correctly matched to the real theme in dark mode.
         return self.main_window._theme
+
+    def _refresh_theme(self):
+        """Re-applies the current theme to this panel's own plot axes
+        and its own nav_toolbar's palette/built-in icons, then redraws.
+        Called from main_window._apply_theme's loop over every open
+        MatrixPanel, the same way main_window._apply_calibration_change
+        already loops over main_window._matrix_panels to push a
+        calibration change out to each one -- needed because this panel
+        builds its own separate Figure/Axes and its own separate
+        NavigationToolbar2QT, entirely independent of MainWindow's own,
+        so neither one follows a theme change made anywhere else on its
+        own (confirmed empirically: both this toolbar's built-in icon
+        bytes and this panel's axes facecolor stayed byte-for-byte
+        unchanged across a MainWindow theme toggle before this fix).
+
+        style_axes() + a bare redraw here (rather than a full
+        self._plot_data()) mirrors exactly how MainWindow's own
+        _apply_theme keeps its own axes in sync -- _plot_data-driven
+        extras like recoloring the plotted trace or resetting the
+        nav_toolbar's zoom history are handled separately, by
+        _apply_theme's caller (_on_theme_toggled), only for
+        MainWindow's own canvas/spectra. This panel's single synthetic
+        spectrum is deliberately NOT theme-recolored either way (see
+        _rebuild_spectra's own docstring above), so there is nothing
+        equivalent for this panel to do beyond restyling the axes."""
+        style_nav_toolbar_palette(self.nav_toolbar, self._theme)
+        refresh_builtin_toolbar_icons(self.nav_toolbar)
+        style_axes(self.axes, self._theme)
+        self.canvas.draw()
 
     def channel_to_display(self, channel):
         if not self._calibration_active or self._calibration is None:

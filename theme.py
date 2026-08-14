@@ -4,6 +4,9 @@ matplotlib axes colors for the plot canvas, switched together by one
 
 import colorsys
 
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
+from PySide6.QtGui import QColor, QPalette
+
 DARK_BG = "#1e1e1e"
 DARK_PANEL = "#2b2b2b"
 DARK_TEXT = "#e0e0e0"
@@ -188,3 +191,75 @@ def style_axes(axes, theme):
     for spine in axes.spines.values():
         spine.set_color(colors["fg"])
     axes.grid(True, color=colors["grid"])
+
+
+def style_nav_toolbar_palette(nav_toolbar, theme):
+    """Sets a matplotlib NavigationToolbar2QT's actual QPalette -- not
+    just this app's own QSS. A QSS rule alone changes the toolbar's
+    *paint* immediately, but a `.palette()` query only starts
+    reflecting it once Qt has actually shown/polished that specific
+    widget under the new stylesheet -- an as-yet-unshown toolbar (as
+    in most of this app's own tests, which construct windows without
+    ever calling .show()) keeps returning Qt's original light-mode
+    colors regardless of the app-wide QSS. matplotlib's own icon
+    rendering (NavigationToolbar2QT._icon, see refresh_builtin_toolbar_icons
+    below) reads exactly this palette's background/foreground to decide
+    whether and which color to recolor Home/Pan/Save for a dark
+    background, so setting it explicitly here -- rather than waiting on
+    Qt's own show/polish timing, which this app has no control over and
+    which varies across matplotlib versions (see
+    refresh_builtin_toolbar_icons's own docstring) -- is what guarantees
+    the icons are correct immediately and deterministically, not just
+    eventually/incidentally. The foreground is set to plain white here
+    (not this app's usual DARK_TEXT) so those re-rendered icons come out
+    the same exact color as this app's own hand-drawn zoom/calibration
+    icons, which are also plain white/black rather than DARK_TEXT --
+    these toolbars have no visible text labels (icon-only buttons), so
+    there's no legibility trade-off to plain white over DARK_TEXT here.
+
+    Free function (not a method) because every top-level window that
+    builds its own separate nav_toolbar -- MainWindow, MatrixPanel,
+    MatrixHeatmapWindow -- needs to run exactly this same logic on its
+    own toolbar; each one calls this directly rather than one
+    borrowing a private method off another via an unrelated `self`."""
+    palette = nav_toolbar.palette()
+    if theme == "dark":
+        for role in (QPalette.ColorRole.Window, QPalette.ColorRole.Button):
+            palette.setColor(role, QColor(DARK_PANEL))
+        for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.ButtonText):
+            palette.setColor(role, QColor("white"))
+    else:
+        palette = QPalette()
+    nav_toolbar.setPalette(palette)
+
+
+def refresh_builtin_toolbar_icons(nav_toolbar):
+    """Re-renders a matplotlib NavigationToolbar2QT's own built-in
+    Home/Pan/Save icons to match whatever theme style_nav_toolbar_palette
+    (above) was just applied to it with.
+
+    Whether this is strictly needed depends on the installed matplotlib
+    version: older ones bake each icon into a static QPixmap exactly
+    once, in NavigationToolbar2QT.__init__, and truly never touch it
+    again on their own, so without a call like this one they stay
+    whatever color matched the palette at toolbar-construction time
+    forever. The version installed as of this fix (matplotlib 3.11)
+    instead backs each icon with a custom QIconEngine
+    (backend_qt._IconEngine) that re-reads the toolbar's palette fresh
+    on every single repaint -- but ONLY once Qt has actually painted
+    that toolbar for real at least once (see style_nav_toolbar_palette's
+    own docstring); until then, or on an older matplotlib, this
+    explicit re-render is exactly what's missing. Calling it
+    unconditionally, immediately after every theme change, is correct
+    and cheap either way, and is what makes the icons' correctness
+    NOT depend on which matplotlib version happens to be installed or
+    on Qt's own incidental show/polish/repaint timing."""
+    image_files = {
+        text: image_file
+        for text, _tooltip, image_file, _callback in nav_toolbar.toolitems
+        if text is not None
+    }
+    for action in nav_toolbar.actions():
+        image_file = image_files.get(action.text())
+        if image_file is not None:
+            action.setIcon(NavigationToolbar2QT._icon(nav_toolbar, image_file + ".png"))

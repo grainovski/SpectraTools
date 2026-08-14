@@ -10,7 +10,7 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from PySide6.QtCore import QEvent, Qt, QRectF
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -49,7 +49,7 @@ from spe_io import load_spe, save_spe
 from spectrum import LoadedSpectrum, next_color
 from spectrum_operations import add, multiply, normalize_factors, rebin, reference_value, subtract
 from spk_io import load_spk, save_spk
-from theme import qt_stylesheet, style_axes
+from theme import qt_stylesheet, refresh_builtin_toolbar_icons, style_axes, style_nav_toolbar_palette
 
 ZOOM_FACTOR = 1.5
 _ICON_SIZE = 24
@@ -453,8 +453,8 @@ class MainWindow(QMainWindow):
             app.setStyleSheet(qt_stylesheet(theme))
         style_axes(self.axes, theme)
         self._theme = theme
-        self._style_nav_toolbar_palette(theme)
-        self._refresh_builtin_toolbar_icons()
+        style_nav_toolbar_palette(self.nav_toolbar, theme)
+        refresh_builtin_toolbar_icons(self.nav_toolbar)
         self._refresh_zoom_icons()
         self._refresh_calibration_icons()
         # Re-derive each already-loaded spectrum's trace color from the
@@ -465,6 +465,22 @@ class MainWindow(QMainWindow):
             color_index = getattr(spectrum, "color_index", None)
             if color_index is not None:
                 spectrum.color = next_color(color_index, theme)
+        # Matrix panels (and any heatmap windows opened from them) each
+        # build their own separate nav_toolbar/axes, entirely independent
+        # of this window's own -- push the new theme out to each one
+        # explicitly, the same way _apply_calibration_change (below)
+        # already loops over self._matrix_panels to share a calibration
+        # change with every open panel. Without this loop, an
+        # already-open panel (and any heatmap window opened from it)
+        # would keep showing whatever theme was active when IT was
+        # constructed and never follow a later toggle here -- confirmed
+        # empirically before this fix: both the toolbar's built-in icon
+        # bytes and the plot axes' facecolor stayed byte-for-byte
+        # unchanged across a toggle.
+        for panel in self._matrix_panels:
+            panel._refresh_theme()
+            for heatmap_window in panel._heatmap_windows:
+                heatmap_window._refresh_theme(theme)
 
     def channel_to_display(self, channel):
         """Converts a channel number (or numpy array of channel numbers)
@@ -801,53 +817,6 @@ class MainWindow(QMainWindow):
                 f"Could not save in this format: {exc}\n\n"
                 "Try a different format (e.g. Text), or Multiply by a smaller factor first.",
             )
-
-    def _style_nav_toolbar_palette(self, theme):
-        """Sets the navigation toolbar's actual QPalette -- not just this
-        app's own QSS, which changes the toolbar's *paint* but leaves
-        `.palette()` queries returning Qt's original light-mode colors.
-        matplotlib's own icon loader (NavigationToolbar2QT._icon) reads
-        exactly that palette's background/foreground to decide whether
-        and which color to recolor Home/Pan/Save for a dark background --
-        but only the one time each button icon is first built, in
-        NavigationToolbar2QT.__init__; it never re-reads the palette on
-        its own afterward, so _refresh_builtin_toolbar_icons() below
-        re-invokes it on every theme change. The foreground is set to
-        plain white here (not this app's usual DARK_TEXT) so those
-        re-rendered icons come out the same exact color as this app's
-        own hand-drawn zoom/calibration icons, which are also plain
-        white/black rather than DARK_TEXT -- this toolbar has no visible
-        text labels (icon-only buttons), so there's no legibility
-        trade-off to plain white over DARK_TEXT here."""
-        palette = self.nav_toolbar.palette()
-        if theme == "dark":
-            from theme import DARK_PANEL
-            for role in (QPalette.ColorRole.Window, QPalette.ColorRole.Button):
-                palette.setColor(role, QColor(DARK_PANEL))
-            for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.ButtonText):
-                palette.setColor(role, QColor("white"))
-        else:
-            palette = QPalette()
-        self.nav_toolbar.setPalette(palette)
-
-    def _refresh_builtin_toolbar_icons(self):
-        """Re-renders matplotlib's own Home/Pan/Save toolbar icons for the
-        current theme. NavigationToolbar2QT._icon() only reads the
-        toolbar's QPalette once, when each button is first created in
-        __init__ -- unlike this app's own zoom/calibration icons (see
-        _refresh_zoom_icons/_refresh_calibration_icons below), matplotlib
-        never re-renders them on its own, so without this they'd stay
-        whatever color matched the palette at toolbar-construction time
-        and never follow later theme toggles."""
-        image_files = {
-            text: image_file
-            for text, _tooltip, image_file, _callback in self.nav_toolbar.toolitems
-            if text is not None
-        }
-        for action in self.nav_toolbar.actions():
-            image_file = image_files.get(action.text())
-            if image_file is not None:
-                action.setIcon(NavigationToolbar2QT._icon(self.nav_toolbar, image_file + ".png"))
 
     def _on_theme_toggled(self, checked):
         theme = "dark" if checked else "light"

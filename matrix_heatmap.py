@@ -5,7 +5,7 @@ from matplotlib.colors import SymLogNorm
 from matplotlib.figure import Figure
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
-from theme import style_axes
+from theme import refresh_builtin_toolbar_icons, style_axes, style_nav_toolbar_palette
 
 _MAX_DISPLAY_DIM = 1024
 
@@ -59,13 +59,6 @@ class MatrixHeatmapWindow(QMainWindow):
         layout.addWidget(self.canvas)
         self.setCentralWidget(container)
 
-        # Match the app's dark/light theme, same as every other plotting
-        # surface (main_window.py, matrix_panel.py's _plot_projection).
-        # This window never redraws after construction, so a single call
-        # here (rather than re-styling on every draw, as _plot_projection
-        # must since it's invoked repeatedly) is sufficient.
-        style_axes(self.axes, theme)
-
         # Downsample before norming/rendering -- the heatmap is a visual
         # overview, not a precision tool, and norming+rendering the full
         # array at real (e.g. 8192x8192) matrix sizes is what made this
@@ -79,17 +72,40 @@ class MatrixHeatmapWindow(QMainWindow):
         norm = SymLogNorm(linthresh=1.0, vmin=display_matrix.min(), vmax=max(display_matrix.max(), 1))
         self.image = self.axes.imshow(display_matrix, norm=norm, origin="lower", aspect="auto")
         self.colorbar = self.figure.colorbar(self.image, ax=self.axes)
-        # style_axes(self.axes, ...) above also sets the *figure's*
-        # facecolor (shared by every Axes in it), but a colorbar draws its
-        # ticks/labels on its own separate Axes (matplotlib creates it
-        # internally, distinct from self.axes) that style_axes(self.axes,
-        # ...) can't reach. Without this second call, the colorbar's tick
-        # numbers would keep matplotlib's hardcoded black and become
-        # unreadable against the now-dark figure background in dark
-        # theme -- not just mismatched, but actually illegible.
-        style_axes(self.colorbar.ax, theme)
         self.axes.set_xlabel("X channel")
         self.axes.set_ylabel("Y channel")
+        # Matches the app's dark/light theme, same as every other
+        # plotting surface (main_window.py, matrix_panel.py's
+        # _plot_data). Also used later to re-apply a theme toggle while
+        # this window is still open (see _refresh_theme below) -- going
+        # through the same method here at construction time guarantees
+        # the two can never drift out of sync with each other.
+        self._refresh_theme(theme)
+
+    def _refresh_theme(self, theme):
+        """Applies `theme` to this window's plot axes, its colorbar's
+        own separate axes, and its nav_toolbar's palette/built-in
+        icons, then redraws. Called both from __init__ above and from
+        main_window._apply_theme's loop over every open MatrixPanel's
+        _heatmap_windows (see matrix_panel.py's own _refresh_theme and
+        main_window.py's _apply_theme) -- a theme toggle while this
+        window is already open must actually repaint it, not just
+        leave it showing whatever theme was active when it was first
+        constructed (confirmed empirically: before this fix, neither
+        the axes colors nor the toolbar's built-in icon bytes changed
+        across a toggle).
+
+        style_axes(self.axes, ...) alone sets the *figure's* facecolor
+        (shared by every Axes drawn in it), but a colorbar draws its
+        ticks/labels on its own separate Axes (matplotlib creates it
+        internally, distinct from self.axes) that style_axes(self.axes,
+        ...) can't reach -- without the second call below, the
+        colorbar's tick numbers would keep matplotlib's hardcoded black
+        and become unreadable against a dark figure background."""
+        style_axes(self.axes, theme)
+        style_axes(self.colorbar.ax, theme)
+        style_nav_toolbar_palette(self.nav_toolbar, theme)
+        refresh_builtin_toolbar_icons(self.nav_toolbar)
         self.canvas.draw()
 
     def closeEvent(self, event):
