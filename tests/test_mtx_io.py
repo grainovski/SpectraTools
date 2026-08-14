@@ -1,6 +1,7 @@
 import functools
 import os
 import struct
+import time
 
 import numpy as np
 import pytest
@@ -100,6 +101,36 @@ def test_load_mtx_real_file_negative_values_preserved():
 def test_load_mtx_symmetric_file_is_actually_symmetric():
     gg = _load_cached("gg.mtx")
     assert gg[10, 2000] == gg[2000, 10] == 1
+
+
+def test_load_mtx_decodes_real_fixture_reasonably_fast():
+    # A timing regression guard for lc_codec.decode_row's performance,
+    # not its correctness (that's covered exhaustively above and in
+    # test_lc_codec.py). Deliberately calls load_mtx() directly rather
+    # than going through _load_cached(): that module-level
+    # functools.lru_cache exists purely so the other real-file tests
+    # in this module don't each pay for a fresh decode, which means
+    # any of them may have already warmed the cache for "gg.mtx" by
+    # the time this test runs (pytest's default collection order is
+    # file-definition order, but that's an implementation detail this
+    # test shouldn't depend on) -- calling _load_cached here could
+    # silently measure a cache hit (microseconds) instead of a real
+    # cold decode. load_mtx() itself has no caching of its own, so
+    # calling it directly always exercises the genuine decode path.
+    #
+    # Before the lc_codec.decode_row optimization (pre-sized output
+    # list instead of append()/extend(), a precomputed zigzag lookup
+    # table instead of a per-value function call), this measured
+    # ~4.8s on the machine this test was written on; after, ~3.9s
+    # (consistent across repeated runs, <1% spread). The threshold
+    # below sits meaningfully under the old baseline -- so a
+    # regression back to the unoptimized decoder fails this test with
+    # real margin, not marginally -- while leaving headroom above the
+    # new measured time for slower/loaded machines.
+    t0 = time.time()
+    load_mtx(os.path.join(FIXTURES, "gg.mtx"))
+    elapsed = time.time() - t0
+    assert elapsed < 4.4
 
 
 def _build_lc_header(levels, lines, columns, poslentablepos, version=2):
