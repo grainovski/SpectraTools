@@ -310,7 +310,10 @@ class MatrixPanel(QMainWindow):
         # call, a panel opened while the app is ALREADY in dark theme
         # would still start out with light-mode Home/Pan/Save icons
         # (Qt's untouched default palette) until the next theme toggle
-        # happened to sweep it up. See _refresh_theme below.
+        # happened to sweep it up. See _refresh_theme below. (It harmlessly
+        # re-styles self.axes and redraws a second time too -- not split
+        # into a toolbar-only path to avoid a third code path for what's
+        # a cheap, one-time-at-construction cost.)
         self._refresh_theme()
 
     def _rebuild_spectra(self):

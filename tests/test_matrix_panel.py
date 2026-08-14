@@ -889,22 +889,21 @@ def _register_panel(main_window, path=None):
     panel.show(), unlike _open_matrix_panel itself.
 
     Deliberately NOT reusing _open_matrix_panel for the theme-toggle
-    tests below: matplotlib 3.11's own toolbar icon implementation
-    (backend_qt.py's _IconEngine) re-reads its toolbar's *live*
-    palette on every single repaint rather than baking a fixed
-    pixmap once -- but a never-shown/never-polished widget's
-    .palette() does NOT yet reflect this app's QSS, so that dynamic
-    re-derivation only actually kicks in once Qt has painted the
-    toolbar for real at least once. A SHOWN panel's icons can
-    therefore end up looking theme-correct purely from matplotlib's
-    own dynamic re-derivation, regardless of whether this app's own
-    explicit MatrixPanel._refresh_theme ever ran -- confirmed
-    empirically: a shown-but-unfixed panel's icon still flipped to
-    white on a dark toggle. Never showing the panel here (matching
-    how tests/test_theme.py's own MainWindow-toolbar tests never call
-    main_window.show() either) keeps these tests honestly exercising
-    only this app's own explicit refresh path, not matplotlib's
-    independent one."""
+    tests below: confirmed empirically that a SHOWN/polished toolbar's
+    .palette() query can start reflecting this app's QSS on its own,
+    via Qt's own stylesheet cascade, with none of this app's explicit
+    theme.py code involved at all -- a never-shown widget's .palette()
+    does not (see style_nav_toolbar_palette's docstring in theme.py).
+    A palette-based assertion against a SHOWN-but-unfixed panel could
+    therefore false-pass even if MatrixPanel._refresh_theme were never
+    called. (The icon PIXMAP itself doesn't share this risk --
+    confirmed separately that NavigationToolbar2QT._icon() never
+    re-bakes on its own regardless of show/polish state, see
+    refresh_builtin_toolbar_icons's docstring -- but never showing the
+    panel here keeps every test in this block testing only this app's
+    own explicit refresh path uniformly, matching how
+    tests/test_theme.py's own MainWindow-toolbar tests never call
+    main_window.show() either.)"""
     panel = MatrixPanel(main_window, path or os.path.join(FIXTURES, "gg.mtx"))
     main_window._matrix_panels.append(panel)
     return panel

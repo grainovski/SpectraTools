@@ -206,11 +206,12 @@ def style_nav_toolbar_palette(nav_toolbar, theme):
     below) reads exactly this palette's background/foreground to decide
     whether and which color to recolor Home/Pan/Save for a dark
     background, so setting it explicitly here -- rather than waiting on
-    Qt's own show/polish timing, which this app has no control over and
-    which varies across matplotlib versions (see
-    refresh_builtin_toolbar_icons's own docstring) -- is what guarantees
-    the icons are correct immediately and deterministically, not just
-    eventually/incidentally. The foreground is set to plain white here
+    Qt's own show/polish timing, which this app has no control over --
+    is what guarantees the icons are correct immediately and
+    deterministically, not just eventually/incidentally (and _icon()
+    itself never re-runs on its own afterward regardless -- see
+    refresh_builtin_toolbar_icons's own docstring). The foreground is
+    set to plain white here
     (not this app's usual DARK_TEXT) so those re-rendered icons come out
     the same exact color as this app's own hand-drawn zoom/calibration
     icons, which are also plain white/black rather than DARK_TEXT --
@@ -238,22 +239,17 @@ def refresh_builtin_toolbar_icons(nav_toolbar):
     Home/Pan/Save icons to match whatever theme style_nav_toolbar_palette
     (above) was just applied to it with.
 
-    Whether this is strictly needed depends on the installed matplotlib
-    version: older ones bake each icon into a static QPixmap exactly
-    once, in NavigationToolbar2QT.__init__, and truly never touch it
-    again on their own, so without a call like this one they stay
-    whatever color matched the palette at toolbar-construction time
-    forever. The version installed as of this fix (matplotlib 3.11)
-    instead backs each icon with a custom QIconEngine
-    (backend_qt._IconEngine) that re-reads the toolbar's palette fresh
-    on every single repaint -- but ONLY once Qt has actually painted
-    that toolbar for real at least once (see style_nav_toolbar_palette's
-    own docstring); until then, or on an older matplotlib, this
-    explicit re-render is exactly what's missing. Calling it
-    unconditionally, immediately after every theme change, is correct
-    and cheap either way, and is what makes the icons' correctness
-    NOT depend on which matplotlib version happens to be installed or
-    on Qt's own incidental show/polish/repaint timing."""
+    NavigationToolbar2QT._icon() bakes each icon into a static QPixmap
+    exactly once, at whatever moment it's called -- confirmed against
+    the installed matplotlib version that this never happens again on
+    its own afterward, no matter how the toolbar's palette later
+    changes (unlike the palette query itself, which Qt's own
+    stylesheet cascade CAN update on a shown/polished widget with no
+    code of ours involved -- see style_nav_toolbar_palette's own
+    docstring). So without an explicit call like this one, right after
+    every theme change, the icons silently stay whatever color matched
+    the palette the last time _icon() happened to run -- which may be
+    all the way back at toolbar construction."""
     image_files = {
         text: image_file
         for text, _tooltip, image_file, _callback in nav_toolbar.toolitems
