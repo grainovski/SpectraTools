@@ -811,3 +811,49 @@ def test_matrix_panel_activate_cut_integration_auto_logs_next_to_source_matrix_f
 
     assert len(added.fits) == 1
     assert os.path.exists(log_path)
+
+
+def test_activate_cut_auto_log_filename_is_not_truncated_by_embedded_dots(qapp, tmp_path, monkeypatch):
+    """Regression guard: _activate_cut's label used to embed the cut
+    region bounds as raw .1f-formatted floats right after a literal
+    ".mtx" (e.g. "gpff.mtx y cut [3004.4, 3859.9]"). fit_export.auto_log_path's
+    os.path.splitext(os.path.basename(...)) truncates at the LAST '.' in
+    that basename, which was always one of the region bounds' own
+    decimal points -- silently dropping everything from there onward
+    (confirmed by two stray files this exact bug left in the repo root:
+    "gpff.mtx y cut [3004.4, 3859_fits.jsonl" and
+    "gpff.mtx y cut [3019.0, 3766_fits.jsonl"). The auto-log path derived
+    from an activated cut's spectrum must retain both region bounds in
+    full, and two differently-bounded cuts on the same matrix must not
+    collide onto the same auto-log file (rounding the bounds to remove
+    their decimal points alone is not sufficient -- it merely unmasks
+    self.path's own ".mtx" dot as the new last dot, which would make
+    every cut on the same matrix resolve to the identical auto-log
+    file)."""
+    small_matrix = np.zeros((50, 50))
+    small_matrix[10:40, 10:40] = 100.0
+    monkeypatch.setattr(matrix_panel, "load_mtx", lambda path: small_matrix)
+
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, str(tmp_path / "gpff.mtx"))
+
+    panel.cut_controller.state.cut_region = (3004.4, 3859.9)
+    panel._activate_cut()
+    first = main_window.spectra[-1]
+    first_log = fit_mode.fit_export.auto_log_path(first.path)
+    first_name = os.path.basename(first_log)
+
+    # Both rounded bounds must survive in full -- the old .1f format
+    # truncated everything from the second bound's decimal point onward.
+    assert "3004" in first_name
+    assert "3860" in first_name  # round(3859.9) == 3860
+    assert first_name.endswith("_fits.jsonl")
+
+    # A second, differently-bounded cut on the same matrix must resolve
+    # to a DIFFERENT auto-log file, not collide onto the same one.
+    panel.cut_controller.state.cut_region = (100.0, 200.0)
+    panel._activate_cut()
+    second = main_window.spectra[-1]
+    second_log = fit_mode.fit_export.auto_log_path(second.path)
+
+    assert second_log != first_log

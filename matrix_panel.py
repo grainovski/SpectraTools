@@ -520,16 +520,32 @@ class MatrixPanel(QMainWindow):
 
         state = self.cut_controller.state
         result = compute_cut(self.matrix, self.working_axis, state.cut_region, state.bg_regions)
-        label = (
-            f"{os.path.basename(self.path)} {self.working_axis} cut "
-            f"[{state.cut_region[0]:.1f}, {state.cut_region[1]:.1f}]"
+        # Path-shaped, not a free-form label -- same rationale and same
+        # fix shape as _rebuild_spectra's own path construction above.
+        # The region bounds used to be embedded as raw .1f floats right
+        # after a literal ".mtx" (e.g. "gpff.mtx y cut [3004.4, 3859.9]"),
+        # and fit_export.auto_log_path's os.path.splitext(os.path.basename(...))
+        # truncates at the LAST '.' in that string -- which was always
+        # one of the region bounds' own decimal points (confirmed by two
+        # stray "..._3859_fits.jsonl"/"..._3766_fits.jsonl" files this
+        # bug left in the repo root). Merely rounding the bounds to drop
+        # their decimal points is not enough by itself: with no dot left
+        # in the region numbers, self.path's OWN ".mtx" dot becomes the
+        # new last dot, which would make EVERY cut on the same matrix
+        # collapse onto the identical auto-log file (verified:
+        # splitext("gpff.mtx y cut [3004, 3860]") -> stem "gpff",
+        # silently dropping the entire cut descriptor and colliding
+        # different cuts' fit logs together). Keeping the real extension
+        # at the very end of the constructed path -- exactly like
+        # _rebuild_spectra -- avoids both failure modes: the only dot
+        # left in the basename is the genuine trailing extension, so
+        # splitext parses it correctly no matter what self.path's own
+        # stem contains.
+        root, ext = os.path.splitext(self.path)
+        path = (
+            f"{root}_{self.working_axis}_cut_"
+            f"{round(state.cut_region[0])}_{round(state.cut_region[1])}{ext}"
         )
-        # Anchored at the real matrix file's directory (not just its
-        # basename in the label above) so fit_export.auto_log_path and
-        # fit_mode.py's "Export Fit Report" default directory -- both of
-        # which read os.path.dirname of a spectrum's .path -- resolve next
-        # to gg.mtx instead of silently falling back to the process's cwd.
-        path = os.path.join(os.path.dirname(self.path), label)
         self.main_window._add_combined_spectrum(path, result)
 
     def _open_heatmap(self):
