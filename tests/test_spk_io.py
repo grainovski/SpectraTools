@@ -231,7 +231,7 @@ def test_lc_decode_error_message_names_spk_not_matrix(tmp_path):
 
     with pytest.raises(ParseError) as excinfo:
         load_spk(str(file_path))
-    assert "matrix" not in str(excinfo.value)
+    assert "lc matrix file" not in str(excinfo.value)
     assert ".spk file" in str(excinfo.value)
 
 

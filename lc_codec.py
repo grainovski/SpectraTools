@@ -14,7 +14,7 @@ def zigzag_decode(n):
     return -((n >> 1) + 1) if (n & 1) else (n >> 1)
 
 
-def decode_row(data, num_values, path, kind="lc matrix file"):
+def decode_row(data, num_values, path, *, kind):
     """Decodes one lc-format v2 compressed row into `num_values`
     integers. A faithful port of lc2_uncompress
     (libmfile-1.0.7/src/lc_c2.c:134-200), including its two least
@@ -24,10 +24,11 @@ def decode_row(data, num_values, path, kind="lc matrix file"):
     unchanged -- `last` is not updated by a same-run tag at all, only
     by the other three tag kinds. Verified byte-for-byte against real
     compressed rows from both fixture files during planning. `kind`
-    is the leading noun phrase in error messages -- defaults to
-    mtx_io.py's original wording; spk_io.py's spectrum decoder passes
-    its own, so a corrupt .spk file's error doesn't claim to be about
-    a matrix file."""
+    is the leading noun phrase in error messages (e.g. "lc matrix
+    file" for mtx_io.py, ".spk file" for spk_io.py) -- required and
+    keyword-only so a future caller can't silently inherit another
+    format's wording by omission, the exact bug this parameter was
+    added to fix."""
     values = []
     last = 0
     pos = 0

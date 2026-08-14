@@ -60,7 +60,7 @@ def load_mtx(path):
                 row_bytes = f.read(row_len)
                 if len(row_bytes) < row_len:
                     raise ParseError(f"lc matrix file row {row} data is truncated: {path}")
-                values = decode_row(row_bytes, columns, path)
+                values = decode_row(row_bytes, columns, path, kind="lc matrix file")
                 try:
                     data[row, :] = values
                 except OverflowError as exc:

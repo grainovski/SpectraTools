@@ -14,11 +14,11 @@ FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 @functools.lru_cache(maxsize=None)
 def _load_cached(filename):
     """Loads and decodes a real fixture file once per test run and
-    reuses the result across every test that needs it. _decode_row is a
-    pure-Python per-value loop over up to 8192x8192 tag bytes (~7.5s for
-    one load of gg.mtx) -- without this cache, the 24 real-file loads
-    below would re-decode the same two files from scratch every time,
-    which used to make this file alone take ~316s."""
+    reuses the result across every test that needs it. decode_row (in
+    lc_codec.py) is a pure-Python per-value loop over up to 8192x8192
+    tag bytes (~7.5s for one load of gg.mtx) -- without this cache, the
+    24 real-file loads below would re-decode the same two files from
+    scratch every time, which used to make this file alone take ~316s."""
     return load_mtx(os.path.join(FIXTURES, filename))
 
 
