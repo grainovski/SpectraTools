@@ -45,6 +45,18 @@ def test_load_histogram_raises_parse_error_not_crash_on_undecodable_bytes(tmp_pa
         load_histogram(str(path))
 
 
+def test_load_histogram_raises_parse_error_not_crash_on_huge_integer(tmp_path):
+    # A value beyond int64 range parses fine as Python's arbitrary-precision
+    # int() but raises OverflowError when assigned into the preallocated
+    # int64 numpy array. This must raise ParseError instead of crashing with
+    # an unhandled OverflowError -- matching the same guard in
+    # spk_io.py/n42_io.py for the equivalent risk.
+    path = tmp_path / "huge_value.txt"
+    path.write_text(f"5\n10\n{10**23}\n7\n")
+    with pytest.raises(ParseError):
+        load_histogram(str(path))
+
+
 def test_bucket_under_4096_pads_to_4096(tmp_path):
     file_path = tmp_path / "short.txt"
     values = list(range(10))

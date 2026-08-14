@@ -32,7 +32,10 @@ def load_histogram(path: str) -> np.ndarray:
 
     channel_count = _bucket_channel_count(len(values))
     data = np.zeros(channel_count, dtype=np.int64)
-    data[: len(values)] = values
+    try:
+        data[: len(values)] = values
+    except OverflowError as exc:
+        raise ParseError(f"File contains an out-of-range integer value: {path}") from exc
     return data
 
 
