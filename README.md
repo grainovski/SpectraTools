@@ -28,8 +28,9 @@ supported — PySide6, the Qt6 binding this app uses, stopped publishing
 wheels compatible with that old a glibc after version 6.2.4 (2021), and
 that's an upstream constraint no packaging choice here can work around.
 
-Install the `.deb` or `.rpm` from the latest release directory (e.g.
-v3.0.0):
+Install the `.deb` or `.rpm` from the latest release directory — the
+commands below show v3.0.0 as an example; substitute whatever version
+you actually have:
 
 ```
 sudo apt install ./spectratools_3.0.0_amd64.deb      # Debian/Ubuntu
