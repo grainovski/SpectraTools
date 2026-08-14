@@ -216,6 +216,25 @@ def test_lc_rejects_stream_that_runs_out_of_bytes(tmp_path):
         load_spk(str(file_path))
 
 
+def test_lc_decode_error_message_names_spk_not_matrix(tmp_path):
+    # lc_codec.decode_row is shared with mtx_io.py's matrix-row decoder
+    # and defaults to matrix-flavored wording ("lc matrix file: ...").
+    # _lc2_uncompress must pass its own `kind` so a corrupt .spk
+    # (single-spectrum) file's error doesn't tell the user their
+    # problem is in a "matrix file" -- confirmed via the real load_spk
+    # path, not just calling _lc2_uncompress directly, since that's
+    # what a user actually sees in the "could not be loaded" dialog.
+    header = _lc_header(version=2, levels=1, lines=1, columns=3, poslentablepos=44)
+    poslen = struct.pack("<2I", 44 + 8, 1)
+    file_path = tmp_path / "lc_short_stream.spk"
+    file_path.write_bytes(header + poslen + bytes([0x53]))
+
+    with pytest.raises(ParseError) as excinfo:
+        load_spk(str(file_path))
+    assert "matrix" not in str(excinfo.value)
+    assert ".spk file" in str(excinfo.value)
+
+
 def test_lc_rejects_value_overflowing_int64(tmp_path):
     # LC1's extended-tag continuation loop has no cap on the number of
     # continuation bytes, so a handful of crafted bytes can build a

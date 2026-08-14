@@ -14,7 +14,7 @@ def zigzag_decode(n):
     return -((n >> 1) + 1) if (n & 1) else (n >> 1)
 
 
-def decode_row(data, num_values, path):
+def decode_row(data, num_values, path, kind="lc matrix file"):
     """Decodes one lc-format v2 compressed row into `num_values`
     integers. A faithful port of lc2_uncompress
     (libmfile-1.0.7/src/lc_c2.c:134-200), including its two least
@@ -23,7 +23,11 @@ def decode_row(data, num_values, path):
     a same-run tag's repeated values equal the pre-run `last`
     unchanged -- `last` is not updated by a same-run tag at all, only
     by the other three tag kinds. Verified byte-for-byte against real
-    compressed rows from both fixture files during planning."""
+    compressed rows from both fixture files during planning. `kind`
+    is the leading noun phrase in error messages -- defaults to
+    mtx_io.py's original wording; spk_io.py's spectrum decoder passes
+    its own, so a corrupt .spk file's error doesn't claim to be about
+    a matrix file."""
     values = []
     last = 0
     pos = 0
@@ -49,7 +53,7 @@ def decode_row(data, num_values, path):
                     values.append(last + diff)
                     nleft -= same
                     if nleft <= 0:
-                        raise ParseError(f"lc matrix file: same-run tag overruns row: {path}")
+                        raise ParseError(f"{kind}: same-run tag overruns row: {path}")
                     values.extend([last] * same)
                 else:
                     last = last + zigzag_decode(n)
@@ -59,7 +63,7 @@ def decode_row(data, num_values, path):
             elif t & 0x40:
                 nleft -= 2
                 if nleft < 0:
-                    raise ParseError(f"lc matrix file: 2-value pack overruns row: {path}")
+                    raise ParseError(f"{kind}: 2-value pack overruns row: {path}")
                 a = t & 0x7
                 b = (t >> 3) & 0x7
                 values.append(last + zigzag_decode(a))
@@ -69,7 +73,7 @@ def decode_row(data, num_values, path):
             else:
                 nleft -= 3
                 if nleft < 0:
-                    raise ParseError(f"lc matrix file: 3-value pack overruns row: {path}")
+                    raise ParseError(f"{kind}: 3-value pack overruns row: {path}")
                 a = t & 0x3
                 b = (t >> 2) & 0x3
                 c = (t >> 4) & 0x3
@@ -78,6 +82,6 @@ def decode_row(data, num_values, path):
                 last = last + zigzag_decode(c)
                 values.append(last)
     except IndexError as exc:
-        raise ParseError(f"lc matrix file: row data ends mid-tag: {path}") from exc
+        raise ParseError(f"{kind}: row data ends mid-tag: {path}") from exc
 
     return values

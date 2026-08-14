@@ -194,10 +194,11 @@ def _lc2_uncompress(data: bytes, num: int, path: str) -> list:
     The actual bit-level tag decoding lives in lc_codec.decode_row,
     shared with mtx_io.py's matrix-row decoding -- same LC2 codec,
     just applied to a whole spectrum here instead of one matrix row.
-    Error messages now come from the shared module's matrix-flavored
-    wording rather than .spk-specific text; ParseError's type and the
-    conditions that trigger it are unchanged."""
-    return decode_row(data, num, path)
+    Passes its own `kind` so a corrupt .spk file's ParseError doesn't
+    claim to be about a matrix file (decode_row's default wording);
+    the exception type and the conditions that trigger it are
+    unchanged."""
+    return decode_row(data, num, path, kind=".spk file")
 
 
 def _load_lc(data: bytes, path: str) -> np.ndarray:
