@@ -51,6 +51,13 @@ No EPEL needed — install directly:
 sudo dnf install ./spectratools-<version>-1.x86_64.rpm
 ```
 
+AlmaLinux 10 is the version this has actually been installed and run on.
+AlmaLinux 9, Fedora, and other RHEL-family distributions aren't
+separately tested, but are expected to work the same way — RHEL-family
+and Fedora share the same core package names this app depends on. If
+`dnf install` reports a missing dependency, please open an issue — it
+likely means a package name has diverged.
+
 Uninstall:
 ```
 sudo dnf remove spectratools
