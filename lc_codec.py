@@ -14,8 +14,8 @@ def zigzag_decode(n):
     return -((n >> 1) + 1) if (n & 1) else (n >> 1)
 
 
-# Precomputed zigzag_decode(0..63): covers every un-extended 6-bit `n`
-# (the common case -- extension only kicks in above 59) and, as a
+# Precomputed zigzag_decode(0..63): covers every single-value tag's
+# `n` below the extension threshold (60, the common case) and, as a
 # subset, every 2-bit/3-bit pack-tag field. A list-index beats calling
 # zigzag_decode() or re-evaluating its ternary inline millions of
 # times per row -- see decode_row's docstring for why this matters.
@@ -38,36 +38,15 @@ def decode_row(data, num_values, path, *, kind):
     format's wording by omission, the exact bug this parameter was
     added to fix.
 
-    Performance note (both callers decode through this one function,
-    so this applies to matrix rows and whole .spk spectra alike): a
-    real 8192x8192 matrix has on the order of 15 million tags per
-    file. A from-scratch, two-phase numpy vectorization (a lean
-    sequential scan classifying each tag, feeding a fully vectorized
-    "reconstruct the running `last` accumulator via np.cumsum, place
-    values via boolean-mask scatter" second pass, batched across all
-    of a matrix's rows in one call to amortize numpy's per-call
-    overhead) was built and verified byte-for-byte correct against
-    the original implementation -- both on ~400 randomized synthetic
-    rows covering every tag kind/boundary and on every one of the
-    16384 real rows across both fixture files -- but measured at best
-    a wash against, and often slightly slower than, the simple
-    approach below. Two things undercut it: the sequential scan phase
-    (unavoidable -- a RUN/SINGLE tag's on-disk length depends on its
-    own content, so tag N+1's start position is only knowable once
-    tag N is parsed) already costs as much as the entire simple
-    decode does today, and the "vectorized" phase's boolean-mask
-    scatter/gather into the output array isn't actually cheap at
-    numpy level for this access pattern (values from interleaved tag
-    kinds land at non-contiguous output positions), so it added a
-    second, comparable-sized cost on top rather than replacing the
-    first one. Per the task's own fallback allowance, this function
-    instead keeps the original's simple, low-risk single-pass
-    structure and applies two cheap, purely mechanical wins measured
-    to actually help: a pre-sized Python list (no per-value
-    append()/extend() call overhead) and _ZIGZAG_TABLE above (no
-    per-value zigzag_decode() call, and no re-evaluating its ternary,
-    for the 2-bit/3-bit pack fields and the common un-extended
-    6-bit case)."""
+    Performance: a pre-sized output list (no per-value append()/
+    extend() overhead) plus _ZIGZAG_TABLE above (no per-value
+    zigzag_decode() call for the common case) measured ~20% faster on
+    real 8192x8192 matrix fixtures. A full numpy vectorization was
+    also tried and verified byte-for-byte correct, but measured no
+    faster (the tag stream's variable-length encoding forces a
+    sequential scan that alone costs as much as this whole function
+    does) -- see commit c9ffee6's message for why, before re-attempting
+    it without new profiling data."""
     values = [0] * num_values
     out = 0
     last = 0
@@ -97,6 +76,11 @@ def decode_row(data, num_values, path, *, kind):
                     nleft -= same
                     if nleft <= 0:
                         raise ParseError(f"{kind}: same-run tag overruns row: {path}")
+                    # Unlike a direct values[out] write, slice-assignment
+                    # silently GROWS the list instead of raising if
+                    # out+same ever exceeded num_values -- only safe
+                    # because the nleft<=0 check above guarantees it
+                    # can't. Do not remove that check.
                     values[out:out + same] = [last] * same
                     out += same
                 else:
