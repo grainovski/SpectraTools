@@ -84,7 +84,7 @@ def test_load_n42_counted_zeroes_unpaired_zero_raises(tmp_path):
 def test_load_n42_rejects_oversized_counted_zeroes_run_length(tmp_path):
     # A huge run-length would previously hit `values.extend([0] * run_length)`
     # with no upper bound, crashing with an uncaught MemoryError. Same bug
-    # class already fixed via MAT_COLMAX (spk_io.py) / _DIM_MAX (mtx_io.py).
+    # class already fixed via MAT_COLMAX (spk_io.py) / DIM_MAX (mtx_io.py).
     xml_text = _MINIMAL_N42.format(
         calibration_block="",
         spectrum_block=_spectrum_block(

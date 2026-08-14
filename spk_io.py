@@ -4,11 +4,11 @@ import numpy as np
 
 from histogram_io import ParseError
 from int64_cast import checked_round_to_int64
+from lc_codec import DIM_MAX as MAT_COLMAX, decode_row, zigzag_decode as _zigzag_decode
 
 LC_MAGIC = 0x80FFFF10
 LC_HEADER_SIZE = 44
 LC_POSLEN_SIZE = 8
-MAT_COLMAX = 1 << 16  # matches libmfile-1.0.7's own MAT_COLMAX buffer-size limit
 
 OLDMAT_TRAILER_SIZE = 64
 OLDMAT_MAGIC = b"\nMatFmt: "
@@ -40,12 +40,6 @@ def load_spk(path: str) -> np.ndarray:
     raise ParseError(
         f"Not a recognized tv/Mfile .spk file (no LC magic, no MatFmt trailer): {path}"
     )
-
-
-def _zigzag_decode(i: int) -> int:
-    if i & 1:
-        return -((i >> 1) + 1)
-    return i >> 1
 
 
 def _zigzag_encode(value: int) -> int:
@@ -194,64 +188,16 @@ def _lc1_uncompress(data: bytes, num: int, path: str) -> list:
 
 
 def _lc2_uncompress(data: bytes, num: int, path: str) -> list:
-    out = []
-    last = 0
-    nleft = num
-    pos = 0
-    n = len(data)
-
-    def next_byte():
-        nonlocal pos
-        if pos >= n:
-            raise ParseError(f"Truncated .spk LC2 compressed stream: {path}")
-        b = data[pos]
-        pos += 1
-        return b
-
-    while nleft > 0:
-        t = next_byte()
-        if t & 0x80:
-            v = t & 0x3F
-            if v > 59:
-                extra_bytes = v - 59
-                v = 59
-                for i in range(extra_bytes):
-                    b = next_byte()
-                    v += (b + 1) << (8 * i)
-            if t & 0x40:
-                diff = v & 1
-                same = (v >> 1) + 3
-                out.append(last + diff)
-                nleft -= same
-                if nleft <= 0:
-                    raise ParseError(f"Corrupt .spk LC2 stream (run overruns channel count): {path}")
-                out.extend([last] * same)
-            else:
-                last += _zigzag_decode(v)
-                out.append(last)
-            nleft -= 1
-        elif t & 0x40:
-            nleft -= 2
-            if nleft < 0:
-                raise ParseError(f"Corrupt .spk LC2 stream (tag overruns channel count): {path}")
-            a = t & 0x7
-            out.append(last + _zigzag_decode(a))
-            b = (t >> 3) & 0x7
-            last += _zigzag_decode(b)
-            out.append(last)
-        else:
-            nleft -= 3
-            if nleft < 0:
-                raise ParseError(f"Corrupt .spk LC2 stream (tag overruns channel count): {path}")
-            a = t & 0x3
-            out.append(last + _zigzag_decode(a))
-            b = (t >> 2) & 0x3
-            out.append(last + _zigzag_decode(b))
-            c = (t >> 4) & 0x3
-            last += _zigzag_decode(c)
-            out.append(last)
-
-    return out
+    """Kept as a distinct module-level name (rather than importing
+    decode_row directly under this name) because tests call it
+    directly and internal callers below reference it by this name.
+    The actual bit-level tag decoding lives in lc_codec.decode_row,
+    shared with mtx_io.py's matrix-row decoding -- same LC2 codec,
+    just applied to a whole spectrum here instead of one matrix row.
+    Error messages now come from the shared module's matrix-flavored
+    wording rather than .spk-specific text; ParseError's type and the
+    conditions that trigger it are unchanged."""
+    return decode_row(data, num, path)
 
 
 def _load_lc(data: bytes, path: str) -> np.ndarray:

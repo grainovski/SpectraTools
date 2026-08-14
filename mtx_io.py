@@ -3,84 +3,11 @@ import struct
 import numpy as np
 
 from histogram_io import ParseError
+from lc_codec import DIM_MAX, decode_row
 
 MAGIC_LC = 0x80FFFF10
 _HEADER_FORMAT = "<11I"
 _HEADER_SIZE = 44
-_DIM_MAX = 1 << 16  # matches spk_io.py's own MAT_COLMAX bound
-
-
-def _zigzag_decode(n):
-    return -((n >> 1) + 1) if (n & 1) else (n >> 1)
-
-
-def _decode_row(data, num_values, path):
-    """Decodes one lc-format v2 compressed row into `num_values`
-    integers. A faithful port of lc2_uncompress
-    (libmfile-1.0.7/src/lc_c2.c:134-200), including its two least
-    obvious behaviors: a 3-pack/2-pack tag's deltas are all computed
-    against the SAME pre-tag `last` (not chained value-to-value), and
-    a same-run tag's repeated values equal the pre-run `last`
-    unchanged -- `last` is not updated by a same-run tag at all, only
-    by the other three tag kinds. Verified byte-for-byte against real
-    compressed rows from both fixture files during planning."""
-    values = []
-    last = 0
-    pos = 0
-    nleft = num_values
-    try:
-        while nleft > 0:
-            t = data[pos]
-            pos += 1
-
-            if t & 0x80:
-                n = t & 0x3F
-                if n > 59:
-                    bytes_extra = n - 59
-                    n = 59
-                    for i in range(bytes_extra):
-                        b = data[pos]
-                        pos += 1
-                        n += (b + 1) << (i * 8)
-
-                if t & 0x40:
-                    diff = n & 1
-                    same = (n >> 1) + 3
-                    values.append(last + diff)
-                    nleft -= same
-                    if nleft <= 0:
-                        raise ParseError(f"lc matrix file: same-run tag overruns row: {path}")
-                    values.extend([last] * same)
-                else:
-                    last = last + _zigzag_decode(n)
-                    values.append(last)
-                nleft -= 1
-
-            elif t & 0x40:
-                nleft -= 2
-                if nleft < 0:
-                    raise ParseError(f"lc matrix file: 2-value pack overruns row: {path}")
-                a = t & 0x7
-                b = (t >> 3) & 0x7
-                values.append(last + _zigzag_decode(a))
-                last = last + _zigzag_decode(b)
-                values.append(last)
-
-            else:
-                nleft -= 3
-                if nleft < 0:
-                    raise ParseError(f"lc matrix file: 3-value pack overruns row: {path}")
-                a = t & 0x3
-                b = (t >> 2) & 0x3
-                c = (t >> 4) & 0x3
-                values.append(last + _zigzag_decode(a))
-                values.append(last + _zigzag_decode(b))
-                last = last + _zigzag_decode(c)
-                values.append(last)
-    except IndexError as exc:
-        raise ParseError(f"lc matrix file: row data ends mid-tag: {path}") from exc
-
-    return values
 
 
 def load_mtx(path):
@@ -108,10 +35,10 @@ def load_mtx(path):
                 )
             if levels < 1:
                 raise ParseError(f"lc matrix file declares zero levels: {path}")
-            if not (1 <= lines <= _DIM_MAX) or not (1 <= columns <= _DIM_MAX):
+            if not (1 <= lines <= DIM_MAX) or not (1 <= columns <= DIM_MAX):
                 raise ParseError(
                     f"Invalid matrix dimensions {lines}x{columns} "
-                    f"(must be 1-{_DIM_MAX} each): {path}"
+                    f"(must be 1-{DIM_MAX} each): {path}"
                 )
 
             # Row-table entries are {u_int pos, u_int len}, one per
@@ -133,7 +60,7 @@ def load_mtx(path):
                 row_bytes = f.read(row_len)
                 if len(row_bytes) < row_len:
                     raise ParseError(f"lc matrix file row {row} data is truncated: {path}")
-                values = _decode_row(row_bytes, columns, path)
+                values = decode_row(row_bytes, columns, path)
                 try:
                     data[row, :] = values
                 except OverflowError as exc:
