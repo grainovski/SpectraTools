@@ -318,9 +318,8 @@ which one to work on from the dropdown. Hold <kbd>C</kbd> and click
 twice to mark the cut (signal) region, and hold <kbd>G</kbd> and click
 twice for each background region -- any number of background regions
 are allowed, and more background generally means better statistics.
-The <b>Clear Marks</b> button resets the cut region and every
-background region mark together, so you can start over without
-switching projections -- fit marks, committed fits, and any
+<b>Clear Marks</b> resets the cut region and every
+background region mark together -- fit marks, committed fits, and any
 already-activated cut are all left untouched. <b>Activate Cut</b>
 (<kbd>Ctrl+Alt+C</kbd>) computes a background-subtracted
 spectrum (weighted automatically by region width, same convention TV uses) and
