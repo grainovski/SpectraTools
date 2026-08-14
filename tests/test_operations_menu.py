@@ -1283,6 +1283,16 @@ def test_close_active_spectrum_preserves_the_current_view(qapp):
     assert main_window.axes.get_xlim() == (10.0, 50.0)
 
 
+def test_toggling_log_scale_preserves_the_current_view(qapp):
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window.axes.set_xlim(10, 50)
+
+    main_window._on_log_scale_toggled(True)
+
+    assert main_window.axes.get_xlim() == (10.0, 50.0)
+
+
 def test_opening_n42_file_with_calibration_auto_activates_it(qapp):
     main_window = MainWindow()
     fixture = os.path.join(os.path.dirname(__file__), "fixtures", "316-2_160V_0785uA.n42")
