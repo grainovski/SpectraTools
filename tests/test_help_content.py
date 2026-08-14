@@ -470,6 +470,19 @@ def test_howto_html_documents_matrix_panel_fit_integrate_calibrate():
     assert "<kbd>Ctrl+=</kbd>" in html
 
 
+def test_howto_html_documents_clear_marks_button():
+    html = build_howto_html()
+    assert "Clear Marks" in html
+    # Specific behavior, not just the button's name -- pins down that it
+    # clears both mark types together and leaves fit marks/committed
+    # fits/an already-activated cut alone, matching what
+    # matrix_panel.py's _clear_marks -> MatrixCutController.clear ->
+    # MatrixCutState.reset actually does (cut_region, bg_regions, and
+    # both pending clicks; nothing on fit_controller's state).
+    assert "resets the cut region and every" in html
+    assert "fit marks, committed fits, and any" in html
+
+
 def test_knowledge_database_explains_2d_matrix_concepts():
     html = _strip_base64_images(build_knowledge_database_html())
     assert "projection" in html.lower()
