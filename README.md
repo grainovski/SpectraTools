@@ -8,15 +8,17 @@ See `CHANGELOG.md` for what's new in each release.
 
 ## Installing
 
-Pre-built releases are under `releases/vX.Y.Z/` (the latest is
-`releases/v2.0.0/`). Pick your platform:
+Pre-built releases are under `releases/`, one subdirectory per version
+(e.g. `releases/v3.0.0/`). Check that directory for the latest, or see
+`CHANGELOG.md` for the release history. Pick your platform:
 
 ### Windows
 
 Requires **Windows 10 or later** (Qt6, which this app is built on,
-doesn't support Windows 7/8). Run `SpectraTools-v2.0.0-Setup.exe` and
-follow the installer. No other prerequisites — everything the app needs
-is bundled.
+doesn't support Windows 7/8). Run the installer inside the latest
+release directory (e.g. `SpectraTools-v3.0.0-Setup.exe` in
+`releases/v3.0.0/`) and follow the installer. No other prerequisites —
+everything the app needs is bundled.
 
 ### Linux
 
@@ -26,9 +28,12 @@ supported — PySide6, the Qt6 binding this app uses, stopped publishing
 wheels compatible with that old a glibc after version 6.2.4 (2021), and
 that's an upstream constraint no packaging choice here can work around.
 
+Install the `.deb` or `.rpm` from the latest release directory (e.g.
+v3.0.0):
+
 ```
-sudo apt install ./spectratools_2.0.0_amd64.deb      # Debian/Ubuntu
-sudo dnf install ./spectratools-2.0.0-1.x86_64.rpm    # RHEL/CentOS/AlmaLinux/Rocky
+sudo apt install ./spectratools_3.0.0_amd64.deb      # Debian/Ubuntu
+sudo dnf install ./spectratools-3.0.0-1.x86_64.rpm    # RHEL/CentOS/AlmaLinux/Rocky
 ```
 
 Both automatically install any missing runtime libraries as part of the
