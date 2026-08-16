@@ -438,14 +438,27 @@ def fit_peaks(
                     "well-determined by this data (invalid negative "
                     "uncertainty)"
                 )
-                if enable_left_tail:
-                    detail += (
-                        "; if the peak has no real tail, this is often the "
-                        "tail parameters specifically -- try unchecking "
-                        "Left tail"
-                    )
             else:
                 detail = "the fit produced a non-finite covariance matrix"
+            # The tail hint belongs on BOTH branches, not just the
+            # negative-variance one. They are two presentations of the
+            # same situation -- a parameter the data does not constrain
+            # -- and the singular one is if anything the commoner face
+            # of it: once tail_fraction is driven to ~0 the tail
+            # contributes nothing, so d(model)/d(tail_beta) vanishes,
+            # J.T @ J loses rank, np.linalg.inv raises, and pcov comes
+            # back all-inf. Observed on synthetic data that genuinely
+            # HAD a tail, with every failing fit ending at tail_beta
+            # pinned to TAIL_BETA_MIN and tail_fraction ~ 0, while
+            # position/sigma/amplitude had converged well. Without the
+            # hint here that case reported only "non-finite covariance
+            # matrix", which says nothing about what to actually do.
+            if enable_left_tail:
+                detail += (
+                    "; if the peak has no real tail, this is often the "
+                    "tail parameters specifically -- try unchecking "
+                    "Left tail"
+                )
             raise FitError(detail[0].upper() + detail[1:])
 
         perr = np.sqrt(np.diag(pcov))

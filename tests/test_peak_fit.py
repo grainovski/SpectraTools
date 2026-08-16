@@ -1616,3 +1616,54 @@ def test_tail_and_gaussian_agree_when_gf3_would_also_keep_the_tail():
     x = np.linspace(-40.0, 40.0, 2001)
     shape = hypermet_left_tail(x, 0.0, sigma, r, beta)
     assert shape[x < 0].sum() > shape[x > 0].sum()
+
+
+def test_singular_tail_covariance_still_suggests_unchecking_left_tail():
+    """A fit whose tail parameters the data cannot constrain fails with a
+    SINGULAR covariance (np.linalg.inv raises -> pcov all-inf), not the
+    negative-variance case. Both are the same underlying situation -- once
+    tail_fraction is driven to ~0 the tail contributes nothing, so
+    d(model)/d(tail_beta) vanishes and J.T @ J loses rank -- so both must
+    carry the actionable hint. Previously only the negative-variance
+    branch did, leaving this one saying just "non-finite covariance
+    matrix".
+    """
+    rng = np.random.default_rng(5)
+    messages = []
+    for sigma, beta in [(1.5, 0.3), (1.5, 1.0), (1.5, 4.0), (3.0, 0.3), (3.0, 1.0),
+                        (3.0, 4.0), (5.0, 0.3), (5.0, 1.0), (5.0, 4.0)]:
+        x = np.arange(300, dtype=float)
+        y = 30.0 + 800.0 * hypermet_left_tail(x, 150.0, sigma, 0.2, beta)
+        y = rng.poisson(np.maximum(y, 0)).astype(np.int64)
+        try:
+            fit_peaks(x, y, (100, 120), (180, 200), (120, 180), [150.0],
+                      link_widths=True, enable_left_tail=True)
+        except FitError as exc:
+            messages.append(str(exc))
+
+    assert messages, "expected at least one tail-parameter fit failure in this sweep"
+    singular = [m for m in messages if "non-finite covariance" in m]
+    assert singular, "expected the singular-covariance branch specifically"
+    for message in singular:
+        assert "Left tail" in message
+
+
+def test_no_tail_hint_when_the_left_tail_is_disabled():
+    # The hint must not appear for fits that never enabled the tail --
+    # it would be actively misleading.
+    from peak_fit import _marquardt_fit
+
+    def singular_fit(model, x, y, y_err, p0, damping, fit_region_bounds=None):
+        return np.asarray(p0, dtype=float), np.full((len(p0), len(p0)), np.inf)
+
+    x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0)
+    import peak_fit as pf
+
+    pf._marquardt_fit = singular_fit
+    try:
+        with pytest.raises(FitError) as excinfo:
+            fit_peaks(x, y, (60, 78), (122, 140), (80, 120), [100.0],
+                      link_widths=True, enable_left_tail=False)
+        assert "Left tail" not in str(excinfo.value)
+    finally:
+        pf._marquardt_fit = _marquardt_fit
