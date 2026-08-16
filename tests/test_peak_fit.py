@@ -1464,3 +1464,115 @@ def test_channel_indices_is_unaffected_by_in_place_data_mutation():
     before = list(channel_indices(len(data)))
     data *= 1000
     assert list(channel_indices(len(data))) == before
+
+
+# --- TV parity: initial width seed (v3.1.0 audit, M1) ------------------
+
+
+def test_initial_sigma_seed_is_half_the_measured_width_matching_tv():
+    # TV's FSInitWidth (vsFitSetup.c:384) sets width = w * FWHM_TO_SIGMA
+    # with w a HALF-width, so its seed is half the sigma the measured
+    # FWHM implies. This port previously seeded the full sigma (2x TV).
+    from peak_fit import _initial_guess, _measure_width, parameter_names
+
+    x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.5)], slope=0.0, intercept=20.0)
+    lo, hi = 80, 120
+    mask = (x >= lo) & (x <= hi)
+    x_fit, y_sub = x[mask], y[mask] - 20.0
+
+    measured = _measure_width(x_fit, y_sub, [100.0], fallback=10.0)
+    names = parameter_names(1, link_widths=True, enable_left_tail=False)
+    guess = _initial_guess(names, x_fit, y_sub, (lo, hi), [100.0],
+                           link_widths=True, enable_left_tail=False)
+
+    seeded_sigma = guess[names.index("sigma")]
+    assert seeded_sigma == pytest.approx(measured / 2.0)
+    # ... and the measurement itself still reports the real width.
+    assert measured == pytest.approx(3.5, abs=0.5)
+
+
+def test_tail_beta_seed_uses_the_measured_width_not_the_halved_seed():
+    # TV's halving is specific to its width parameter; nothing in
+    # vsFitSetup.c propagates it to the tail decay length.
+    from peak_fit import TAIL_BETA_MIN, _initial_guess, _measure_width, parameter_names
+
+    x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.5)], slope=0.0, intercept=20.0)
+    lo, hi = 80, 120
+    mask = (x >= lo) & (x <= hi)
+    x_fit, y_sub = x[mask], y[mask] - 20.0
+
+    measured = _measure_width(x_fit, y_sub, [100.0], fallback=10.0)
+    names = parameter_names(1, link_widths=True, enable_left_tail=True)
+    guess = _initial_guess(names, x_fit, y_sub, (lo, hi), [100.0],
+                           link_widths=True, enable_left_tail=True)
+
+    assert guess[names.index("tail_beta")] == pytest.approx(max(measured, TAIL_BETA_MIN))
+    assert guess[names.index("sigma")] == pytest.approx(measured / 2.0)
+
+
+def test_initial_guess_falls_back_without_halving_when_width_cannot_be_measured():
+    # The fallback heuristic is this port's own, not TV's, so the
+    # halving must not be applied to it.
+    from peak_fit import _initial_guess, parameter_names
+
+    x_fit = np.arange(80, 121, dtype=float)
+    y_sub = np.zeros_like(x_fit)  # perfectly flat -> no measurable peak
+    names = parameter_names(1, link_widths=True, enable_left_tail=False)
+    guess = _initial_guess(names, x_fit, y_sub, (80, 120), [100.0],
+                           link_widths=True, enable_left_tail=False)
+
+    expected_fallback = max((120 - 80) / 4.0, 1e-6)
+    assert guess[names.index("sigma")] == pytest.approx(expected_fallback)
+
+
+# --- TV parity: Marquardt half-step fallback (v3.1.0 audit, M2) --------
+
+
+def test_reversed_half_step_is_re_damped_and_stays_inside_the_fit_region():
+    # TV's lambda-runaway fallback (vsCurFit.c:130-134) negates and
+    # halves the step and then pushes it back through the SAME
+    # CurChangeTry damping pass the forward step used. This port applied
+    # the reversed step raw. Halving alone can only shrink a step, but
+    # NEGATING it can break a constraint the forward step honoured: the
+    # position rule keeps a peak inside the marked region, and
+    # _clamp_trial does not cover positions at all -- only sigma and the
+    # tail parameters.
+    from peak_fit import _apply_step_damping, _build_param_damping, _clamp_trial
+
+    names = ["amp_0", "pos_0", "sigma"]
+    damping = _build_param_damping(names, {}, link_widths=True)
+    region = (10.0, 60.0)
+    p = np.array([100.0, 10.5, 3.0])  # position just inside the low edge
+
+    forward = _apply_step_damping(p, np.array([0.0, 2.0, 0.0]), damping, region)
+
+    # What the old code did: reverse the damped step, value-clamp only.
+    undamped = _clamp_trial(p - 0.5 * forward, damping)
+    assert undamped[1] < region[0], "precondition: the raw reversal leaves the region"
+
+    # What TV does, and what the fix does: re-damp the reversed step.
+    back = _apply_step_damping(p, -0.5 * forward, damping, region)
+    redamped = _clamp_trial(p + back, damping)
+    assert region[0] <= redamped[1] <= region[1]
+
+
+def test_fits_never_place_a_peak_outside_the_marked_region():
+    # End-to-end guard for the same property: whichever path the solver
+    # exits through, including the give-up fallback, a fitted position
+    # must lie inside the region the user marked.
+    rng = np.random.default_rng(11)
+    for trial in range(25):
+        sigma = float(rng.uniform(1.5, 6.0))
+        pos = float(rng.uniform(95.0, 105.0))
+        x = np.arange(200, dtype=float)
+        y = 30.0 + 400.0 * np.exp(-((x - pos) ** 2) / (2 * sigma ** 2))
+        y = rng.poisson(np.maximum(y, 0)).astype(np.int64)
+        lo, hi = 80.0, 120.0
+        try:
+            result = fit_peaks(x, y, (60, 78), (122, 140), (lo, hi), [pos], link_widths=True)
+        except FitError:
+            continue
+        for peak in result.peaks:
+            assert lo <= peak.position <= hi, (
+                f"trial {trial}: fitted position {peak.position} escaped region ({lo}, {hi})"
+            )
