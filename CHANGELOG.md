@@ -4,7 +4,7 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
-## [3.1.0] - unreleased
+## [3.1.0] - 2026-08-16
 
 A correctness and robustness release. It fixes everything found by a
 full audit of v3.0.0, including five crashes or silent-corruption bugs
