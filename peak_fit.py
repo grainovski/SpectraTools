@@ -456,10 +456,33 @@ def fit_peaks(
             if not name.startswith("tail_")
         }
         if degenerate_peak_params:
+            # Reported as peak NUMBERS, not internal parameter names.
+            # This used to list them raw -- "could not determine amp_0,
+            # amp_1, amp_2, amp_3, pos_0, ... sigma_3" -- which is twelve
+            # pieces of jargon for what is really "peaks 1-4", and
+            # amp_0/sigma_2 mean nothing to someone marking peaks on a
+            # spectrum. The parameter names are an implementation detail
+            # of _parameter_names(); the peak index is the only part the
+            # user chose.
+            peak_numbers = sorted(
+                {int(name.rsplit("_", 1)[1]) + 1
+                 for name in degenerate_peak_params
+                 if name.rsplit("_", 1)[-1].isdigit()}
+            )
+            if peak_numbers:
+                if len(peak_numbers) == 1:
+                    which = f"peak {peak_numbers[0]}"
+                else:
+                    which = "peaks " + ", ".join(str(n) for n in peak_numbers)
+            else:
+                # The shared "sigma" of a linked-width fit carries no peak
+                # index at all, so there is no number to report.
+                which = "the peak width"
             detail = (
-                "the fit could not determine "
-                + ", ".join(sorted(degenerate_peak_params))
-                + " -- the peaks or regions marked are degenerate for this data"
+                f"the fit could not determine {which} -- the marked peaks or regions "
+                "are degenerate for this data. Peaks marked at (or very near) the "
+                "same position, or a fit region too narrow to separate them, are the "
+                "usual cause"
             )
             if enable_left_tail:
                 detail += "; if the peak has no real tail, try unchecking Left tail"

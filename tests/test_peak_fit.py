@@ -1658,9 +1658,17 @@ def test_a_wholly_degenerate_fit_still_fails():
     the fit must still fail rather than look successful.
     """
     x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0)
-    with pytest.raises(FitError, match="degenerate"):
+    with pytest.raises(FitError, match="degenerate") as excinfo:
         fit_peaks(x, y, (20.0, 35.0), (160.0, 175.0), (93.0, 107.0),
                   [100.0, 100.0, 100.0, 100.0], link_widths=False)
+
+    # The message must name the peaks the user marked, not the solver's
+    # internal parameter names -- it used to read "could not determine
+    # amp_0, amp_1, ... sigma_3", which is jargon for "peaks 1-4".
+    message = str(excinfo.value)
+    assert "peaks 1, 2, 3, 4" in message
+    for internal in ("amp_", "pos_", "sigma_"):
+        assert internal not in message, f"internal parameter name {internal!r} leaked to the user"
 def test_optional_parameters_are_dropped_only_when_the_full_inversion_fails():
     """_covariance_from must be conservative: a healthy curvature matrix
     is inverted whole, so fits that already produced uncertainties keep
