@@ -544,16 +544,20 @@ class MatrixPanel(QMainWindow):
         channels = np.arange(len(spectrum.data))
         x = self.channel_to_display(channels)
         self.axes.plot(x, spectrum.data, drawstyle="steps-mid", linewidth=0.8, color=spectrum.color)
-        self.fit_controller.draw_committed_fits(spectrum)
-        self.fit_controller.update_results_list()
-        self.axes.set_xlabel("Energy (keV)" if self._calibration_active else f"{self.working_axis.upper()} channel")
-        self.axes.set_ylabel("Counts")
+        # Resolved before drawing so off-view fits can be skipped, then
+        # applied below in its original place -- see main_window's
+        # _plot_data for why it cannot simply be read back from the axes
+        # inside the draw call.
         if xlim_override is not None:
             xlim = xlim_override
         elif saved_xlim is not None:
             xlim = saved_xlim
         else:
             xlim = (self.channel_to_display(0), self.channel_to_display(len(spectrum.data) - 1))
+        self.fit_controller.draw_committed_fits(spectrum, view_xlim=xlim)
+        self.fit_controller.update_results_list()
+        self.axes.set_xlabel("Energy (keV)" if self._calibration_active else f"{self.working_axis.upper()} channel")
+        self.axes.set_ylabel("Counts")
         self.axes.set_xlim(xlim)
         self._autoscale_y(xlim)
         self.canvas.draw()
@@ -664,3 +668,28 @@ class MatrixPanel(QMainWindow):
         )
         if not others_enabled:
             self.main_window.setEnabled(True)
+
+        # Release the decoded matrix explicitly.
+        #
+        # Closing a window does not destroy it. This panel is a
+        # parentless top-level widget, so Qt never owned it, and the Qt
+        # signal connections made in __init__ capture `self` in closures
+        # that outlive the close -- the object stays reachable and its
+        # matrix stays resident. Measured before this: opening and
+        # closing the same 8192x8192 matrix three times left three live
+        # panels holding 1.6 GB between them, growing without bound for
+        # as long as the session lasts. The _matrix_panels bookkeeping
+        # above was already correct; it is the payload that lingered.
+        #
+        # Dropping the references here rather than relying on the widget
+        # being collected: whether the panel itself is freed depends on
+        # Qt/Python ownership details that are easy to regress, while an
+        # explicit release frees the memory that actually matters either
+        # way. Safe because every reader of self.matrix
+        # (_rebuild_spectra, _activate_cut, the heatmap) is a user action
+        # on an OPEN panel, and this panel is hidden and de-registered by
+        # the time we get here. The heatmap windows closed above hold
+        # their own reference to the same array, which is why they are
+        # closed first.
+        self.matrix = None
+        self.projections = {}

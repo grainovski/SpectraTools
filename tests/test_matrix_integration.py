@@ -212,3 +212,43 @@ def test_open_matrix_dialog_reports_a_bad_file_instead_of_raising(qapp, monkeypa
     assert warnings, "a corrupt matrix must still be reported to the user"
     assert "bad magic" in warnings[0][1]
     assert not opened, "no panel should be opened for a file that failed to load"
+
+
+def test_closing_a_matrix_panel_releases_its_matrix(qapp):
+    """A closed panel used to keep its whole decoded matrix resident.
+    The panel is a parentless top-level widget, so Qt never owned it, and
+    the signal connections made in __init__ capture `self` in closures
+    that outlive close() -- three open/close cycles on one 8192x8192
+    matrix retained 1.6 GB, growing for the life of the session.
+
+    Asserts the payload is released rather than that the widget is
+    collected: whether the object itself is freed depends on Qt/Python
+    ownership details that are easy to regress, while the memory is what
+    actually matters.
+    """
+    import weakref
+
+    main_window = MainWindow()
+    path = os.path.join(FIXTURES, "gg.mtx")
+
+    # Weakrefs to just the panels THIS test opens. A global sweep of every
+    # live MatrixPanel would also pick up panels other tests in this
+    # module deliberately leave open, and fail for their sake rather than
+    # for a real leak.
+    closed = []
+    for _ in range(2):
+        panel = main_window._open_matrix_panel(path)
+        assert panel.matrix is not None and panel.matrix.nbytes > 0
+        panel.close()
+        closed.append(weakref.ref(panel))
+        del panel
+
+    still_held = 0
+    for ref in closed:
+        panel = ref()
+        if panel is not None and getattr(panel, "matrix", None) is not None:
+            still_held += panel.matrix.nbytes
+    assert still_held == 0, (
+        f"{still_held / 1e6:,.0f} MB of matrix data still held by closed panels"
+    )
+    assert main_window._matrix_panels == []
