@@ -271,3 +271,50 @@ def test_load_mtx_same_run_and_packed_tags(tmp_path):
     path = _build_minimal_lc_file(tmp_path, [row0], columns=9)
     data = load_mtx(path)
     assert list(data[0]) == [-1, -3, -3, -3, -3, -3, -3, -3, -3]
+
+
+def test_load_mtx_reads_the_file_without_a_syscall_per_row(monkeypatch):
+    """The row loop used to seek+read once per line -- 8194 read() calls
+    for a real 8192-line matrix. That is invisible on a local disk but
+    dominates on a network or virtualised filesystem, where per-call
+    latency is what costs (measured: 1.63 s on WSL's 9p mount vs 0.02 s
+    for the same file on native ext4, doubling the whole load).
+
+    Asserts the CALL COUNT, not elapsed time, so it stays meaningful on
+    any machine -- unlike a wall-clock threshold, which is calibrated to
+    one CPU.
+    """
+    import builtins
+
+    real_open = builtins.open
+    reads = []
+
+    class _CountingFile:
+        def __init__(self, handle):
+            self._handle = handle
+
+        def read(self, *args):
+            reads.append(1)
+            return self._handle.read(*args)
+
+        def seek(self, *args):
+            return self._handle.seek(*args)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self._handle.__exit__(*args)
+
+    def counting_open(path, *args, **kwargs):
+        return _CountingFile(real_open(path, *args, **kwargs))
+
+    monkeypatch.setattr(builtins, "open", counting_open)
+    data = load_mtx(os.path.join(FIXTURES, "gg.mtx"))
+    monkeypatch.undo()
+
+    assert data.shape == (8192, 8192)
+    assert len(reads) <= 2, (
+        f"expected the file to be read in one bulk call, got {len(reads)} read() calls "
+        "-- has the per-row seek+read crept back in?"
+    )
