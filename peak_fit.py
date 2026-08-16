@@ -49,10 +49,19 @@ def hypermet_left_tail(x, position, sigma, r, beta):
         pure Gaussian, and measured up to 0.28 of peak amplitude of
         difference. It is reachable in practice -- a fit of genuinely
         short-tailed data was observed converging to y ~ 20 with beta
-        pinned at TAIL_BETA_MIN. Deliberately left unreplicated because
-        this port's shape is the true Hypermet function there and gf3's
-        is a float32 safeguard, but it IS a real behavioural divergence
-        from the reference, recorded here rather than silently kept.
+        pinned at TAIL_BETA_MIN.
+
+        DECIDED 2026-08-16, by the user, after being shown that
+        measurement: keep the true Hypermet function here and do NOT
+        replicate gf3's switch. This port computes in float64, so the
+        numerical danger the safeguard exists to avoid does not apply,
+        and collapsing to a Gaussian would discard real tail shape in
+        exactly the short-tail fits where it is most visible.
+
+        This is therefore a deliberate divergence from the reference,
+        not an unported detail -- do not "fix" it in a future parity
+        pass. tests/test_peak_fit.py::
+        test_tail_stays_active_where_gf3_would_disable_it locks it in.
     """
     dx = x - position
     w = dx / (sigma * np.sqrt(2))

@@ -1576,3 +1576,43 @@ def test_fits_never_place_a_peak_outside_the_marked_region():
             assert lo <= peak.position <= hi, (
                 f"trial {trial}: fitted position {peak.position} escaped region ({lo}, {hi})"
             )
+
+
+# --- deliberate divergence from gf3: the tail is never disabled -------
+
+
+def test_tail_stays_active_where_gf3_would_disable_it():
+    """gf3 switches to a pure Gaussian once y = sigma/(beta*sqrt(2)) > 4
+    (its `notail` flag, gf3_subs.c:2896-2898) -- a float32-era numerical
+    safeguard. This port keeps computing the true Hypermet function
+    there, which is a DELIBERATE, user-confirmed divergence (2026-08-16),
+    not an oversight. Locked in by this test so a future parity pass
+    cannot quietly "restore" gf3's behaviour and change fitted results.
+    """
+    sigma, beta, r = 3.0, 0.2, 0.3
+    y = sigma / (beta * np.sqrt(2))
+    assert y > 4.0, "precondition: this is the regime gf3 would disable the tail in"
+
+    x = np.linspace(-40.0, 40.0, 2001)
+    shape = hypermet_left_tail(x, 0.0, sigma, r, beta)
+    pure_gaussian = np.exp(-((x / (sigma * np.sqrt(2))) ** 2))
+
+    # If the tail were disabled, `shape` would BE the pure Gaussian.
+    assert np.max(np.abs(shape - pure_gaussian)) > 0.05
+
+    # And it must still lean left -- the physical point of the tail.
+    left = shape[x < 0].sum()
+    right = shape[x > 0].sum()
+    assert left > right
+
+
+def test_tail_and_gaussian_agree_when_gf3_would_also_keep_the_tail():
+    """Guard from the other side: for a long tail (y well under 4, where
+    gf3 keeps its tail too) the shape must still be a real tail, so the
+    test above is checking the regime and not just any old difference."""
+    sigma, beta, r = 3.0, 10.0, 0.3
+    assert sigma / (beta * np.sqrt(2)) < 4.0
+
+    x = np.linspace(-40.0, 40.0, 2001)
+    shape = hypermet_left_tail(x, 0.0, sigma, r, beta)
+    assert shape[x < 0].sum() > shape[x > 0].sum()
