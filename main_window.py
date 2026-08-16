@@ -9,7 +9,7 @@ matplotlib.use("QtAgg")
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
-from PySide6.QtCore import QEvent, Qt, QRectF
+from PySide6.QtCore import QEvent, Qt, QRectF, QThread, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDockWidget,
     QFileDialog,
+    QProgressDialog,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -43,6 +44,7 @@ from help_content import (
 )
 from histogram_io import ParseError, load_histogram, save_histogram
 from matrix_panel import MatrixPanel
+from mtx_io import load_mtx
 from n42_io import load_n42
 from settings import Settings
 from spe_io import load_spe, save_spe
@@ -228,6 +230,43 @@ class _TrimmedNavigationToolbar(NavigationToolbar2QT):
         item for item in NavigationToolbar2QT.toolitems
         if item[0] not in ("Back", "Forward", "Zoom", "Subplots", "Customize")
     ]
+
+
+class _MatrixLoadWorker(QThread):
+    """Decodes a matrix off the GUI thread.
+
+    The decode is several seconds of pure-Python CPU that cannot be
+    vectorised (the tag stream's variable-length encoding forces a
+    sequential scan -- see lc_codec.decode_row). Run on the GUI thread it
+    froze the whole window: no repaint, no menu, an unresponsive title
+    bar, which is what made a merely-slow operation feel broken.
+
+    Only decodes and reports; every widget touched in response lives in
+    the GUI thread's slots. The decoded numpy array is handed over via
+    the `loaded` signal -- safe to pass between threads, since ownership
+    moves with it and this thread never looks at it again.
+    """
+
+    progressed = Signal(int, int)
+    loaded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, path, parent=None):
+        super().__init__(parent)
+        self._path = path
+
+    def run(self):
+        try:
+            matrix = load_mtx(self._path, progress=self.progressed.emit)
+        except ParseError as exc:
+            # ParseError already carries a user-facing message, and
+            # load_mtx converts OSError into one too, so this is the
+            # single failure channel. Caught here rather than left to
+            # propagate because an exception escaping run() would take
+            # down the thread with no way for the GUI to report it.
+            self.failed.emit(str(exc))
+            return
+        self.loaded.emit(matrix)
 
 
 class MainWindow(QMainWindow):
@@ -851,27 +890,69 @@ class MainWindow(QMainWindow):
             self, "Open Matrix", self.settings.last_folder(), "Matrix files (*.mtx);;All files (*)"
         )
         if path:
-            # Decoding a real matrix (e.g. 8192x8192 lc-compressed) takes
-            # several seconds on the GUI thread -- without feedback the app
-            # appears to hang. The status message is posted before the wait
-            # cursor and flushed with processEvents() so it actually paints
-            # before the blocking load starts (the event loop can't repaint
-            # once _open_matrix_panel is on the stack).
-            self.statusBar().showMessage("Loading matrix...")
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            QApplication.processEvents()
-            try:
-                self._open_matrix_panel(path)
-            except ParseError as exc:
-                QMessageBox.warning(self, "Could not open matrix", str(exc))
-            else:
-                self.settings.set_last_folder(os.path.dirname(path))
-            finally:
-                QApplication.restoreOverrideCursor()
-                self.statusBar().clearMessage()
+            matrix, error = self._load_matrix_with_progress(path)
+            if error is not None:
+                QMessageBox.warning(self, "Could not open matrix", error)
+                return
+            self._open_matrix_panel(path, matrix=matrix)
+            self.settings.set_last_folder(os.path.dirname(path))
 
-    def _open_matrix_panel(self, path):
-        panel = MatrixPanel(self, path)
+    def _load_matrix_with_progress(self, path):
+        """Decodes `path` in a worker thread behind a progress dialog.
+
+        Returns (matrix, None) or (None, error_message).
+
+        This used to run on the GUI thread behind a wait cursor and a
+        status message flushed with processEvents(). That told the user
+        something was happening but the window still could not repaint
+        for the several seconds the decode takes, so it still looked
+        hung. A worker thread keeps the event loop alive, and because
+        load_mtx reports row progress the bar shows real progress rather
+        than an indeterminate spinner.
+
+        The dialog has no cancel button on purpose: load_mtx builds the
+        matrix in one pass with no unwind path, so a cancel could only be
+        honoured between rows and would leave a half-decoded array to
+        throw away. A few seconds does not warrant that machinery.
+
+        Deliberately NOT folded into _open_matrix_panel: that method is
+        the synchronous seam every other caller (and every test) uses to
+        get a panel back immediately, and threading it would turn a
+        simple call into an event-loop dependency.
+        """
+        dialog = QProgressDialog("Reading matrix...", None, 0, 100, self)
+        dialog.setWindowTitle("Open Matrix")
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.setValue(0)
+
+        outcome = {"matrix": None, "error": None}
+        worker = _MatrixLoadWorker(path, self)
+
+        def on_progress(done, total):
+            if total:
+                dialog.setValue(int(done * 100 / total))
+
+        worker.progressed.connect(on_progress)
+        worker.loaded.connect(lambda m: outcome.__setitem__("matrix", m))
+        worker.failed.connect(lambda msg: outcome.__setitem__("error", msg))
+        # close(), not accept()/reject(): this dialog is only ever
+        # dismissed by the load finishing, so there is no accepted vs
+        # rejected distinction to preserve.
+        worker.finished.connect(dialog.close)
+        worker.start()
+        dialog.exec()
+        # The nested event loop above ends when the dialog closes, which
+        # the finished signal drives -- but wait() makes the hand-off
+        # explicit rather than relying on that ordering, and guarantees
+        # the thread is done before its results are read.
+        worker.wait()
+        return outcome["matrix"], outcome["error"]
+
+    def _open_matrix_panel(self, path, matrix=None):
+        panel = MatrixPanel(self, path, matrix=matrix)
         self._matrix_panels.append(panel)
         panel.show()
         return panel

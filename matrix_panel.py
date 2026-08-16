@@ -185,11 +185,17 @@ class MatrixPanel(QMainWindow):
     window. Coexists with MainWindow -- activating one disables, but
     does not close, the other (wired in Task 6)."""
 
-    def __init__(self, main_window, path):
+    def __init__(self, main_window, path, matrix=None):
         super().__init__()
         self.main_window = main_window
         self.path = path
-        self.matrix = load_mtx(path)
+        # `matrix` lets a caller hand in an already-decoded matrix
+        # instead of paying for the decode here, on the GUI thread.
+        # main_window's Open Matrix flow does exactly that, loading in a
+        # worker thread so the window keeps painting; passing None keeps
+        # the original synchronous behaviour, which every direct
+        # construction (including the tests) still relies on.
+        self.matrix = load_mtx(path) if matrix is None else matrix
         self.projections = {
             "x": compute_projection(self.matrix, "x"),
             "y": compute_projection(self.matrix, "y"),

@@ -10,13 +10,22 @@ _HEADER_FORMAT = "<11I"
 _HEADER_SIZE = 44
 
 
-def load_mtx(path):
+def load_mtx(path, progress=None):
     """Reads level 0 of an lc-format (line-compressed) TV matrix file,
     returning a (lines, columns) int64 array. Read-only -- no writer,
     matching TV's own architecture. Negative values (e.g. from
     random-coincidence subtraction) are preserved as-is throughout.
     Always reads level 0 and never exposes level selection -- matching
-    TV's own matrix-open command, which has no level argument at all."""
+    TV's own matrix-open command, which has no level argument at all.
+
+    `progress`, if given, is called as progress(rows_done, rows_total)
+    roughly every 256 rows and once at the end. It exists so a caller
+    running this off the GUI thread can show real progress rather than a
+    spinner: the decode is several seconds of CPU that cannot be
+    vectorised (see lc_codec.decode_row). Called at a coarse interval --
+    32 times for a real 8192-line matrix -- so it costs nothing
+    measurable, and it must not raise: this function makes no attempt to
+    unwind a partially built matrix."""
     try:
         with open(path, "rb") as f:
             # Whole file in ONE read, then sliced below, rather than a
@@ -67,6 +76,8 @@ def load_mtx(path):
 
             data = np.zeros((lines, columns), dtype=np.int64)
             for row in range(lines):
+                if progress is not None and (row & 0xFF) == 0:
+                    progress(row, lines)
                 row_pos = row_table[row * 2]
                 row_len = row_table[row * 2 + 1]
                 if row_len == 0:
@@ -109,4 +120,6 @@ def load_mtx(path):
     except OSError as exc:
         raise ParseError(f"Could not read {path}: {exc}") from exc
 
+    if progress is not None:
+        progress(lines, lines)
     return data
