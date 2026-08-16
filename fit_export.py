@@ -1,4 +1,5 @@
 import json
+import math
 import os
 
 from peak_fit import IntegrationResult
@@ -121,10 +122,33 @@ def append_auto_log(spectrum_path, result, calibration=None):
     record = _to_json_record(result, spectrum_path, calibration)
     path = auto_log_path(spectrum_path)
     with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\n")
+        f.write(json.dumps(_json_safe(record)) + "\n")
+
+
+def _json_safe(value):
+    """Replaces NaN/inf with None (-> JSON `null`) throughout a record.
+
+    An uncertainty is NaN when the fit could not determine that
+    parameter (peak_fit._covariance_from). json.dumps would happily
+    write a bare `NaN` literal, which Python itself reads back but which
+    is NOT valid JSON -- jq, JavaScript's JSON.parse and most other
+    parsers reject it outright. Since this log is a .jsonl file users
+    are expected to process with other tools, `null` is the only
+    portable way to say "no value"."""
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
 
 
 def _format_err(value, err):
+    """`value ± err`, with an undetermined (NaN) uncertainty spelled out
+    rather than printed as the bare "nan" float repr."""
+    if not math.isfinite(err):
+        return f"{value:.6g} ± n/a"
     return f"{value:.6g} ± {err:.6g}"
 
 

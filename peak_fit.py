@@ -422,46 +422,48 @@ def fit_peaks(
         except np.linalg.LinAlgError as exc:
             raise FitError(f"Fit did not converge: {exc}") from exc
 
-        if pcov is None or not np.all(np.isfinite(pcov)) or np.any(np.diag(pcov) < 0):
-            # A covariance matrix's diagonal holds variances, which
-            # become perr via sqrt() below -- a negative diagonal entry
-            # is never physically valid (it would silently corrupt the
-            # UI with NaN uncertainties), even though the matrix itself
-            # is finite in that case (hence the message below covers
-            # both, distinctly, rather than calling a negative variance
-            # "non-finite"). Off-diagonal negative entries are untouched
-            # by this check -- those are legitimate for correlated
-            # parameters.
-            if pcov is not None and np.all(np.isfinite(pcov)):
-                detail = (
-                    "the fit converged but one or more parameters are not "
-                    "well-determined by this data (invalid negative "
-                    "uncertainty)"
-                )
-            else:
-                detail = "the fit produced a non-finite covariance matrix"
-            # The tail hint belongs on BOTH branches, not just the
-            # negative-variance one. They are two presentations of the
-            # same situation -- a parameter the data does not constrain
-            # -- and the singular one is if anything the commoner face
-            # of it: once tail_fraction is driven to ~0 the tail
-            # contributes nothing, so d(model)/d(tail_beta) vanishes,
-            # J.T @ J loses rank, np.linalg.inv raises, and pcov comes
-            # back all-inf. Observed on synthetic data that genuinely
-            # HAD a tail, with every failing fit ending at tail_beta
-            # pinned to TAIL_BETA_MIN and tail_fraction ~ 0, while
-            # position/sigma/amplitude had converged well. Without the
-            # hint here that case reported only "non-finite covariance
-            # matrix", which says nothing about what to actually do.
-            if enable_left_tail:
-                detail += (
-                    "; if the peak has no real tail, this is often the "
-                    "tail parameters specifically -- try unchecking "
-                    "Left tail"
-                )
-            raise FitError(detail[0].upper() + detail[1:])
+        if not np.all(np.isfinite(popt)):
+            # The VALUES themselves are unusable -- there is no fit to
+            # report at all. Distinct from an unusable covariance, which
+            # is handled below by reporting the fit with undetermined
+            # uncertainties rather than discarding it.
+            raise FitError("Fit did not converge: the fit produced non-finite parameter values")
 
-        perr = np.sqrt(np.diag(pcov))
+        # A covariance diagonal holds variances, so a negative or
+        # non-finite entry means that parameter is not determined by
+        # this data. This used to reject the WHOLE fit, which threw away
+        # good position/sigma/amplitude values because a nuisance
+        # parameter was undetermined -- most often the tail pair, once
+        # tail_fraction is driven to ~0 and d(model)/d(tail_beta)
+        # vanishes. Now the undetermined parameters alone get NaN and
+        # the rest keep real uncertainties (see _uncertainties_from).
+        perr = _uncertainties_from(pcov, len(popt))
+
+        # An undetermined TAIL parameter is worth reporting around: the
+        # peak's own position/width/area are what the user reads, and
+        # they are usually solid even when the tail is not. An
+        # undetermined PEAK parameter is different -- it means the marks
+        # themselves are degenerate (duplicate peaks at one position,
+        # where any split of amplitude between them fits equally well),
+        # so the values carry no more information than the uncertainties
+        # do and reporting them would dress a meaningless answer up as a
+        # successful fit.
+        undetermined = {
+            name for name, err in zip(free_names, perr) if math.isnan(err)
+        }
+        degenerate_peak_params = {
+            name for name in undetermined
+            if not name.startswith("tail_")
+        }
+        if degenerate_peak_params:
+            detail = (
+                "the fit could not determine "
+                + ", ".join(sorted(degenerate_peak_params))
+                + " -- the peaks or regions marked are degenerate for this data"
+            )
+            if enable_left_tail:
+                detail += "; if the peak has no real tail, try unchecking Left tail"
+            raise FitError(detail[0].upper() + detail[1:])
         values_by_name = dict(fixed_params)
         values_by_name.update(zip(free_names, popt))
         err_by_name = {name: 0.0 for name in fixed_params}
@@ -1058,9 +1060,81 @@ def _marquardt_fit(model, x, y, y_err, p0, damping, fit_region_bounds=None):
         if ratio <= _CUR_RATIO:
             break
 
-    alpha_final = J.T @ J
+    # The tail pair is what may be dropped to rescue an otherwise-good
+    # fit; every other parameter is one the user actually reads.
+    optional = [
+        i for i, meta in enumerate(damping)
+        if meta.kind in ("tail_fraction", "tail_beta")
+    ]
+    return p, _covariance_from(J.T @ J, n, optional)
+
+
+def _uncertainties_from(pcov, n):
+    """Per-parameter standard errors from a covariance matrix, NaN where
+    the variance is missing (NaN from _covariance_from) or invalid (a
+    negative variance means the same thing: not determined by this
+    data). Computed with an explicit mask rather than sqrt-ing the whole
+    diagonal, so an undetermined parameter does not raise a numpy
+    invalid-value warning on every fit."""
+    if pcov is None:
+        return np.full(n, np.nan)
+    diag = np.diag(pcov)
+    perr = np.full(n, np.nan)
+    determined = np.isfinite(diag) & (diag >= 0)
+    perr[determined] = np.sqrt(diag[determined])
+    return perr
+
+
+def _invert_or_none(alpha):
+    """inv(alpha) if the result is a usable covariance, else None. A
+    non-finite entry or a negative variance both mean "not determined by
+    this data"; only the diagonal is checked for sign, since negative
+    off-diagonal covariances are perfectly legitimate for correlated
+    parameters."""
     try:
-        pcov = np.linalg.inv(alpha_final)
+        inverse = np.linalg.inv(alpha)
     except np.linalg.LinAlgError:
-        pcov = np.full((n, n), np.inf)
-    return p, pcov
+        return None
+    if not np.all(np.isfinite(inverse)) or np.any(np.diag(inverse) < 0):
+        return None
+    return inverse
+
+
+def _covariance_from(alpha, n, optional=()):
+    """Inverts the curvature matrix, falling back to dropping `optional`
+    parameters (by index) rather than losing the whole fit.
+
+    The full matrix is tried FIRST and returned unchanged when it works,
+    so every fit that already produced uncertainties keeps exactly the
+    ones it had -- this is deliberately not a general re-derivation of
+    how uncertainties are computed.
+
+    Only when that fails do the `optional` parameters get dropped and the
+    remaining submatrix inverted on its own. They are the tail pair:
+    once tail_fraction reaches ~0 the tail term stops contributing, so
+    d(model)/d(tail_beta) vanishes, alpha loses rank, and a plain inv()
+    takes the peak's own well-determined position/width/amplitude down
+    with it. Dropped parameters come back NaN -- genuinely unknown --
+    while the peak parameters keep real uncertainties.
+
+    Deliberately NOT a pseudo-inverse: pinv would return a minimum-norm
+    variance near ZERO for an undetermined parameter, which reads as
+    "measured perfectly" -- the most dangerous possible answer here. NaN
+    is the honest one.
+    """
+    if not np.all(np.isfinite(alpha)):
+        return np.full((n, n), np.nan)
+
+    full = _invert_or_none(alpha)
+    if full is not None:
+        return full
+
+    pcov = np.full((n, n), np.nan)
+    keep = np.array([i for i in range(n) if i not in set(optional)], dtype=int)
+    if keep.size == 0 or keep.size == n:
+        return pcov
+    sub = _invert_or_none(alpha[np.ix_(keep, keep)])
+    if sub is None:
+        return pcov
+    pcov[np.ix_(keep, keep)] = sub
+    return pcov

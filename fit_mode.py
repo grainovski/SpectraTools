@@ -1,3 +1,4 @@
+import math
 import os
 import sys
 import time
@@ -237,6 +238,20 @@ _FitDrawContext = namedtuple(
 )
 
 
+def _err_text(err, spec=".2f"):
+    """An uncertainty, or "n/a" when the fit could not determine it.
+
+    peak_fit reports NaN for a parameter this data does not constrain
+    (most often the tail pair once tail_fraction reaches ~0) instead of
+    discarding the whole fit over it, so every place an uncertainty is
+    displayed has to say so in words. Formatting NaN with "%.2f" would
+    print a bare "nan", which reads like a number that went wrong rather
+    than a quantity that was never available."""
+    if not math.isfinite(err):
+        return "n/a"
+    return format(err, spec)
+
+
 def _to_energy(main_window, channel_value, channel_err, is_width, reference_position=None):
     """(energy, energy_err) in keV, or None when no calibration is
     active -- in which case the caller keeps its channel-space values.
@@ -286,9 +301,10 @@ def _dual_unit_value(main_window, channel_value, channel_err, is_width, referenc
     curvature scale."""
     converted = _to_energy(main_window, channel_value, channel_err, is_width, reference_position)
     if converted is None:
-        return f"{channel_value:.2f} ± {channel_err:.2f}"
+        return f"{channel_value:.2f} ± {_err_text(channel_err)}"
     energy, energy_err = converted
-    return f"{channel_value:.2f} ± {channel_err:.2f} ch ({energy:.2f} ± {energy_err:.2f} keV)"
+    return (f"{channel_value:.2f} ± {_err_text(channel_err)} ch "
+            f"({energy:.2f} ± {_err_text(energy_err)} keV)")
 
 
 def _unit_switched_value(main_window, channel_value, channel_err, is_width, reference_position=None):
@@ -305,9 +321,9 @@ def _unit_switched_value(main_window, channel_value, channel_err, is_width, refe
     own value."""
     converted = _to_energy(main_window, channel_value, channel_err, is_width, reference_position)
     if converted is None:
-        return f"{channel_value:.2f} ± {channel_err:.2f}"
+        return f"{channel_value:.2f} ± {_err_text(channel_err)}"
     value, err = converted
-    return f"{value:.2f} ± {err:.2f}"
+    return f"{value:.2f} ± {_err_text(err)}"
 
 
 def _integration_tooltip(main_window, result):
@@ -323,10 +339,10 @@ def _integration_tooltip(main_window, result):
     report the total/gross row in this case."""
     if not result.has_background:
         return (
-            f"Area={result.gross_area:.1f}±{result.gross_area_err:.1f}, "
+            f"Area={result.gross_area:.1f}±{_err_text(result.gross_area_err, '.1f')}, "
             f"centroid={_dual_unit_value(main_window, result.gross_centroid, result.gross_centroid_err, is_width=False)}, "
             f"FWHM={_dual_unit_value(main_window, result.gross_fwhm, result.gross_fwhm_err, is_width=True, reference_position=result.gross_centroid)}, "
-            f"skewness={result.gross_skewness:.3g}±{result.gross_skewness_err:.3g}"
+            f"skewness={result.gross_skewness:.3g}±{_err_text(result.gross_skewness_err, '.3g')}"
         )
     lines = []
     for label, prefix in (("Gross", "gross"), ("Background", "background"), ("Net", "net")):
@@ -339,10 +355,10 @@ def _integration_tooltip(main_window, result):
         skewness = getattr(result, f"{prefix}_skewness")
         skewness_err = getattr(result, f"{prefix}_skewness_err")
         lines.append(
-            f"{label}: area={area:.1f}±{area_err:.1f}, "
+            f"{label}: area={area:.1f}±{_err_text(area_err, '.1f')}, "
             f"centroid={_dual_unit_value(main_window, centroid, centroid_err, is_width=False)}, "
             f"FWHM={_dual_unit_value(main_window, fwhm, fwhm_err, is_width=True, reference_position=centroid)}, "
-            f"skewness={skewness:.3g}±{skewness_err:.3g}"
+            f"skewness={skewness:.3g}±{_err_text(skewness_err, '.3g')}"
         )
     return "\n".join(lines)
 
@@ -1057,7 +1073,7 @@ class FitModeController(QObject):
                         self.main_window, result.net_fwhm, result.net_fwhm_err,
                         is_width=True, reference_position=result.net_centroid,
                     ),
-                    f"{result.net_area:.1f} ± {result.net_area_err:.1f}",
+                    f"{result.net_area:.1f} ± {_err_text(result.net_area_err, '.1f')}",
                     "—",  # no chi^2 concept for a direct-sum Integration result
                 ]
                 self._populate_results_row(row, values, tooltip, grayed=not result.visible)
@@ -1065,8 +1081,8 @@ class FitModeController(QObject):
 
             fit_label = f"{fit_index + 1} [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]"
             shared_tooltip_lines = [
-                f"region full (no bg subtracted): {result.gross_area:.1f} ± {result.gross_area_err:.1f}",
-                f"region net (bg subtracted): {result.net_area:.1f} ± {result.net_area_err:.1f}",
+                f"region full (no bg subtracted): {result.gross_area:.1f} ± {_err_text(result.gross_area_err, '.1f')}",
+                f"region net (bg subtracted): {result.net_area:.1f} ± {_err_text(result.net_area_err, '.1f')}",
                 f"reduced chi^2: {result.reduced_chi2:.3g}" if result.reduced_chi2 is not None
                 else "reduced chi^2: undefined (zero degrees of freedom)",
             ]
@@ -1075,8 +1091,8 @@ class FitModeController(QObject):
             if result.tail_fraction is not None:
                 shared_tooltip_lines.append(
                     f"left tail: r={result.tail_fraction:.2f}"
-                    f"±{result.tail_fraction_err:.2f}, "
-                    f"β={result.tail_beta:.1f}±{result.tail_beta_err:.1f} "
+                    f"±{_err_text(result.tail_fraction_err)}, "
+                    f"β={result.tail_beta:.1f}±{_err_text(result.tail_beta_err, '.1f')} "
                     f"(volume excludes tail)"
                 )
 
@@ -1086,8 +1102,8 @@ class FitModeController(QObject):
                 self._results_row_fit_index.append(fit_index)
 
                 peak_tooltip_lines = [
-                    f"peak full (no bg subtracted): {peak.full_area:.1f} ± {peak.full_area_err:.1f}",
-                    f"peak net (bg subtracted): {peak.area:.1f} ± {peak.area_err:.1f}",
+                    f"peak full (no bg subtracted): {peak.full_area:.1f} ± {_err_text(peak.full_area_err, '.1f')}",
+                    f"peak net (bg subtracted): {peak.area:.1f} ± {_err_text(peak.area_err, '.1f')}",
                     *shared_tooltip_lines,
                 ]
                 tooltip = "\n".join(peak_tooltip_lines)
@@ -1101,7 +1117,7 @@ class FitModeController(QObject):
                         self.main_window, peak.fwhm, peak.fwhm_err,
                         is_width=True, reference_position=peak.position,
                     ),
-                    f"{peak.area:.1f} ± {peak.area_err:.1f}",
+                    f"{peak.area:.1f} ± {_err_text(peak.area_err, '.1f')}",
                     f"{result.reduced_chi2:.3g}" if result.reduced_chi2 is not None else "—",
                 ]
                 self._populate_results_row(row, values, tooltip, grayed=not result.visible)

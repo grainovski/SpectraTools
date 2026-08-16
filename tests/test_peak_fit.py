@@ -1618,52 +1618,77 @@ def test_tail_and_gaussian_agree_when_gf3_would_also_keep_the_tail():
     assert shape[x < 0].sum() > shape[x > 0].sum()
 
 
-def test_singular_tail_covariance_still_suggests_unchecking_left_tail():
-    """A fit whose tail parameters the data cannot constrain fails with a
-    SINGULAR covariance (np.linalg.inv raises -> pcov all-inf), not the
-    negative-variance case. Both are the same underlying situation -- once
-    tail_fraction is driven to ~0 the tail contributes nothing, so
-    d(model)/d(tail_beta) vanishes and J.T @ J loses rank -- so both must
-    carry the actionable hint. Previously only the negative-variance
-    branch did, leaving this one saying just "non-finite covariance
-    matrix".
+# --- undetermined parameters are reported as NaN, not fatal (2026-08-16)
+
+
+def test_undetermined_tail_reports_the_fit_with_nan_tail_uncertainty():
+    """A peak with no real tail drives tail_fraction to ~0, at which
+    point tail_beta stops affecting the model and its Jacobian column
+    vanishes. That used to make the covariance uninvertible and sink the
+    ENTIRE fit. The well-determined parameters are now reported with real
+    uncertainties and only the undetermined ones come back NaN.
     """
     rng = np.random.default_rng(5)
-    messages = []
-    for sigma, beta in [(1.5, 0.3), (1.5, 1.0), (1.5, 4.0), (3.0, 0.3), (3.0, 1.0),
-                        (3.0, 4.0), (5.0, 0.3), (5.0, 1.0), (5.0, 4.0)]:
+    reported = []
+    for sigma, beta in [(1.5, 0.3), (3.0, 1.0), (5.0, 1.0), (5.0, 4.0)]:
         x = np.arange(300, dtype=float)
         y = 30.0 + 800.0 * hypermet_left_tail(x, 150.0, sigma, 0.2, beta)
         y = rng.poisson(np.maximum(y, 0)).astype(np.int64)
-        try:
-            fit_peaks(x, y, (100, 120), (180, 200), (120, 180), [150.0],
-                      link_widths=True, enable_left_tail=True)
-        except FitError as exc:
-            messages.append(str(exc))
+        result = fit_peaks(x, y, (100, 120), (180, 200), (120, 180), [150.0],
+                           link_widths=True, enable_left_tail=True)
+        reported.append(result)
 
-    assert messages, "expected at least one tail-parameter fit failure in this sweep"
-    singular = [m for m in messages if "non-finite covariance" in m]
-    assert singular, "expected the singular-covariance branch specifically"
-    for message in singular:
-        assert "Left tail" in message
+    assert len(reported) == 4, "these fits must no longer be rejected outright"
+    # At least one of them is the degenerate-tail case that used to fail.
+    undetermined = [r for r in reported if math.isnan(r.tail_beta_err)]
+    assert undetermined, "expected at least one undetermined tail_beta"
+    for result in undetermined:
+        peak = result.peaks[0]
+        # The parameters the data DOES constrain keep real uncertainties.
+        assert math.isfinite(peak.position_err) and peak.position_err > 0
+        assert math.isfinite(peak.fwhm_err) and peak.fwhm_err > 0
+        assert 140.0 < peak.position < 160.0
 
 
-def test_no_tail_hint_when_the_left_tail_is_disabled():
-    # The hint must not appear for fits that never enabled the tail --
-    # it would be actively misleading.
-    from peak_fit import _marquardt_fit
-
-    def singular_fit(model, x, y, y_err, p0, damping, fit_region_bounds=None):
-        return np.asarray(p0, dtype=float), np.full((len(p0), len(p0)), np.inf)
-
+def test_a_wholly_degenerate_fit_still_fails():
+    """The other side of that change: reporting values is only worthwhile
+    when SOMETHING was determined. Four identical peaks at one position
+    leave every parameter undetermined -- any split of amplitude between
+    them fits equally well -- so there is nothing meaningful to report and
+    the fit must still fail rather than look successful.
+    """
     x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0)
-    import peak_fit as pf
+    with pytest.raises(FitError, match="degenerate"):
+        fit_peaks(x, y, (20.0, 35.0), (160.0, 175.0), (93.0, 107.0),
+                  [100.0, 100.0, 100.0, 100.0], link_widths=False)
+def test_optional_parameters_are_dropped_only_when_the_full_inversion_fails():
+    """_covariance_from must be conservative: a healthy curvature matrix
+    is inverted whole, so fits that already produced uncertainties keep
+    exactly the ones they had. Only when that fails are the `optional`
+    (tail) parameters dropped, and then they alone come back NaN."""
+    from peak_fit import _covariance_from
 
-    pf._marquardt_fit = singular_fit
-    try:
-        with pytest.raises(FitError) as excinfo:
-            fit_peaks(x, y, (60, 78), (122, 140), (80, 120), [100.0],
-                      link_widths=True, enable_left_tail=False)
-        assert "Left tail" not in str(excinfo.value)
-    finally:
-        pf._marquardt_fit = _marquardt_fit
+    healthy = np.diag([4.0, 9.0, 16.0])
+    pcov = _covariance_from(healthy, 3, optional=[2])
+    assert np.allclose(np.diag(pcov), [0.25, 1 / 9, 1 / 16]), "optional param dropped needlessly"
+
+    # Now a matrix that is singular *because* of the optional parameter.
+    singular = np.diag([4.0, 9.0, 0.0])
+    pcov = _covariance_from(singular, 3, optional=[2])
+    assert np.allclose(np.diag(pcov)[:2], [0.25, 1 / 9]), "good parameters must survive"
+    assert np.isnan(pcov[2, 2]), "the undetermined parameter must be NaN, never a number"
+
+    # Singular for a reason dropping the optional parameter cannot fix.
+    hopeless = np.array([[1.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 4.0]])
+    assert np.all(np.isnan(_covariance_from(hopeless, 3, optional=[2])))
+
+
+def test_pseudo_inverse_is_not_used_for_undetermined_parameters():
+    """A pinv would report a near-ZERO variance for an undetermined
+    parameter -- i.e. "measured perfectly", the most misleading possible
+    answer. NaN is required instead."""
+    from peak_fit import _covariance_from
+
+    pcov = _covariance_from(np.diag([4.0, 0.0]), 2, optional=[1])
+    assert np.isnan(pcov[1, 1])
+    assert not np.isclose(np.nan_to_num(pcov[1, 1]), 0.0) or np.isnan(pcov[1, 1])

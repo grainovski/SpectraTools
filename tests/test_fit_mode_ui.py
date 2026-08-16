@@ -1602,20 +1602,14 @@ def test_draw_committed_fits_fit_background_line_spans_bg_regions(qapp):
     assert ydata[1] == pytest.approx(0.1 * 130.0 + 20.0)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="NOT fixed by Task 3's _measure_width (verified): "
-    "_make_active_spectrum's synthetic peak has no genuine left tail, so "
-    "an accurate width guess correctly drives tail_fraction to 0, at "
-    "which point tail_beta has zero effect on the model and its "
-    "Jacobian column vanishes -- a real, expected parameter-"
-    "identifiability degeneracy (confirmed: popt lands at tail_fraction="
-    "0.0, tail_beta clamped to TAIL_BETA_MIN, pcov all-inf), not a "
-    "width-estimate defect. The old region_width/(4*n_peaks) heuristic's "
-    "badly-oversized starting sigma happened to push tail_fraction to "
-    "its upper clamp instead, which incidentally avoided this "
-    "degeneracy -- masking the issue rather than avoiding it correctly.",
-)
+# Was xfail(strict=True) until 2026-08-16. This synthetic peak has no
+# genuine left tail, so an accurate width guess correctly drives
+# tail_fraction to 0, at which point tail_beta stops affecting the model
+# and its Jacobian column vanishes -- a real parameter-identifiability
+# degeneracy that used to sink the entire fit through an uninvertible
+# covariance. Such fits now report their well-determined parameters and
+# mark only the undetermined ones NaN, so the degeneracy no longer fails
+# the fit and this passes on its own merits.
 def test_double_click_reloads_a_left_tail_fit_and_refitting_appends_a_new_entry(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
@@ -2123,20 +2117,14 @@ def test_independent_widths_checkbox_is_passed_to_fit_peaks(qapp):
     assert spectrum.fits[0].link_widths is False
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="NOT fixed by Task 3's _measure_width (verified): "
-    "_make_active_spectrum's synthetic peak has no genuine left tail, so "
-    "an accurate width guess correctly drives tail_fraction to 0, at "
-    "which point tail_beta has zero effect on the model and its "
-    "Jacobian column vanishes -- a real, expected parameter-"
-    "identifiability degeneracy (confirmed: popt lands at tail_fraction="
-    "0.0, tail_beta clamped to TAIL_BETA_MIN, pcov all-inf), not a "
-    "width-estimate defect. The old region_width/(4*n_peaks) heuristic's "
-    "badly-oversized starting sigma happened to push tail_fraction to "
-    "its upper clamp instead, which incidentally avoided this "
-    "degeneracy -- masking the issue rather than avoiding it correctly.",
-)
+# Was xfail(strict=True) until 2026-08-16. This synthetic peak has no
+# genuine left tail, so an accurate width guess correctly drives
+# tail_fraction to 0, at which point tail_beta stops affecting the model
+# and its Jacobian column vanishes -- a real parameter-identifiability
+# degeneracy that used to sink the entire fit through an uninvertible
+# covariance. Such fits now report their well-determined parameters and
+# mark only the undetermined ones NaN, so the degeneracy no longer fails
+# the fit and this passes on its own merits.
 def test_left_tail_checkbox_is_passed_to_fit_peaks(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
