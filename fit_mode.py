@@ -461,7 +461,12 @@ class FitModeController(QObject):
         design spec's "Fits/Marks Clearing Semantics"."""
         self._clear_progress()
 
-    def _clear_progress(self):
+    def _remove_progress_artists(self):
+        """Detaches every in-progress marking artist and empties the
+        list. Shared by _clear_progress() (which then also resets the
+        marking state) and _redraw_progress() (which then rebuilds the
+        artists from that same state) -- the two differ in what happens
+        after the removal, never in the removal itself."""
         for artist in self._progress_artists:
             try:
                 artist.remove()
@@ -477,6 +482,9 @@ class FitModeController(QObject):
                 # there's nothing left to do for it here.
                 pass
         self._progress_artists = []
+
+    def _clear_progress(self):
+        self._remove_progress_artists()
         self.state.reset()
         self.parameters_table.setRowCount(0)
         self._parameter_names_shown = []
@@ -489,12 +497,7 @@ class FitModeController(QObject):
         artist left behind by an evicted background region or a
         removed peak. FitModeState itself always stays channel-based;
         to_display converts to keV for drawing only, when calibrated."""
-        for artist in self._progress_artists:
-            try:
-                artist.remove()
-            except NotImplementedError:
-                pass
-        self._progress_artists = []
+        self._remove_progress_artists()
 
         axes = self.main_window.axes
         state = self.state
@@ -928,6 +931,21 @@ class FitModeController(QObject):
         shared conversion/error-message logic."""
         return self._read_panel_values(want_checked=False, error_label="Value")
 
+    def _populate_results_row(self, row, values, tooltip, grayed):
+        """Fills one Fit Results row. Both branches of
+        update_results_list() (Integration, and one row per peak of a
+        Fit) built these cells with byte-identical code: read-only
+        flags, the tooltip on column 0 only, and gray text for a hidden
+        (Ctrl+C'd) result."""
+        for col, text in enumerate(values):
+            item = QTableWidgetItem(text)
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            if col == 0:
+                item.setToolTip(tooltip)
+            if grayed:
+                item.setForeground(QColor("gray"))
+            self.results_table.setItem(row, col, item)
+
     def update_results_list(self):
         calibrated = self.main_window._calibration_active and self.main_window._calibration is not None
         self.results_table.setHorizontalHeaderLabels([
@@ -961,14 +979,7 @@ class FitModeController(QObject):
                     f"{result.net_area:.1f} ± {result.net_area_err:.1f}",
                     "—",  # no chi^2 concept for a direct-sum Integration result
                 ]
-                for col, text in enumerate(values):
-                    item = QTableWidgetItem(text)
-                    item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                    if col == 0:
-                        item.setToolTip(tooltip)
-                    if not result.visible:
-                        item.setForeground(QColor("gray"))
-                    self.results_table.setItem(row, col, item)
+                self._populate_results_row(row, values, tooltip, grayed=not result.visible)
                 continue
 
             fit_label = f"{fit_index + 1} [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]"
@@ -1012,19 +1023,12 @@ class FitModeController(QObject):
                     f"{peak.area:.1f} ± {peak.area_err:.1f}",
                     f"{result.reduced_chi2:.3g}" if result.reduced_chi2 is not None else "—",
                 ]
-                for col, text in enumerate(values):
-                    item = QTableWidgetItem(text)
-                    item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                    if col == 0:
-                        item.setToolTip(tooltip)
-                    if not result.visible:
-                        item.setForeground(QColor("gray"))
-                    self.results_table.setItem(row, col, item)
+                self._populate_results_row(row, values, tooltip, grayed=not result.visible)
 
     def _on_results_context_menu(self, position):
         mw = self.main_window
         item = self.results_table.itemAt(position)
-        active = next((s for s in mw.spectra if s.active), None)
+        active = active_spectrum(mw.spectra)
         menu = QMenu(mw)
         remove_action = menu.addAction("Remove Fit") if item is not None else None
         export_one_action = menu.addAction("Export This Fit...") if item is not None else None
