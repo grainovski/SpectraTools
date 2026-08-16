@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 
 import fit_export
 from peak_fit import (
-    FWHM_FACTOR, FitError, IntegrationResult, compute_background, fit_peaks,
+    FWHM_FACTOR, FitError, IntegrationResult, channel_indices, compute_background, fit_peaks,
     fit_result_values_by_name, hypermet_left_tail, integrate_region, parameter_names,
 )
 from spectrum import active_spectrum
@@ -539,7 +539,7 @@ class FitModeController(QObject):
             active = active_spectrum(self.main_window.spectra)
             if active is not None:
                 left, right = state.ordered_bg_regions()
-                x = np.arange(len(active.data), dtype=float)
+                x = channel_indices(len(active.data))
                 try:
                     slope, intercept = compute_background(x, active.data, left, right)
                 except FitError as exc:
@@ -1167,7 +1167,7 @@ class FitModeController(QObject):
         if active is None:
             return
         left, right = self.state.ordered_bg_regions()
-        x = np.arange(len(active.data), dtype=float)
+        x = channel_indices(len(active.data))
         y = active.data
         link_widths = not self.main_window.independent_widths_action.isChecked()
         enable_left_tail = self.main_window.left_tail_action.isChecked()
@@ -1212,7 +1212,7 @@ class FitModeController(QObject):
         if active is None:
             return
         left, right = self.state.ordered_bg_regions()
-        x = np.arange(len(active.data), dtype=float)
+        x = channel_indices(len(active.data))
         y = active.data
         try:
             result = integrate_region(x, y, left, right, self.state.fit_region)

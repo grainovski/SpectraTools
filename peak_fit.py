@@ -144,6 +144,32 @@ def _region_centroid(x, y, region):
     return float(np.mean(x[mask])), float(np.mean(y[mask]))
 
 
+_channel_indices_cache = {}
+
+
+def channel_indices(length):
+    """`[0, 1, ... length-1]` as float64 -- the channel-number axis for a
+    spectrum of `length` channels.
+
+    Cached by length. Safe to cache because the array depends ONLY on
+    the channel count, never on the counts themselves: a spectrum whose
+    data is mutated in place (Multiply, Add/Subtract) keeps the exact
+    same channel axis, so unlike a cached fit result this can never go
+    stale. A spectrum whose LENGTH changes (Rebin) simply lands on a
+    different key.
+
+    Returned read-only so a caller that tries to modify it fails loudly
+    instead of silently corrupting the axis for every other caller
+    sharing the same cached array.
+    """
+    cached = _channel_indices_cache.get(length)
+    if cached is None:
+        cached = np.arange(length, dtype=float)
+        cached.flags.writeable = False
+        _channel_indices_cache[length] = cached
+    return cached
+
+
 def compute_background(x, y, left_bg_region, right_bg_region):
     left_x, left_y = _region_centroid(x, y, left_bg_region)
     right_x, right_y = _region_centroid(x, y, right_bg_region)

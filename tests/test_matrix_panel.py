@@ -1028,3 +1028,36 @@ def test_matrix_panel_theme_toggle_also_refreshes_its_open_heatmap_window(qapp):
         assert _opaque_icon_colors(_save_icon(heatmap_window.nav_toolbar)) == {"#ffffff"}
     finally:
         main_window.settings.set_theme(original_theme)
+
+
+def test_switching_projection_does_not_draw_the_outgoing_projection(qapp):
+    # Clearing cut state used to force a canvas draw of the OLD
+    # projection immediately before _plot_data() cleared the axes and
+    # repainted -- one wholly discarded frame per switch (v3.1.0 audit,
+    # Minor). Counts real canvas.draw() calls across the switch.
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    draws = []
+    real_draw = panel.canvas.draw
+    panel.canvas.draw = lambda *a, **k: (draws.append(1), real_draw(*a, **k))[1]
+
+    index = 1 if panel.axis_selector.currentIndex() == 0 else 0
+    panel._on_axis_changed(index)
+
+    assert len(draws) == 1, f"expected a single canvas draw per switch, got {len(draws)}"
+
+
+def test_clear_marks_button_still_redraws(qapp):
+    # The other side of the redraw=False change: Clear Marks has nothing
+    # following it, so it must still repaint.
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    draws = []
+    real_draw = panel.canvas.draw
+    panel.canvas.draw = lambda *a, **k: (draws.append(1), real_draw(*a, **k))[1]
+
+    panel._clear_marks()
+
+    assert len(draws) == 1

@@ -118,12 +118,19 @@ class MatrixCutController(QObject):
         self._redraw_markers()
         self.panel._update_activate_button()
 
-    def clear(self):
+    def clear(self, redraw=True):
+        """Drops every cut/background mark. `redraw=False` skips the
+        canvas draw for callers that are about to replot anyway --
+        _on_axis_changed swaps the projection underneath us, so the
+        default draw here would paint the OLD projection's axes for one
+        frame before _plot_data() immediately clears and replaces it.
+        The Clear Marks button, by contrast, has nothing following it
+        and needs the draw."""
         self.state.reset()
-        self._redraw_markers()
+        self._redraw_markers(redraw=redraw)
         self.panel._update_activate_button()
 
-    def _redraw_markers(self):
+    def _redraw_markers(self, redraw=True):
         for artist in self._artists:
             try:
                 artist.remove()
@@ -163,7 +170,8 @@ class MatrixCutController(QObject):
                     to_display(lo), to_display(hi), color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA
                 )
             )
-        self.panel.canvas.draw()
+        if redraw:
+            self.panel.canvas.draw()
 
 
 class MatrixPanel(QMainWindow):
@@ -511,7 +519,10 @@ class MatrixPanel(QMainWindow):
     def _on_axis_changed(self, index):
         self.working_axis = self.axis_selector.itemData(index)
         self._rebuild_spectra()
-        self.cut_controller.clear()
+        # redraw=False: _plot_data() below clears the axes and repaints
+        # from scratch, so a draw here would only render the outgoing
+        # projection for one discarded frame.
+        self.cut_controller.clear(redraw=False)
         self.fit_controller.reset_marks()
         self._plot_data()
 

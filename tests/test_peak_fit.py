@@ -1418,3 +1418,49 @@ def test_integrate_region_positive_counts_unaffected_by_negative_count_guard():
     y += 5.0
     result = integrate_region(x, y, (10, 30), (150, 170), (60, 140))
     assert result.gross_area_err == pytest.approx(math.sqrt(sum(y[(x >= 60) & (x <= 140)])))
+
+
+# --- channel_indices caching (v3.1.0 audit, Minor) ---------------------
+
+
+def test_channel_indices_returns_the_channel_axis():
+    from peak_fit import channel_indices
+
+    assert list(channel_indices(5)) == [0.0, 1.0, 2.0, 3.0, 4.0]
+
+
+def test_channel_indices_reuses_one_array_per_length():
+    from peak_fit import channel_indices
+
+    assert channel_indices(4096) is channel_indices(4096)
+    assert channel_indices(4096) is not channel_indices(2048)
+
+
+def test_channel_indices_is_read_only():
+    # The array is shared between every caller of the same length, so a
+    # caller mutating it would corrupt the axis for all the others. Must
+    # fail loudly rather than silently.
+    import numpy as np
+    import pytest as _pytest
+
+    from peak_fit import channel_indices
+
+    axis = channel_indices(16)
+    with _pytest.raises(ValueError):
+        axis[0] = 99.0
+    assert axis[0] == 0.0
+    assert np.array_equal(channel_indices(16), np.arange(16, dtype=float))
+
+
+def test_channel_indices_is_unaffected_by_in_place_data_mutation():
+    # The reason caching is safe at all: the channel axis depends only on
+    # the channel count, so mutating a spectrum's counts in place (what
+    # Multiply and Add/Subtract do) cannot make a cached axis stale.
+    import numpy as np
+
+    from peak_fit import channel_indices
+
+    data = np.array([1, 2, 3, 4], dtype=np.int64)
+    before = list(channel_indices(len(data)))
+    data *= 1000
+    assert list(channel_indices(len(data))) == before
