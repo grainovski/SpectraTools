@@ -1150,7 +1150,7 @@ def test_write_spectrum_with_bare_path_reloads_correctly_through_extension_dispa
     assert not os.path.exists(bare_path)
     assert os.path.exists(bare_path + ".spe")
 
-    reloaded, error = main_window._try_load_spectrum(bare_path + ".spe")
+    reloaded, error, _calibration = main_window._try_load_spectrum(bare_path + ".spe")
     assert error is None
     assert list(reloaded.data) == list(spectrum.data)
 
@@ -1379,3 +1379,95 @@ def test_opening_n42_file_does_not_override_an_already_active_calibration(qapp):
 
     assert main_window._calibration.kind == "linear"
     assert main_window._calibration.a == 99.0
+
+
+def test_spectrum_list_rebuild_does_not_leak_button_groups(qapp):
+    # QButtonGroup(self) gives the main window C++ ownership, so rebinding
+    # self.active_button_group alone left every previous group alive as a
+    # child of the window -- unbounded growth across a session, one per
+    # add/remove (v3.1.0 audit, Minor). Counts real QObject children
+    # rather than trusting Python refcounts, since that is exactly where
+    # the old reasoning went wrong.
+    import gc
+
+    from PySide6.QtWidgets import QButtonGroup
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    for _ in range(20):
+        main_window._update_spectrum_list()
+    gc.collect()
+
+    groups = [c for c in main_window.children() if isinstance(c, QButtonGroup)]
+    assert len(groups) == 1, f"expected exactly one live QButtonGroup, found {len(groups)}"
+    assert groups[0] is main_window.active_button_group
+
+
+def test_spectrum_list_still_functional_after_rebuilds(qapp):
+    # Guards the leak fix from the other direction: setParent(None) must
+    # detach only the OLD group, leaving the current one wired up.
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    main_window._update_spectrum_list()
+
+    assert len(main_window.active_button_group.buttons()) == len(main_window.spectra)
+    assert spectrum.active is True
+
+
+def _write_n42_with_calibration(tmp_path, name="cal.n42"):
+    xml_text = """<?xml version="1.0"?>
+<RadInstrumentData xmlns="http://physics.nist.gov/N42/2011/N42">
+  <EnergyCalibration id="EnergyCalibration-1">
+    <CoefficientValues>10.0 0.5</CoefficientValues>
+  </EnergyCalibration>
+  <RadMeasurement id="RadMeasurement-1">
+    <Spectrum id="Spectrum-1" energyCalibrationReference="EnergyCalibration-1">
+      <ChannelData compressionCode="None">0 1 2 3 4 5</ChannelData>
+    </Spectrum>
+  </RadMeasurement>
+</RadInstrumentData>
+"""
+    path = os.path.join(str(tmp_path), name)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(xml_text)
+    return path
+
+
+def test_loading_a_calibrated_n42_redraws_once_with_the_spectrum_present(qapp, tmp_path):
+    # The embedded calibration used to be applied inside
+    # _try_load_spectrum, i.e. before the new spectrum was appended --
+    # so _apply_calibration_change redrew a plot that did not yet contain
+    # the file that supplied the calibration, and _load_files then redrew
+    # again (v3.1.0 audit, Minor). Asserts both halves: exactly one
+    # redraw, and self.spectra already complete when it happens.
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)  # a pre-existing spectrum
+
+    calls = []
+    real_plot_data = main_window._plot_data
+
+    def counting_plot_data(*args, **kwargs):
+        calls.append(len(main_window.spectra))
+        return real_plot_data(*args, **kwargs)
+
+    main_window._plot_data = counting_plot_data
+    main_window._load_files([_write_n42_with_calibration(tmp_path)])
+
+    assert len(calls) == 1, f"expected a single redraw, got {len(calls)}"
+    assert calls[0] == 2, "redraw must happen with the newly loaded spectrum already in the list"
+    assert main_window._calibration is not None
+    assert main_window._calibration_active is True
+
+
+def test_calibrated_n42_still_applies_its_calibration_when_loaded_first(qapp, tmp_path):
+    # The empty-list case never showed the double redraw (the old code's
+    # _apply_calibration_change no-ops its replot when self.spectra is
+    # empty), so this guards that moving the call didn't break the
+    # auto-apply itself.
+    main_window = MainWindow()
+    main_window._load_files([_write_n42_with_calibration(tmp_path)])
+
+    assert len(main_window.spectra) == 1
+    assert main_window._calibration is not None
+    assert main_window._calibration_active is True

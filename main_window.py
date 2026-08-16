@@ -892,9 +892,6 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             return None, f"{os.path.basename(path)}: {exc}"
 
-        if calibration is not None and not self._calibration_active:
-            self._apply_calibration_change(calibration, True)
-
         color_index = self._next_color_index
         self._next_color_index += 1
         spectrum = LoadedSpectrum(path, data, next_color(color_index, self._theme))
@@ -902,15 +899,26 @@ class MainWindow(QMainWindow):
         # from the new theme's palette without needing to reload the file
         # or renumber already-loaded spectra.
         spectrum.color_index = color_index
-        return spectrum, None
+        # The calibration is RETURNED rather than applied here: applying
+        # it mid-load fired _apply_calibration_change while this spectrum
+        # was still not in self.spectra, redrawing a plot that didn't yet
+        # contain the file that supplied the calibration, and then getting
+        # redrawn again by _load_files moments later. _load_files applies
+        # it once the list is complete instead.
+        return spectrum, None, calibration
 
     def _load_files(self, paths):
         failures = []
         loaded_any = False
+        # First embedded calibration wins, matching the previous
+        # per-file behaviour: the old code applied one as soon as it saw
+        # it, which set _calibration_active and made every later file in
+        # the same batch skip its own.
+        pending_calibration = None
         for path in paths:
             if any(s.path == path for s in self.spectra):
                 continue
-            spectrum, error = self._try_load_spectrum(path)
+            spectrum, error, calibration = self._try_load_spectrum(path)
             if error:
                 failures.append(error)
                 continue
@@ -919,12 +927,19 @@ class MainWindow(QMainWindow):
             self.spectra.append(spectrum)
             self.settings.set_last_folder(os.path.dirname(path))
             self.settings.add_recent_file(path)
+            if calibration is not None and pending_calibration is None:
+                pending_calibration = calibration
             loaded_any = True
 
         if loaded_any:
             self._update_recent_menu()
             self._update_spectrum_list()
-            self._plot_data()
+            if pending_calibration is not None and not self._calibration_active:
+                # Redraws by itself, so it replaces the _plot_data()
+                # below rather than adding to it.
+                self._apply_calibration_change(pending_calibration, True)
+            else:
+                self._plot_data()
 
         if failures:
             QMessageBox.warning(self, "Some files could not be loaded", "\n".join(failures))
@@ -1038,8 +1053,19 @@ class MainWindow(QMainWindow):
 
     def _update_spectrum_list(self):
         self.spectrum_list.clear()
-        # Recreated each rebuild -- the old group (and its buttons) are
-        # discarded along with the list items they belonged to.
+        # Recreated each rebuild. Detaching the old group from `self`
+        # first is load-bearing, not tidiness: QButtonGroup(self) hands
+        # C++ ownership to the main window, so merely rebinding the
+        # Python attribute leaks the old group -- it survives as a child
+        # of the window forever (measured: 21 live instances after 20
+        # rebuilds, even after gc.collect()). setParent(None) hands
+        # ownership back to Python, so the rebind below drops the last
+        # reference and the C++ object goes with it. Deterministic, unlike
+        # deleteLater(), which needs an event-loop turn that a rebuild
+        # triggered from a menu action doesn't necessarily reach.
+        old_group = getattr(self, "active_button_group", None)
+        if old_group is not None:
+            old_group.setParent(None)
         self.active_button_group = QButtonGroup(self)
 
         for spectrum in self.spectra:
