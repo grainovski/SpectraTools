@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+from collections import namedtuple
 from datetime import datetime
 
 import numpy as np
@@ -224,6 +225,16 @@ def _parameter_label(name, calibrated=False):
     kind = {"amp": "amplitude", "pos": "position", "sigma": "FWHM"}[prefix]
     suffix = " (keV)" if calibrated and prefix in ("pos", "sigma") else ""
     return f"Peak {peak_num} {kind}{suffix}"
+
+
+# The per-spectrum drawing state draw_committed_fits() computes once and
+# its three _draw_* helpers all read. A named tuple rather than five
+# positional arguments threaded through each helper: these five always
+# travel together, and naming them at the call site is what keeps the
+# split readable.
+_FitDrawContext = namedtuple(
+    "_FitDrawContext", "axes label_transform fit_color bg_line_color to_display"
+)
 
 
 def _to_energy(main_window, channel_value, channel_err, is_width, reference_position=None):
@@ -646,102 +657,152 @@ class FitModeController(QObject):
         self.main_window._update_fit_mode_availability()
 
     def draw_committed_fits(self, spectrum):
-        axes = self.main_window.axes
-        # x in data coordinates, y in axes-fraction -- keeps peak labels
-        # pinned near the top of the visible plot regardless of the
-        # current y-axis scale (linear or log) or zoom level.
-        label_transform = axes.get_xaxis_transform()
-        theme = getattr(self.main_window, "_theme", "light")
-        fit_color, bg_line_color = fit_drawing_colors(spectrum.color, theme)
-        to_display = self.main_window.channel_to_display
+        """Draws every visible committed result for `spectrum`.
+
+        Split into three helpers below, which are called in exactly the
+        order their artists must layer in -- matplotlib stacks artists
+        in call order, so the region shading has to go down before the
+        curves and labels drawn on top of it. Each result is either an
+        Integration (annotation only) or a Fit (background line, total
+        curve, per-peak decomposition, peak labels), never both.
+        """
+        context = self._fit_draw_context(spectrum)
         for result in spectrum.fits:
             if not result.visible:
                 continue
-            if result.left_bg_region is not None:
-                left_lo, left_hi = result.left_bg_region
-                axes.axvspan(
-                    to_display(left_lo), to_display(left_hi), color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA
-                )
-                right_lo, right_hi = result.right_bg_region
-                axes.axvspan(
-                    to_display(right_lo), to_display(right_hi), color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA
-                )
-            fit_lo, fit_hi = result.fit_region
-            axes.axvspan(
-                to_display(fit_lo), to_display(fit_hi), color=FIT_REGION_COLOR, alpha=FIT_REGION_ALPHA
-            )
-
+            self._draw_result_regions(result, context)
             if isinstance(result, IntegrationResult):
-                if result.has_background:
-                    bg_line_lo, bg_line_hi = result.left_bg_region[0], result.right_bg_region[1]
-                    axes.plot(
-                        [to_display(bg_line_lo), to_display(bg_line_hi)],
-                        [result.background_density, result.background_density],
-                        color=bg_line_color, linestyle="--", linewidth=1,
-                    )
-                    axes.annotate(
-                        f"centroid={result.net_centroid:.1f}\n"
-                        f"FWHM={result.net_fwhm:.1f}\n"
-                        f"full={result.gross_area:.0f}\nnet={result.net_area:.0f}",
-                        xy=(to_display(result.net_centroid), 0.95),
-                        xycoords=label_transform,
-                        ha="center", va="top",
-                        fontsize=7, color=fit_color,
-                    )
-                else:
-                    axes.annotate(
-                        f"centroid={result.gross_centroid:.1f}\n"
-                        f"FWHM={result.gross_fwhm:.1f}\n"
-                        f"area={result.gross_area:.0f}",
-                        xy=(to_display(result.gross_centroid), 0.95),
-                        xycoords=label_transform,
-                        ha="center", va="top",
-                        fontsize=7, color=fit_color,
-                    )
-                continue
+                self._draw_integration_annotation(result, context)
+            else:
+                self._draw_fit_curves(result, context)
 
-            lo, hi = result.fit_region
+    def _fit_draw_context(self, spectrum):
+        """The per-spectrum drawing state every _draw_* helper needs.
+        Built once per draw_committed_fits() call rather than per
+        result: the theme colors and the transform are the same for
+        every result belonging to one spectrum."""
+        axes = self.main_window.axes
+        theme = getattr(self.main_window, "_theme", "light")
+        fit_color, bg_line_color = fit_drawing_colors(spectrum.color, theme)
+        return _FitDrawContext(
+            axes=axes,
+            # x in data coordinates, y in axes-fraction -- keeps peak
+            # labels pinned near the top of the visible plot regardless
+            # of the current y-axis scale (linear or log) or zoom level.
+            label_transform=axes.get_xaxis_transform(),
+            fit_color=fit_color,
+            bg_line_color=bg_line_color,
+            to_display=self.main_window.channel_to_display,
+        )
+
+    def _draw_result_regions(self, result, context):
+        """Background-region and fit-region shading, common to both
+        result kinds. Drawn first so everything else layers on top."""
+        axes = context.axes
+        to_display = context.to_display
+        if result.left_bg_region is not None:
+            left_lo, left_hi = result.left_bg_region
+            axes.axvspan(
+                to_display(left_lo), to_display(left_hi), color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA
+            )
+            right_lo, right_hi = result.right_bg_region
+            axes.axvspan(
+                to_display(right_lo), to_display(right_hi), color=BG_REGION_COLOR, alpha=BG_REGION_ALPHA
+            )
+        fit_lo, fit_hi = result.fit_region
+        axes.axvspan(
+            to_display(fit_lo), to_display(fit_hi), color=FIT_REGION_COLOR, alpha=FIT_REGION_ALPHA
+        )
+
+    def _draw_integration_annotation(self, result, context):
+        """An Integration result draws no model curve -- just its
+        background level (when it has background regions) and a summary
+        annotation, which reports gross or net quantities depending on
+        whether a background was subtracted."""
+        axes = context.axes
+        to_display = context.to_display
+        fit_color = context.fit_color
+        bg_line_color = context.bg_line_color
+        label_transform = context.label_transform
+        if result.has_background:
             bg_line_lo, bg_line_hi = result.left_bg_region[0], result.right_bg_region[1]
-            background_lo = result.background_slope * bg_line_lo + result.background_intercept
-            background_hi = result.background_slope * bg_line_hi + result.background_intercept
             axes.plot(
-                [to_display(bg_line_lo), to_display(bg_line_hi)], [background_lo, background_hi],
+                [to_display(bg_line_lo), to_display(bg_line_hi)],
+                [result.background_density, result.background_density],
                 color=bg_line_color, linestyle="--", linewidth=1,
             )
+            axes.annotate(
+                f"centroid={result.net_centroid:.1f}\n"
+                f"FWHM={result.net_fwhm:.1f}\n"
+                f"full={result.gross_area:.0f}\nnet={result.net_area:.0f}",
+                xy=(to_display(result.net_centroid), 0.95),
+                xycoords=label_transform,
+                ha="center", va="top",
+                fontsize=7, color=fit_color,
+            )
+        else:
+            axes.annotate(
+                f"centroid={result.gross_centroid:.1f}\n"
+                f"FWHM={result.gross_fwhm:.1f}\n"
+                f"area={result.gross_area:.0f}",
+                xy=(to_display(result.gross_centroid), 0.95),
+                xycoords=label_transform,
+                ha="center", va="top",
+                fontsize=7, color=fit_color,
+            )
 
-            # x_dense stays in channel space -- the model below (linear
-            # background + Gaussian/hypermet peaks) is defined in terms
-            # of the fitted channel-space parameters (peak.position,
-            # peak.sigma, background_slope). Only the final plotted
-            # x-coordinates are converted, via to_display(x_dense),
-            # never the values used in the model math itself.
-            x_dense = np.linspace(lo, hi, 200)
-            background_dense = result.background_slope * x_dense + result.background_intercept
-            total = background_dense.copy()
-            for peak in result.peaks:
-                total = total + _peak_component(x_dense, peak, result)
-            axes.plot(to_display(x_dense), total, color=fit_color, linewidth=1.5)
+    def _draw_fit_curves(self, result, context):
+        """A Fit result's own drawing: the fitted linear background, the
+        total model curve, each peak's individual contribution, and the
+        per-peak position labels -- in that order, which is also their
+        layering order."""
+        axes = context.axes
+        to_display = context.to_display
+        fit_color = context.fit_color
+        label_transform = context.label_transform
 
-            # Peak decomposition: each peak's own contribution (background
-            # + that single peak), so a multi-peak fit visually shows how
-            # the total curve above decomposes into its components.
-            for peak in result.peaks:
-                component = _peak_component(x_dense, peak, result)
-                axes.plot(
-                    to_display(x_dense), background_dense + component,
-                    color=fit_color, linewidth=0.75, linestyle="--", alpha=0.6,
-                )
+        lo, hi = result.fit_region
+        bg_line_lo, bg_line_hi = result.left_bg_region[0], result.right_bg_region[1]
+        background_lo = result.background_slope * bg_line_lo + result.background_intercept
+        background_hi = result.background_slope * bg_line_hi + result.background_intercept
+        axes.plot(
+            [to_display(bg_line_lo), to_display(bg_line_hi)], [background_lo, background_hi],
+            color=context.bg_line_color, linestyle="--", linewidth=1,
+        )
 
-            for peak in result.peaks:
-                label_x = to_display(peak.position)
-                axes.axvline(label_x, color=fit_color, linestyle=":", linewidth=1)
-                axes.annotate(
-                    f"{label_x:.1f}",
-                    xy=(label_x, 0.95),
-                    xycoords=label_transform,
-                    ha="center", va="top",
-                    fontsize=7, color=fit_color,
-                )
+        # x_dense stays in channel space -- the model below (linear
+        # background + Gaussian/hypermet peaks) is defined in terms
+        # of the fitted channel-space parameters (peak.position,
+        # peak.sigma, background_slope). Only the final plotted
+        # x-coordinates are converted, via to_display(x_dense),
+        # never the values used in the model math itself.
+        x_dense = np.linspace(lo, hi, 200)
+        background_dense = result.background_slope * x_dense + result.background_intercept
+        total = background_dense.copy()
+        for peak in result.peaks:
+            total = total + _peak_component(x_dense, peak, result)
+        axes.plot(to_display(x_dense), total, color=fit_color, linewidth=1.5)
+
+        # Peak decomposition: each peak's own contribution (background
+        # + that single peak), so a multi-peak fit visually shows how
+        # the total curve above decomposes into its components.
+        for peak in result.peaks:
+            component = _peak_component(x_dense, peak, result)
+            axes.plot(
+                to_display(x_dense), background_dense + component,
+                color=fit_color, linewidth=0.75, linestyle="--", alpha=0.6,
+            )
+
+        for peak in result.peaks:
+            label_x = to_display(peak.position)
+            axes.axvline(label_x, color=fit_color, linestyle=":", linewidth=1)
+            axes.annotate(
+                f"{label_x:.1f}",
+                xy=(label_x, 0.95),
+                xycoords=label_transform,
+                ha="center", va="top",
+                fontsize=7, color=fit_color,
+            )
 
     def build_results_panel(self):
         mw = self.main_window
