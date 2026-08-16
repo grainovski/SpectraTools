@@ -16,6 +16,7 @@ from peak_fit import (
     FWHM_FACTOR, FitError, IntegrationResult, compute_background, fit_peaks,
     fit_result_values_by_name, hypermet_left_tail, integrate_region, parameter_names,
 )
+from spectrum import active_spectrum
 from theme import NEUTRAL_LINE_COLOR, fit_drawing_colors
 
 BG_REGION_CAP = 2
@@ -445,7 +446,7 @@ class FitModeController(QObject):
 
     def clear(self):
         self.reset_marks()
-        active = next((s for s in self.main_window.spectra if s.active), None)
+        active = active_spectrum(self.main_window.spectra)
         if active is not None:
             for result in active.fits:
                 result.visible = False
@@ -532,7 +533,7 @@ class FitModeController(QObject):
             )
 
         if state.show_background_preview and len(state.bg_regions) == BG_REGION_CAP:
-            active = next((s for s in self.main_window.spectra if s.active), None)
+            active = active_spectrum(self.main_window.spectra)
             if active is not None:
                 left, right = state.ordered_bg_regions()
                 x = np.arange(len(active.data), dtype=float)
@@ -938,7 +939,7 @@ class FitModeController(QObject):
         ])
         self.results_table.setRowCount(0)
         self._results_row_fit_index = []
-        active = next((s for s in self.main_window.spectra if s.active), None)
+        active = active_spectrum(self.main_window.spectra)
         if active is None:
             return
         for fit_index, result in enumerate(active.fits):
@@ -1047,14 +1048,14 @@ class FitModeController(QObject):
             self._clear_all_fits()
 
     def _clear_all_fits(self):
-        active = next((s for s in self.main_window.spectra if s.active), None)
+        active = active_spectrum(self.main_window.spectra)
         if active is None:
             return
         active.fits.clear()
         self.main_window._plot_data(preserve_view=True)
 
     def _export_all_fits(self):
-        active = next((s for s in self.main_window.spectra if s.active), None)
+        active = active_spectrum(self.main_window.spectra)
         if active is None or not active.fits:
             return
         self._export_fits(active, list(range(len(active.fits))))
@@ -1084,7 +1085,7 @@ class FitModeController(QObject):
             self._show_status_message(f"Could not write export: {exc}", 5000)
 
     def _on_result_double_clicked(self, item):
-        active = next((s for s in self.main_window.spectra if s.active), None)
+        active = active_spectrum(self.main_window.spectra)
         if active is None:
             return
         fit_index = self._results_row_fit_index[item.row()]
@@ -1158,7 +1159,7 @@ class FitModeController(QObject):
         if not self.state.ready_to_fit():
             self._show_status_message(self.state.fit_blocked_reason(), 5000)
             return
-        active = next((s for s in self.main_window.spectra if s.active), None)
+        active = active_spectrum(self.main_window.spectra)
         if active is None:
             return
         left, right = self.state.ordered_bg_regions()
@@ -1203,7 +1204,7 @@ class FitModeController(QObject):
         if not self.state.ready_to_integrate():
             self._show_status_message(self.state.integrate_blocked_reason(), 5000)
             return
-        active = next((s for s in self.main_window.spectra if s.active), None)
+        active = active_spectrum(self.main_window.spectra)
         if active is None:
             return
         left, right = self.state.ordered_bg_regions()

@@ -42,6 +42,23 @@ class LoadedSpectrum:
         self.fits = []
 
 
+def active_spectrum(spectra):
+    """The one spectrum flagged active, or None if there isn't one.
+
+    Lives here rather than as a MainWindow method because both
+    MainWindow and MatrixPanel own a `spectra` list and both are used
+    interchangeably as FitModeController's `main_window` (the panel
+    duck-types the same surface) -- a method on MainWindow alone would
+    quietly become part of that contract. Callers pass the list itself,
+    so neither class has to grow anything.
+
+    'Active' is a radio-button selection: at most one spectrum has it
+    set, and None is a normal, expected result (nothing loaded, or the
+    active spectrum was just closed), never an error.
+    """
+    return next((s for s in spectra if s.active), None)
+
+
 def next_color(index, theme="light"):
     cycle = DARK_COLOR_CYCLE if theme == "dark" else LIGHT_COLOR_CYCLE
     return cycle[index % len(cycle)]

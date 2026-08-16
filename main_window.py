@@ -46,7 +46,7 @@ from matrix_panel import MatrixPanel
 from n42_io import load_n42
 from settings import Settings
 from spe_io import load_spe, save_spe
-from spectrum import LoadedSpectrum, next_color
+from spectrum import LoadedSpectrum, active_spectrum, next_color
 from spectrum_operations import add, multiply, normalize_factors, rebin, reference_value, subtract
 from spk_io import load_spk, save_spk
 from theme import qt_stylesheet, refresh_builtin_toolbar_icons, style_axes, style_nav_toolbar_palette
@@ -568,7 +568,7 @@ class MainWindow(QMainWindow):
             panel._plot_data(xlim_override=panel_new_xlim)
 
     def _open_multiply_dialog(self):
-        active = next((s for s in self.spectra if s.active), None)
+        active = active_spectrum(self.spectra)
         if active is None:
             return
         dialog = FactorDialog(
@@ -590,7 +590,7 @@ class MainWindow(QMainWindow):
         self._plot_data(preserve_view=True)
 
     def _open_rebin_dialog(self):
-        active = next((s for s in self.spectra if s.active), None)
+        active = active_spectrum(self.spectra)
         if active is None:
             return
         dialog = FactorDialog(
@@ -686,7 +686,7 @@ class MainWindow(QMainWindow):
     def _open_add_dialog(self):
         if len(self.spectra) < 2:
             return
-        active = next((s for s in self.spectra if s.active), None)
+        active = active_spectrum(self.spectra)
         dialog = CombineDialog(self, "Add Spectra", self.spectra, active)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._apply_add(dialog.result_spectrum_a, dialog.result_spectrum_b, dialog.result_factor)
@@ -713,7 +713,7 @@ class MainWindow(QMainWindow):
     def _open_subtract_dialog(self):
         if len(self.spectra) < 2:
             return
-        active = next((s for s in self.spectra if s.active), None)
+        active = active_spectrum(self.spectra)
         dialog = CombineDialog(self, "Subtract Spectra", self.spectra, active)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._apply_subtract(dialog.result_spectrum_a, dialog.result_spectrum_b, dialog.result_factor)
@@ -754,7 +754,7 @@ class MainWindow(QMainWindow):
         self._plot_data()
 
     def _open_save_spectrum_dialog(self):
-        active = next((s for s in self.spectra if s.active), None)
+        active = active_spectrum(self.spectra)
         if active is None:
             return
         path, chosen_filter = QFileDialog.getSaveFileName(
@@ -1114,7 +1114,7 @@ class MainWindow(QMainWindow):
         self._plot_data(preserve_view=True)
 
     def _close_active_spectrum(self):
-        active = next((s for s in self.spectra if s.active), None)
+        active = active_spectrum(self.spectra)
         if active is None:
             return
         self._remove_spectrum(active.path)
@@ -1215,13 +1215,13 @@ class MainWindow(QMainWindow):
         self.fit_controller.on_click(event)
 
     def _update_fit_mode_availability(self):
-        active = next((s for s in self.spectra if s.active), None)
+        active = active_spectrum(self.spectra)
         available = active is not None and active.visible
         self.fit_button.setEnabled(available and self.fit_controller.state.ready_to_fit())
         self.integrate_button.setEnabled(available and self.fit_controller.state.ready_to_integrate())
 
     def _update_operations_availability(self):
-        active = next((s for s in self.spectra if s.active), None)
+        active = active_spectrum(self.spectra)
         self.multiply_action.setEnabled(active is not None)
         self.rebin_action.setEnabled(active is not None)
         self.save_spectrum_action.setEnabled(active is not None)
