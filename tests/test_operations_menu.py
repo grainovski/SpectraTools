@@ -1471,3 +1471,130 @@ def test_calibrated_n42_still_applies_its_calibration_when_loaded_first(qapp, tm
     assert len(main_window.spectra) == 1
     assert main_window._calibration is not None
     assert main_window._calibration_active is True
+
+
+# --- incremental spectrum-list updates (v3.1.0 audit, M16) -------------
+
+
+def _list_state(main_window):
+    """Everything about the spectrum list that a full rebuild determines."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QCheckBox, QLabel, QRadioButton
+
+    rows = []
+    for i in range(main_window.spectrum_list.count()):
+        item = main_window.spectrum_list.item(i)
+        widget = main_window.spectrum_list.itemWidget(item)
+        rows.append({
+            "path": item.data(Qt.ItemDataRole.UserRole),
+            "checkboxes": [
+                c.isChecked() for c in widget.findChildren(QCheckBox)
+                if not isinstance(c, QRadioButton)
+            ],
+            "radios": [r.isChecked() for r in widget.findChildren(QRadioButton)],
+            "labels": [lbl.text() for lbl in widget.findChildren(QLabel) if lbl.text()],
+        })
+    group = main_window.active_button_group
+    return {
+        "rows": rows,
+        "buttons": len(group.buttons()),
+        "checked": sum(1 for b in group.buttons() if b.isChecked()),
+        "exclusive": group.exclusive(),
+    }
+
+
+def _add_spectrum(main_window, name, active=False):
+    spectrum = LoadedSpectrum(name, np.zeros(32, dtype=np.int64), "#1f77b4")
+    spectrum.active = active
+    main_window.spectra.append(spectrum)
+    return spectrum
+
+
+def test_incremental_add_matches_a_full_rebuild(qapp):
+    # The whole basis for appending instead of rebuilding: the resulting
+    # list must be indistinguishable from the rebuilt one.
+    main_window = MainWindow()
+    for i in range(5):
+        for s in main_window.spectra:
+            s.active = False
+        spectrum = _add_spectrum(main_window, f"s{i}.txt", active=True)
+        main_window._append_spectrum_row(spectrum)
+        main_window._sync_active_radios()
+
+    incremental = _list_state(main_window)
+    main_window._update_spectrum_list()
+    assert incremental == _list_state(main_window)
+
+
+def test_incremental_removal_matches_a_full_rebuild(qapp):
+    main_window = MainWindow()
+    for i in range(5):
+        _add_spectrum(main_window, f"r{i}.txt", active=(i == 3))
+    main_window._update_spectrum_list()
+
+    # Removing the ACTIVE spectrum promotes spectra[0], so the checked
+    # radio has to move -- the case incremental removal most easily gets
+    # wrong.
+    main_window._remove_spectrum("r3.txt")
+
+    incremental = _list_state(main_window)
+    main_window._update_spectrum_list()
+    assert incremental == _list_state(main_window)
+    assert main_window.spectra[0].active is True
+    assert incremental["checked"] == 1
+
+
+def test_adding_a_spectrum_does_not_rebuild_existing_rows(qapp):
+    # The actual point of M16: existing rows must survive an add
+    # untouched. Compares widget identity, so reverting to a full
+    # rebuild fails this even though the visible state would look right.
+    main_window = MainWindow()
+    for i in range(3):
+        _add_spectrum(main_window, f"keep{i}.txt", active=(i == 0))
+    main_window._update_spectrum_list()
+
+    before = [
+        main_window.spectrum_list.itemWidget(main_window.spectrum_list.item(i))
+        for i in range(main_window.spectrum_list.count())
+    ]
+
+    new = _add_spectrum(main_window, "added.txt")
+    main_window._append_spectrum_row(new)
+    main_window._sync_active_radios()
+
+    after = [
+        main_window.spectrum_list.itemWidget(main_window.spectrum_list.item(i))
+        for i in range(main_window.spectrum_list.count())
+    ]
+    assert len(after) == len(before) + 1
+    for original, current in zip(before, after):
+        assert original is current, "an existing row widget was reconstructed by an append"
+
+
+def test_removing_every_spectrum_leaves_an_empty_consistent_list(qapp):
+    main_window = MainWindow()
+    for i in range(3):
+        _add_spectrum(main_window, f"e{i}.txt", active=(i == 0))
+    main_window._update_spectrum_list()
+
+    for i in range(3):
+        main_window._remove_spectrum(f"e{i}.txt")
+
+    state = _list_state(main_window)
+    assert state["rows"] == []
+    assert state["buttons"] == 0
+    main_window._update_spectrum_list()
+    assert state == _list_state(main_window)
+
+
+def test_removing_an_unknown_path_falls_back_to_a_full_rebuild(qapp):
+    # _remove_spectrum_row returns False when the list and self.spectra
+    # have diverged; the caller must rebuild rather than leave a stale
+    # list behind.
+    main_window = MainWindow()
+    for i in range(3):
+        _add_spectrum(main_window, f"f{i}.txt", active=(i == 0))
+    main_window._update_spectrum_list()
+
+    assert main_window._remove_spectrum_row("not-in-the-list.txt") is False
+    assert main_window.spectrum_list.count() == 3

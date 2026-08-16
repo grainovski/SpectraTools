@@ -4,7 +4,7 @@
 
 **Source of the findings:** the audit artifact (https://claude.ai/code/artifact/ab9ece47-327d-418e-8bee-34f76778622d). No local copy existed — it was re-fetched and the Minor section extracted verbatim. Every finding was then re-verified against current code before acting, because the audit's line numbers predate 23 tasks of fixes.
 
-**Outcome: 3 were already fixed, 16 fixed here, 3 deliberately not changed (with reasons), 2 blocked.**
+**Outcome: 3 were already fixed, 17 fixed here, 2 deliberately not changed (with reasons), 2 blocked.**
 
 ## Already fixed by the Critical/Important cycle — verified, no action
 
@@ -27,6 +27,7 @@
 | M4 | Both value formatters duplicate the conversion | → `_to_energy()`. Kept because the duplicated part is the *error-propagation math*, not the formatting; the two output shapes the spec requires are unchanged |
 | M8 | Background preview recomputes per mark click | `compute_background` is region-bounded, so the only size-scaling cost was the full-length `np.arange`. `peak_fit.channel_indices(n)` caches it **by length** — safe because the channel axis never depends on counts, so in-place mutation (Multiply/Add/Subtract) cannot stale it. Returned read-only |
 | M12 | Discarded redraw on X/Y projection switch | `CutController.clear(redraw=False)` for callers that replot immediately. Clear Marks keeps its draw. Verified 2 draws → 1 |
+| M16 | Spectrum-list panel rebuilt wholesale per add/remove | Row construction extracted to `_append_spectrum_row()`, with `_remove_spectrum_row()` + `_sync_active_radios()` for incremental removal; the full rebuild survives for the theme toggle, which genuinely must recolour every swatch, and as the fallback when a removal can't find its row. **Measured 10× faster at 20 spectra, 57× at 200** (14 s → 244 ms). Equivalence proven against a full rebuild across 6 scenarios |
 | M7 | `draw_committed_fits()` is the file's largest method | Split into `_fit_draw_context()` + `_draw_result_regions()` / `_draw_integration_annotation()` / `_draw_fit_curves()`, leaving a 20-line loop that names the three concerns. Call order is preserved exactly, because matplotlib layers artists in call order. **Proven identical by artist-level comparison**, not just by tests — see below |
 | M19 | Private matplotlib API + unbounded pin | `matplotlib>=3.8,<3.12`, with the reason recorded at the pin |
 | M20 | Spec text says Ctrl+C deletes | Addendum recording that it was implemented then deliberately reverted to hide-not-delete |
@@ -39,7 +40,6 @@
 
 - **M3 — model function rebuilds dict/f-string state per evaluation.** Implemented, verified bit-identical across 96 configurations, then **measured: 1.02× (≈1.5%)** on an 8-peak/512-point model. The cost is dominated by the numpy `exp`/`erfc` work, matching the audit's own "secondary, not a primary driver" note. Reverted — ~30 lines of extra indirection in numerically-critical code is not worth 1.5%.
 - **M11 — matrix panel redraws twice on calibration change.** The second redraw is deliberate and documented at `matrix_panel.py`'s `_apply_calibration_change` as belt-and-suspenders, explicitly "not reliant on the `_matrix_panels` registration loop for correctness". Removing it to save ~30 ms (invisible; Qt coalesces the paint) would make correctness depend on that registration.
-- **M16 — spectrum-list panel rebuilt wholesale per add/remove.** O(M²) only across M *sequential single-spectrum* operations; batch open already rebuilds once. At the audit's own "dozens of spectra" scale this is microseconds. An incremental rewrite of a core UI path is exactly the shape of change that has produced stale-widget bugs in this project before. The unbounded part of this finding was the `QButtonGroup` leak, which **is** fixed (M17).
 
 ## Blocked
 
@@ -49,4 +49,8 @@
 
 **M7 specifically** was verified beyond the test suite, because no test asserts rendered output and a drawing-order mistake would be invisible to them: a scenario covering all three result kinds (a two-peak Fit, an Integration with background, an Integration without) plus a hidden result was rendered before and after the split, and every artist matplotlib produced was captured — type, xy data, color, linestyle, linewidth, alpha, annotation text and anchor, and z-order — then compared element-by-element in list order. **31 artists, identical in both cases** (20 with a result hidden). That is what makes the split safe to claim as behaviour-preserving; the 363 passing tests in the affected suites do not, on their own, prove it.
 
-Full suite after all changes: **810 passed, 2 xfailed, 1 failed** — up from 782 passed (28 tests added). The single failure is `test_load_mtx_decodes_real_fixture_reasonably_fast`, a machine-calibrated wall-clock assertion unrelated to these changes; see that test's own note and project memory. Each behavioural fix was additionally proven to fail before its fix (M10: 17 failures; M17, M18, M12: asserted counts).
+**M16** was likewise verified beyond the suite: the incrementally-built list was compared against a full rebuild across six scenarios (sequential adds, batch append onto a populated list, removing an inactive row, removing the ACTIVE row so another is promoted, removing every row, and mixed add/remove) — identical in all six, comparing row order, per-row checkbox/radio state, labels, and button-group membership. A separate test asserts existing row *widget identity* survives an append, so a silent revert to full rebuilding fails it (confirmed: 0 of 3 widgets survive a rebuild).
+
+**A correction worth recording:** M16 was first declined on the claim that the cost was "microseconds at realistic scale". That was wrong by orders of magnitude — a rebuild measures 5.5 ms at 20 spectra, 17 ms at 50 and 96 ms at 200, on *every* add or remove. The revisit produced the largest measured win of this whole cycle.
+
+Full suite after all changes: **815 passed, 2 xfailed, 1 failed** — up from 782 passed (33 tests added). The single failure is `test_load_mtx_decodes_real_fixture_reasonably_fast`, a machine-calibrated wall-clock assertion unrelated to these changes; see that test's own note and project memory. Each behavioural fix was additionally proven to fail before its fix (M10: 17 failures; M17, M18, M12: asserted counts).
