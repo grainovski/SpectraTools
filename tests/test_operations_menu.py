@@ -1598,3 +1598,44 @@ def test_removing_an_unknown_path_falls_back_to_a_full_rebuild(qapp):
 
     assert main_window._remove_spectrum_row("not-in-the-list.txt") is False
     assert main_window.spectrum_list.count() == 3
+
+
+def test_a_zoom_burst_coalesces_into_a_single_render(qapp):
+    """A mouse wheel emits events far faster than a full canvas render
+    completes. With a synchronous canvas.draw() each tick rendered
+    separately, so the view lagged the wheel by one full render per tick
+    -- tolerable on a GPU desktop, not on a software renderer (WSLg
+    passes through no GPU at all), which is where this was reported.
+
+    Asserts the RENDER COUNT rather than elapsed time, so it means the
+    same thing on any machine.
+    """
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    renders = []
+    real_draw = main_window.canvas.draw
+    main_window.canvas.draw = lambda *a, **k: (renders.append(1), real_draw(*a, **k))[1]
+
+    for _ in range(10):
+        main_window._zoom_x(0.8)
+    qapp.processEvents()
+
+    assert len(renders) == 1, (
+        f"expected a 10-tick zoom burst to coalesce into one render, got {len(renders)} "
+        "-- has canvas.draw() replaced draw_idle() in _zoom_x?"
+    )
+
+
+def test_zoom_still_actually_changes_the_view(qapp):
+    # Guard from the other side: coalescing must not mean the zoom is
+    # skipped -- the limits still have to move on every tick.
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    main_window._show_full_spectrum()
+
+    before = main_window.axes.get_xlim()
+    main_window._zoom_x(0.5)
+    after = main_window.axes.get_xlim()
+
+    assert abs(after[1] - after[0]) < abs(before[1] - before[0])

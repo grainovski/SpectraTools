@@ -489,7 +489,11 @@ class MatrixPanel(QMainWindow):
         new_xlim = (new_lo, new_hi) if xlim[0] <= xlim[1] else (new_hi, new_lo)
         self.axes.set_xlim(new_xlim)
         self._autoscale_y(new_xlim)
-        self.canvas.draw()
+        # draw_idle for the same reason as main_window._zoom_x: a mouse
+        # wheel emits events faster than a full render completes, so
+        # drawing synchronously makes the view lag the wheel by one full
+        # render per tick. Coalesced into one instead.
+        self.canvas.draw_idle()
         self.nav_toolbar.push_current()
 
     def _show_full_view(self):
