@@ -1047,11 +1047,29 @@ class MainWindow(QMainWindow):
         self.axes.clear()
         style_axes(self.axes, self._theme)
         visible = [s for s in self.spectra if s.visible]
+        # The final limits are resolved BEFORE anything is drawn, purely
+        # so draw_committed_fits can skip fits that fall outside them.
+        # They are still applied below, in the original place, so the
+        # autoscale behaviour is unchanged -- this only moves the
+        # decision earlier. It has to be: set_xlim happens after the
+        # loop, so a fit-culling test reading axes.get_xlim() from inside
+        # the loop would see matplotlib's provisional data-derived
+        # limits, not the view the user ends up looking at, and would
+        # drop fits that belong on screen.
+        view_xlim = None
+        if visible:
+            max_channel = max(len(s.data) for s in visible) - 1
+            if xlim_override is not None:
+                view_xlim = xlim_override
+            elif saved_xlim is not None:
+                view_xlim = saved_xlim
+            else:
+                view_xlim = (self.channel_to_display(0), self.channel_to_display(max_channel))
         for spectrum in visible:
             channels = np.arange(len(spectrum.data))
             x = self.channel_to_display(channels)
             self.axes.plot(x, spectrum.data, drawstyle="steps-mid", color=spectrum.color)
-            self.fit_controller.draw_committed_fits(spectrum)
+            self.fit_controller.draw_committed_fits(spectrum, view_xlim=view_xlim)
         self.axes.set_xlabel("Energy (keV)" if self._calibration_active else "Channel")
         self.axes.set_ylabel("Counts")
         self.axes.grid(True)
@@ -1061,13 +1079,8 @@ class MainWindow(QMainWindow):
             # default 5% autoscale margin, which would otherwise show them
             # as such. Span the widest currently-visible spectrum, since
             # loaded files can have different channel counts.
-            max_channel = max(len(s.data) for s in visible) - 1
-            if xlim_override is not None:
-                xlim = xlim_override
-            elif saved_xlim is not None:
-                xlim = saved_xlim
-            else:
-                xlim = (self.channel_to_display(0), self.channel_to_display(max_channel))
+            # Same value the fit-culling above already resolved.
+            xlim = view_xlim
             self.axes.set_xlim(xlim)
             self._autoscale_y(xlim)
         self.canvas.draw()

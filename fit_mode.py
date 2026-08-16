@@ -672,8 +672,44 @@ class FitModeController(QObject):
             return
         self.main_window._update_fit_mode_availability()
 
-    def draw_committed_fits(self, spectrum):
+    def _result_is_off_view(self, result, context, view_xlim):
+        """True when nothing this result draws could land inside
+        `view_xlim`, so building its artists would be wasted work.
+
+        Spans the BACKGROUND regions as well as the fit region: the
+        background line and its shading are drawn from the left region's
+        start to the right region's end, well outside fit_region itself,
+        and culling on fit_region alone would clip them at the edge of
+        the view.
+
+        Compared in display space, and both ends are normalised, because
+        a negative-b calibration makes channel_to_display decreasing --
+        the axis is then legitimately inverted and a raw lo/hi compare
+        would be backwards.
+        """
+        if view_xlim is None:
+            return False
+        to_display = context.to_display
+        lo, hi = result.fit_region
+        if result.left_bg_region is not None:
+            lo = min(lo, result.left_bg_region[0])
+            hi = max(hi, result.right_bg_region[1])
+        a, b = to_display(lo), to_display(hi)
+        span_lo, span_hi = min(a, b), max(a, b)
+        view_lo, view_hi = min(view_xlim), max(view_xlim)
+        return span_hi < view_lo or span_lo > view_hi
+
+    def draw_committed_fits(self, spectrum, view_xlim=None):
         """Draws every visible committed result for `spectrum`.
+
+        `view_xlim` (display space) lets results that fall entirely
+        outside the visible range be skipped. Building a result's artists
+        costs ~5 ms -- region shading, the background line, a 200-point
+        model curve, a per-peak decomposition curve each, and labels --
+        and this runs on EVERY replot, so a spectrum carrying 100 fits
+        spent over half a second redrawing them all whether or not they
+        were on screen. Callers that do not know their final limits yet
+        can omit it and everything is drawn, exactly as before.
 
         Split into three helpers below, which are called in exactly the
         order their artists must layer in -- matplotlib stacks artists
@@ -685,6 +721,8 @@ class FitModeController(QObject):
         context = self._fit_draw_context(spectrum)
         for result in spectrum.fits:
             if not result.visible:
+                continue
+            if self._result_is_off_view(result, context, view_xlim):
                 continue
             self._draw_result_regions(result, context)
             if isinstance(result, IntegrationResult):

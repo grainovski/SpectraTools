@@ -3909,3 +3909,61 @@ def test_toggle_background_preview_catches_fit_error_and_resets_the_flag(qapp):
         == f"Background preview failed: Background region {failing_region} contains no data"
     )
     assert main_window.fit_controller.state.show_background_preview is False
+
+
+def test_fits_outside_the_visible_range_are_not_drawn(qapp):
+    """Building one committed fit's artists costs ~5 ms -- region
+    shading, a background line, a 200-point model curve, a decomposition
+    curve per peak and labels -- and it happens on EVERY replot. A
+    spectrum carrying 100 fits spent over half a second per replot
+    redrawing all of them regardless of whether they were on screen;
+    zoomed away from them it is now ~48 ms.
+
+    Counts artists rather than timing, so it means the same on any
+    machine.
+    """
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    for key, x in (("b", 70), ("b", 85), ("b", 115), ("b", 130),
+                   ("r", 85), ("r", 115), ("p", 100)):
+        _held_key_click(main_window, key, x)
+    main_window.fit_controller.run_fit()
+    spectrum = main_window.spectra[0]
+    assert len(spectrum.fits) == 1
+    region = spectrum.fits[0].fit_region
+
+    main_window._show_full_spectrum()
+    with_fit = len(main_window.axes.get_children())
+
+    # Zoom to a range well clear of both the fit region and its
+    # background regions.
+    main_window.axes.set_xlim(region[1] + 40, region[1] + 60)
+    main_window._plot_data(preserve_view=True)
+    without_fit = len(main_window.axes.get_children())
+
+    assert without_fit < with_fit, (
+        "a fit entirely outside the visible range should not be drawn "
+        f"(artists: {with_fit} in view, {without_fit} out of view)"
+    )
+
+
+def test_a_fit_inside_the_visible_range_is_still_drawn(qapp):
+    # The other half: culling must not drop a fit that IS on screen.
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    for key, x in (("b", 70), ("b", 85), ("b", 115), ("b", 130),
+                   ("r", 85), ("r", 115), ("p", 100)):
+        _held_key_click(main_window, key, x)
+    main_window.fit_controller.run_fit()
+    spectrum = main_window.spectra[0]
+    region = spectrum.fits[0].fit_region
+
+    main_window.axes.set_xlim(region[0] - 5, region[1] + 5)
+    main_window._plot_data(preserve_view=True)
+    in_view = len(main_window.axes.get_children())
+
+    spectrum.fits[0].visible = False
+    main_window._plot_data(preserve_view=True)
+    hidden = len(main_window.axes.get_children())
+
+    assert in_view > hidden, "a fit within the visible range must still be drawn"
