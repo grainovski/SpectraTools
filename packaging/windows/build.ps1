@@ -16,10 +16,23 @@ if (-not $versionMatch) {
 # quote would produce a build_info.py with a Python syntax error.
 $version = ($versionMatch.Matches[0].Groups[1].Value -replace '\\', '\\') -replace '"', '\"'
 $buildDate = Get-Date -Format "yyyy-MM-dd"
-@"
+# Written via .NET rather than Set-Content because Windows PowerShell
+# 5.1's "-Encoding utf8" means UTF-8 WITH a BOM, and PowerShell 7's
+# "utf8NoBOM" does not exist in 5.1 at all. Python's own importer skips a
+# leading BOM, so the app never cared -- but the BOM is a real character
+# to anything else reading the file as text, and ast.parse() rejects the
+# module outright ("invalid non-printable character U+FEFF"), which
+# breaks tooling that scans the source tree. The Linux build's heredoc
+# has always written this file BOM-less; this makes the two agree.
+$buildInfo = @"
 VERSION = "$version"
 BUILD_DATE = "$buildDate"
-"@ | Set-Content -Path "$root/build_info.py" -Encoding utf8
+"@
+[System.IO.File]::WriteAllText(
+    "$root/build_info.py",
+    $buildInfo + [Environment]::NewLine,
+    (New-Object System.Text.UTF8Encoding($false))
+)
 Write-Host "Stamped build_info.py: VERSION=$version BUILD_DATE=$buildDate"
 
 # --onefile (vs. Linux's --onedir, see build.sh): originally paired with
