@@ -22,6 +22,19 @@ BUILD_DATE = "$buildDate"
 "@ | Set-Content -Path "$root/build_info.py" -Encoding utf8
 Write-Host "Stamped build_info.py: VERSION=$version BUILD_DATE=$buildDate"
 
+# --onefile (vs. Linux's --onedir, see build.sh): originally paired with
+# Inno Setup convenience and, historically, the now-removed AppImage's
+# own AppDir structure on the Linux side. That second reason no longer
+# applies (Linux packaging moved to native .deb/.rpm), but onefile is
+# kept deliberately for Windows: Inno Setup packages a single exe
+# cleanly, and onedir's many loose files would need their own directory
+# layout decision in the installer. Tradeoff: onefile's PyInstaller
+# bootloader re-extracts the whole bundle to a temp dir on every launch
+# (no persistent cache), so Windows cold-starts slower than Linux's
+# onedir build does on equivalent hardware, and onefile executables are
+# a more common antivirus false-positive target. Revisit if startup
+# time or AV false positives become a real user complaint -- see the
+# v3.1.0 audit finding that first raised this.
 & "$root/.venv/Scripts/python.exe" -m PyInstaller --noconfirm --onefile --windowed --name SpectraTools --icon "$root/assets/icon.ico" main.py
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed with exit code $LASTEXITCODE"
