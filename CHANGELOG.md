@@ -4,6 +4,40 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [3.1.1] - unreleased
+
+A performance and responsiveness release, addressing matrix loading and
+zooming feeling sluggish — most visibly on Linux.
+
+### Changed
+
+- **Opening a matrix no longer freezes the application.** The decode now
+  runs in the background behind a progress dialog, so the window keeps
+  responding and shows how far along it is. The decode itself takes
+  slightly longer in absolute terms as a result; it no longer blocks
+  everything while it runs.
+- **Zooming is smoother.** Rapid mouse-wheel zooming previously redrew
+  the plot once per wheel click; those redraws are now combined, so a
+  burst of ten clicks costs one redraw instead of ten. The difference is
+  most noticeable where drawing is slow — a remote desktop, a virtual
+  machine, or any system without graphics acceleration.
+
+### Performance
+
+- **Matrices load roughly twice as fast on Linux** and about 10% faster
+  on Windows. Three separate causes: the file is now read in one
+  operation instead of one per matrix line (which dominated when the
+  file lived on a network or virtual filesystem, such as a Windows drive
+  seen from WSL), decoded rows are assembled more efficiently, and the
+  Linux packages are now built against a newer Python whose loop
+  performance is markedly better.
+
+### Notes
+
+- The Linux `.deb` and `.rpm` are built against Python 3.12 rather than
+  3.9. The minimum supported system is unchanged — they still run on the
+  same RHEL- and Debian-family releases as before.
+
 ## [3.1.0] - 2026-08-16
 
 A correctness and robustness release. It fixes everything found by a
