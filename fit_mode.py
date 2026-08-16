@@ -226,6 +226,38 @@ def _parameter_label(name, calibrated=False):
     return f"Peak {peak_num} {kind}{suffix}"
 
 
+def _to_energy(main_window, channel_value, channel_err, is_width, reference_position=None):
+    """(energy, energy_err) in keV, or None when no calibration is
+    active -- in which case the caller keeps its channel-space values.
+
+    This is the conversion _dual_unit_value and _unit_switched_value
+    share; only their output SHAPE differs (the spec deliberately wants
+    "ch (keV)" in the roomy Integration tooltip and a bare unit-switched
+    number in the narrow results-table column), never the arithmetic.
+    Keeping the math in one place matters more than usual here because
+    it is a scientific claim, not formatting: a width (`is_width=True`)
+    scales by the calibration's local derivative evaluated at
+    `reference_position` -- the peak's own position, NOT the width's
+    numeric value, which has no location on the calibration curve --
+    while a position converts through the full calibration including
+    the offset. Uncertainty is first-order propagation through that
+    same local derivative: exact for a linear calibration, a good
+    approximation for a quadratic one at realistic peak-width
+    uncertainties. Previously duplicated verbatim in both formatters,
+    so any correction would have had to be made twice.
+    """
+    if not main_window._calibration_active or main_window._calibration is None:
+        return None
+    cal = main_window._calibration
+    if is_width:
+        slope = abs(cal.derivative(reference_position))
+        value = slope * channel_value
+    else:
+        slope = abs(cal.derivative(channel_value))
+        value = cal.apply(channel_value)
+    return value, slope * channel_err
+
+
 def _dual_unit_value(main_window, channel_value, channel_err, is_width, reference_position=None):
     """Formats a channel-space value+error as "X.XX ± Y.YY ch (E.EE ±
     F.FF keV)" when calibration is active, or plain "X.XX ± Y.YY"
@@ -241,16 +273,10 @@ def _dual_unit_value(main_window, channel_value, channel_err, is_width, referenc
     calibration, a good approximation for quadratic given realistic
     peak-width uncertainties are small relative to the calibration's
     curvature scale."""
-    if not main_window._calibration_active or main_window._calibration is None:
+    converted = _to_energy(main_window, channel_value, channel_err, is_width, reference_position)
+    if converted is None:
         return f"{channel_value:.2f} ± {channel_err:.2f}"
-    cal = main_window._calibration
-    if is_width:
-        slope = abs(cal.derivative(reference_position))
-        energy = slope * channel_value
-    else:
-        slope = abs(cal.derivative(channel_value))
-        energy = cal.apply(channel_value)
-    energy_err = slope * channel_err
+    energy, energy_err = converted
     return f"{channel_value:.2f} ± {channel_err:.2f} ch ({energy:.2f} ± {energy_err:.2f} keV)"
 
 
@@ -266,16 +292,10 @@ def _unit_switched_value(main_window, channel_value, channel_err, is_width, refe
     _dual_unit_value -- a width converts via the calibration's local
     derivative evaluated at reference_position, never at the width's
     own value."""
-    if not main_window._calibration_active or main_window._calibration is None:
+    converted = _to_energy(main_window, channel_value, channel_err, is_width, reference_position)
+    if converted is None:
         return f"{channel_value:.2f} ± {channel_err:.2f}"
-    cal = main_window._calibration
-    if is_width:
-        slope = abs(cal.derivative(reference_position))
-        value = slope * channel_value
-    else:
-        slope = abs(cal.derivative(channel_value))
-        value = cal.apply(channel_value)
-    err = slope * channel_err
+    value, err = converted
     return f"{value:.2f} ± {err:.2f}"
 
 
