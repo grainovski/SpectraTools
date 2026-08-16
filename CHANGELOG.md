@@ -4,6 +4,77 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [3.1.0] - unreleased
+
+A correctness and robustness release. It fixes everything found by a
+full audit of v3.0.0, including five crashes or silent-corruption bugs
+reachable in ordinary use, and restores exact agreement with TV in two
+places where the fitting maths had drifted.
+
+### Fixed - crashes and data corruption
+
+- **Integration on a spectrum containing negative counts** (most easily
+  produced by Subtract Spectra) crashed the application. It now reports
+  a clear error instead.
+- **Opening a file the app could not read as text** — an image, a PDF,
+  anything picked through the "All files" filter — crashed the
+  application. Such files are now rejected with a message.
+- **A corrupt or truncated .n42 file** could exhaust memory and take the
+  application down. Run lengths are now bounded, as they already were
+  for .spk and .mtx.
+- **A very large or infinite Multiply/Add/Subtract factor** silently
+  corrupted the spectrum's counts in place, with no visible error. Such
+  factors are now rejected.
+- **The matrix panel's Fit Results table never filled in**, so fits made
+  on a projection could not be selected, removed or exported from it,
+  despite the documentation saying otherwise.
+- **A calibration file or .n42 containing "nan" or "inf"** was accepted
+  and made every displayed energy blank. Coefficients must now be finite.
+
+### Changed - fitting behaviour
+
+- **Peak fits now start from the same initial width TV uses.** The
+  previous starting guess was twice TV's. This changes fitted results
+  for closely-spaced multiplets and makes fits converge more reliably:
+  across 200 randomised test fits the old guess failed to converge 10
+  times where the corrected one never did, and average position error
+  roughly halved.
+- **A fit whose tail parameters the data cannot pin down is no longer
+  thrown away.** Previously the whole fit was rejected. It now reports
+  position, width and area normally, showing "n/a" for only the
+  uncertainties that could not be determined. Fits where the peak
+  parameters themselves are undetermined are still rejected.
+- The solver's last-resort recovery step now re-applies its own step
+  limits, so a fitted peak can no longer land outside the marked region.
+- Background uncertainty for Integration used the wrong statistical
+  moment, making the reported background skewness error incorrect
+  whenever background regions were marked.
+
+### Changed - other
+
+- The zoom level is now preserved when toggling log scale, toggling a
+  spectrum's visibility, or removing a spectrum.
+- Save Spectrum always writes a real file extension, instead of an
+  extensionless file on Linux.
+- Activate Cut labels are now path-safe, so automatic fit logs are no
+  longer written to truncated filenames.
+
+### Performance
+
+- Multi-peak fits are substantially faster: the solver no longer
+  computes a full derivative matrix for trial steps it then rejects.
+- Loading a large 2D matrix is faster.
+- Adding or removing spectra no longer rebuilds the whole spectra list;
+  with many spectra loaded this is 10x faster at 20 and around 57x at
+  200.
+
+### Notes
+
+- Automatic fit logs (`*_fits.jsonl`) now write `null` rather than a
+  bare `NaN` for an undetermined uncertainty, so the files are valid
+  JSON for other tools.
+- matplotlib is now pinned below 3.12; see requirements.txt.
+
 ## [3.0.0] - 2026-08-13
 
 ### Added
