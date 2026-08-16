@@ -27,6 +27,32 @@ def hypermet_left_tail(x, position, sigma, r, beta):
     toward lower x (left), matching real low-energy detector tailing.
     Public (no leading underscore) because fit_mode.py's committed-fit
     overlay drawing reuses this exact formula to redraw tailed fits.
+
+    Re-verified term-by-term against the real gf3 source on 2026-08-16
+    (srcRW/gf3_subs.c:2914-2966), which had never been possible before
+    -- the vendored tree is untracked and only reached this machine
+    then. Every term matches, including one that looks like it does
+    not: gf3 writes y as FWHM/(beta*3.33021838), and since
+    3.33021838 == 2.35482*sqrt(2) that is exactly sigma/(beta*sqrt(2))
+    above. The |dx/beta| > 12 cutoff below is gf3's own (:2949-2953).
+
+    THREE of gf3's cutoffs are deliberately NOT replicated. All three
+    are float32-era numerical safeguards; this port computes in float64,
+    where the exact value is both computable and more accurate:
+      * `|w| > 4  -> gaussian core := 0` (:2918-2921). Differs by ~1e-7
+        of peak amplitude.
+      * `|w+y| > 4 -> erfc(w+y) := 0 or 2` (:2957-2962). Up to ~1e-3 of
+        peak amplitude on the right flank, where gf3 truncates a
+        genuinely small but non-zero huge*tiny product.
+      * `y > 4 -> tail disabled entirely` (:2896-2898, gf3's `notail`).
+        This one is NOT a precision detail: it switches the model to a
+        pure Gaussian, and measured up to 0.28 of peak amplitude of
+        difference. It is reachable in practice -- a fit of genuinely
+        short-tailed data was observed converging to y ~ 20 with beta
+        pinned at TAIL_BETA_MIN. Deliberately left unreplicated because
+        this port's shape is the true Hypermet function there and gf3's
+        is a float32 safeguard, but it IS a real behavioural divergence
+        from the reference, recorded here rather than silently kept.
     """
     dx = x - position
     w = dx / (sigma * np.sqrt(2))
