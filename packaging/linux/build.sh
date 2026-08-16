@@ -19,16 +19,16 @@ cd "$BUILD_DIR"
 # Build-host prerequisites, installed unconditionally every run (dnf install
 # on an already-installed package is a fast no-op, verified) so this script
 # is self-sufficient regardless of what state the host is already in --
-# python39 for the build itself; binutils because PyInstaller's own
+# python3.12 for the build itself; binutils because PyInstaller's own
 # dependency scanner (needs objdump) fails *silently*, producing a build
 # that looks fine but is subtly broken, if binutils is missing -- it does
-# not error loudly the way a missing python3.9 would; epel-release plus the
+# not error loudly the way a missing python3.12 would; epel-release plus the
 # runtime libs because PyInstaller's own analysis needs to actually resolve
 # these libraries at build time too, not just at install time on the target
 # machine (xcb-util-cursor specifically needs EPEL on EL8 -- see the design
 # spec's "EPEL" note).
 dnf install -y epel-release >/dev/null
-dnf install -y python39 python39-devel python39-pip binutils \
+dnf install -y python3.12 python3.12-devel python3.12-pip binutils \
     mesa-libGL mesa-libEGL fontconfig xcb-util-image xcb-util-cursor \
     libxkbcommon-x11 xcb-util-wm xcb-util-keysyms xcb-util-renderutil libatomic \
     >/dev/null
@@ -37,20 +37,31 @@ dnf install -y python39 python39-devel python39-pip binutils \
 # python3 happens to resolve to, so the shipped binary runs on both old AND
 # current RHEL-family releases (glibc is forward-compatible, never backward --
 # see docs/superpowers/specs/2026-08-03-linux-native-packages-design.md).
-# python39 (the AppStream module package) provides /usr/bin/python3.9, and its
-# venv bootstraps its own pip cleanly on this base (verified) -- no
-# --without-pip workaround needed here, unlike the old Ubuntu-based build.
-python3.9 -m venv .venv
-# AlmaLinux 8's python39-pip RPM is frozen at 20.2.4 (RHEL module streams
-# don't rebase pip mid-lifecycle -- confirmed via its rpm changelog, last
-# touched 2024 for an unrelated patch) and python39's ensurepip ships no
-# bundled wheel of its own, so venv creation always inherits that exact
-# 20.2.4. That version predates PEP 600 (pip 20.3+) and so cannot see the
-# manylinux_2_28-tagged wheels PySide6 has shipped since 6.3 -- it silently
-# falls back to the last manylinux1 release it CAN see (6.2.4) and then
-# fails the >=6.6 requirement outright. Upgrading pip first (a universal,
-# tag-less wheel itself, so any pip version can install it) fixes this
-# before it ever touches PySide6.
+# python3.12 (a plain AppStream package on EL8, NOT a module stream like
+# python39 was) provides /usr/bin/python3.12.
+#
+# Deliberately NOT python39, which this build used until v3.1.1. The .mtx
+# row decoder is a pure-Python loop -- the tag stream's variable-length
+# encoding forces a sequential scan, so it cannot be vectorised (see
+# lc_codec.decode_row's docstring) -- and pure-Python loop performance is
+# exactly what improved most in 3.11+. Measured on the same machine with a
+# benchmark shaped like that decoder: 3.9 took 1.12 s where 3.12 took
+# 0.69 s, so the Linux packages were carrying a ~1.6x interpreter penalty
+# the Windows build (3.13) never had. This is the only reason the
+# interpreter is pinned at all.
+#
+# The glibc floor -- the entire point of building here -- is unaffected:
+# python3.12 is an ordinary el8 package linked against this host's glibc
+# 2.28, so the shipped binary still runs on old and current RHEL-family
+# releases alike.
+python3.12 -m venv .venv
+# Upgrade pip inside the venv before installing anything. This was
+# originally required because python39's ensurepip pinned pip 20.2.4,
+# which predates PEP 600 and therefore could not see PySide6's
+# manylinux_2_28 wheels at all (it silently fell back to 6.2.4 and then
+# failed the >=6.6 requirement). python3.12 ships a modern pip and no
+# longer needs the workaround, but upgrading remains cheap insurance
+# against the same class of resolver-blindness in future wheels.
 .venv/bin/python3 -m pip install --quiet --upgrade pip
 .venv/bin/python3 -m pip install --quiet -r requirements-dev.txt
 
