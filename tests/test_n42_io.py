@@ -223,3 +223,28 @@ def test_load_n42_rejects_value_overflowing_int64(tmp_path):
     )
     with pytest.raises(ParseError):
         load_n42(_write_n42(tmp_path, xml_text))
+
+
+def test_load_n42_non_finite_coefficient_gives_no_calibration(tmp_path):
+    # "nan"/"inf" pass float() cleanly, so before the finiteness check in
+    # Calibration.__post_init__ this auto-activated a calibration that
+    # made every displayed energy NaN (v3.1.0 audit, Minor). Expected
+    # outcome matches the other unusable-calibration cases above:
+    # degrade to no calibration, not a load failure.
+    xml_text = _MINIMAL_N42.format(
+        calibration_block=_CALIBRATION_BLOCK.format(coefficients="nan 0.5"),
+        spectrum_block=_spectrum_block("0 1 2"),
+    )
+    data, calibration = load_n42(_write_n42(tmp_path, xml_text))
+    assert list(data) == [0, 1, 2]
+    assert calibration is None
+
+
+def test_load_n42_inf_coefficient_gives_no_calibration(tmp_path):
+    xml_text = _MINIMAL_N42.format(
+        calibration_block=_CALIBRATION_BLOCK.format(coefficients="10.0 inf 0.001"),
+        spectrum_block=_spectrum_block("0 1 2"),
+    )
+    data, calibration = load_n42(_write_n42(tmp_path, xml_text))
+    assert list(data) == [0, 1, 2]
+    assert calibration is None

@@ -2,6 +2,7 @@
 own position calibration (tv-1.9.13/lib/tv/vsCal.c). Pure Python, no Qt
 dependency -- calibration_dialog.py is the thin Qt layer on top of this."""
 
+import math
 from dataclasses import dataclass
 
 # TV's own Newton's-method precision/iteration-cap constants
@@ -32,6 +33,23 @@ class Calibration:
         # b == 0. This is a new UI entry point, not a raw port of an
         # existing TV-driven flow, so it's validated here instead of
         # replicating that silent failure mode.
+        #
+        # Finiteness is checked FIRST, and here in __post_init__ rather
+        # than at each parse site, because every way a Calibration can
+        # come into existence funnels through this constructor: the
+        # dialog's own text fields (float("nan")/float("inf") both parse
+        # happily), an ASCII coefficients file, and an N42 file's
+        # CoefficientValues. A non-finite coefficient isn't caught by the
+        # b == 0.0 test below either -- nan == 0.0 is False -- and would
+        # otherwise sail through to make apply() return NaN for every
+        # channel, i.e. an active calibration that silently displays a
+        # blank/NaN energy everywhere.
+        for name in ("a", "b", "c"):
+            value = getattr(self, name)
+            if not math.isfinite(value):
+                raise CalibrationError(
+                    f"Calibration coefficient '{name}' must be a finite number, got {value!r}"
+                )
         if self.b == 0.0:
             raise CalibrationError("Calibration coefficient 'b' must not be zero")
 
@@ -108,6 +126,18 @@ def read_coefficients_file(path, quadratic):
             f"{kind_name} calibration, found {len(lines)} in {path}"
         )
     try:
-        return [float(line) for line in lines]
+        values = [float(line) for line in lines]
     except ValueError as exc:
         raise CalibrationFileError(f"Non-numeric value in {path}: {exc}") from exc
+    # float() accepts "nan"/"inf"/"-inf" as valid numbers, so the parse
+    # above can succeed on a corrupted file and still yield a coefficient
+    # set that makes every displayed energy NaN. Calibration.__post_init__
+    # rejects these too, but only once the user presses OK -- catching it
+    # here names the offending file in the message instead.
+    for value in values:
+        if not math.isfinite(value):
+            raise CalibrationFileError(
+                f"Non-finite coefficient ({value!r}) in {path}: "
+                "calibration coefficients must be finite numbers"
+            )
+    return values

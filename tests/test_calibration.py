@@ -183,3 +183,51 @@ def test_rescaled_is_algebraically_equivalent_at_the_new_channel():
     rescaled = cal.rescaled(factor)
     new_channel = 37
     assert rescaled.apply(new_channel) == pytest.approx(cal.apply(new_channel * factor))
+
+
+# --- non-finite coefficient rejection (v3.1.0 audit, Minor) -------------
+# float("nan")/float("inf") parse happily everywhere a coefficient can
+# enter the app, and `nan == 0.0` is False so the pre-existing b-is-zero
+# guard never caught them. An accepted non-finite coefficient makes
+# apply() return NaN for every channel -- an active calibration that
+# silently displays a blank energy everywhere.
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_calibration_rejects_non_finite_a(bad):
+    with pytest.raises(CalibrationError):
+        Calibration(kind="linear", a=bad, b=0.5)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_calibration_rejects_non_finite_b(bad):
+    with pytest.raises(CalibrationError):
+        Calibration(kind="linear", a=1.0, b=bad)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_calibration_rejects_non_finite_c(bad):
+    with pytest.raises(CalibrationError):
+        Calibration(kind="quadratic", a=1.0, b=0.5, c=bad)
+
+
+def test_calibration_error_names_the_offending_coefficient():
+    with pytest.raises(CalibrationError, match="'b'"):
+        Calibration(kind="linear", a=1.0, b=float("nan"))
+
+
+def test_finite_coefficients_still_accepted():
+    # Guards against the new check being too aggressive: a very large but
+    # finite coefficient is legal and must still construct.
+    cal = Calibration(kind="quadratic", a=-1e300, b=1e300, c=0.0)
+    assert cal.b == 1e300
+
+
+@pytest.mark.parametrize("text", ["nan", "inf", "-inf", "Infinity", "NaN"])
+def test_read_coefficients_file_rejects_non_finite(tmp_path, text):
+    from calibration import read_coefficients_file
+
+    path = tmp_path / "cal.txt"
+    path.write_text(f"10.5\n{text}\n")
+    with pytest.raises(CalibrationFileError, match="finite"):
+        read_coefficients_file(str(path), quadratic=False)
