@@ -318,8 +318,14 @@ current view, and <kbd>Ctrl+0</kbd> resets to the full spectrum.</p>
 <h3>11. Matrix analysis</h3>
 <p><b>File &gt; Open Matrix...</b> (<kbd>Ctrl+Shift+O</kbd>) opens a
 2D coincidence matrix (<b>.mtx</b>) in its own window. Only the raw
-histogram is read -- there's no way to save a matrix back out. The
-matrix panel computes both its X and Y projections up front; pick
+histogram is read -- there's no way to save a matrix back out.
+Decoding a full-size matrix takes several seconds, so a
+<b>Reading matrix...</b> progress window appears while it works; the
+application stays responsive throughout, and the panel opens by itself
+when the read finishes. Loading is fastest from a local disk -- reading
+a matrix across a network share, or from a Windows drive inside WSL, is
+noticeably slower.
+The matrix panel computes both its X and Y projections up front; pick
 which one to work on from the dropdown. Hold <kbd>C</kbd> and click
 twice to mark the cut (signal) region, and hold <kbd>G</kbd> and click
 twice for each background region -- any number of background regions
@@ -515,6 +521,36 @@ whole fit region (not the fitted model curve), and its net total sums
 just the peaks' own net volumes, with their uncertainties combined in
 quadrature. Net volume is almost always the number you actually want
 (for example, when computing activity or a branching ratio).</p>
+
+<h2>When an uncertainty reads "n/a"</h2>
+<p>Occasionally a fit succeeds but one of its numbers is shown as
+<code>&plusmn; n/a</code> in the Fit Results panel, in a row's tooltip,
+or in an exported report. That is not a formatting glitch and not a
+failed fit: it means the data did not constrain that particular
+parameter, so no honest uncertainty can be quoted for it. The
+<i>value</i> beside it is still the fitted result; only its error bar is
+unknown.</p>
+<p>The usual cause is the <b>left tail</b> on a peak that doesn't really
+have one. With nothing in the data pulling the tail fraction away from
+zero, the optimizer drives it to zero -- and once the tail contributes
+nothing, the tail's decay length can take any value at all without
+changing the fitted curve. It is genuinely undetermined, and the fit
+says so rather than inventing a number. If you see this on the tail
+parameters, the fit itself is fine; unchecking <b>Left tail</b> and
+re-fitting removes them from the fit entirely.</p>
+<p>Earlier versions rejected the whole fit in this situation, discarding
+a perfectly good position, width and volume because a tail parameter
+could not be pinned down. The fit is now reported, with "n/a" marking
+only what is actually unknown. In an exported text report the same
+quantity reads <code>&plusmn; n/a</code>; in the automatic
+<code>_fits.jsonl</code> log it is written as JSON <code>null</code>, so
+the file stays valid for other tools.</p>
+<p>A fit is still refused outright when the <i>peaks themselves</i>
+cannot be separated -- two peaks marked at (or very near) the same
+position, for instance, where any split of the counts between them fits
+the data equally well. There the message names the peaks concerned, and
+the fix is to re-mark them: remove the duplicate, or widen the fit
+region so the peaks are genuinely resolvable.</p>
 
 <h2>Integration vs. fitting</h2>
 <p><kbd>Ctrl+I</kbd> (Integrate) computes a full/background/net split

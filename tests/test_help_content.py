@@ -504,3 +504,54 @@ def test_knowledge_database_explains_2d_matrix_concepts():
     assert "projection" in html.lower()
     assert "cut" in html.lower() or "gate" in html.lower()
     assert "coincidence" in html.lower()
+
+
+def _rendered_text(html):
+    """Visible text only. Asserting against raw HTML gives false
+    positives -- an audit of this page found "n/a" and "progress"
+    apparently present when neither appeared in anything a reader sees
+    (one matched inside markup, the other only ever meant "in-progress
+    marks")."""
+    import re
+
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", _strip_base64_images(html)))
+
+
+def test_knowledge_database_explains_an_n_a_uncertainty():
+    # Fits can report "± n/a" for a parameter the data does not
+    # constrain (peak_fit._uncertainties_from -> fit_mode._err_text).
+    # Before this the page never mentioned it, so a user meeting "n/a"
+    # in the Fit Results panel had nothing to consult.
+    text = _rendered_text(build_knowledge_database_html())
+    assert "n/a" in text
+    assert "did not constrain" in text
+    # ... and the actionable part: which parameters, and what to do.
+    assert "left tail" in text.lower()
+    assert "unchecking" in text
+    # ... and that the fit itself is still valid.
+    assert "not a failed fit" in text
+
+
+def test_knowledge_database_explains_the_degenerate_fit_refusal():
+    # The other branch: peak parameters undetermined is still a hard
+    # failure, and the message names peaks. The page should say why and
+    # what to change.
+    text = _rendered_text(build_knowledge_database_html())
+    assert "cannot be separated" in text
+    assert "same position" in text
+
+
+def test_knowledge_database_documents_the_export_forms_of_an_unknown_error():
+    # A text report writes "± n/a"; the .jsonl auto-log writes null so
+    # the file stays valid JSON (fit_export._format_err / _json_safe).
+    text = _rendered_text(build_knowledge_database_html())
+    assert "_fits.jsonl" in text
+    assert "null" in text
+
+
+def test_howto_documents_the_matrix_loading_progress_window():
+    # main_window._load_matrix_with_progress shows a QProgressDialog
+    # labelled "Reading matrix..." and keeps the window responsive.
+    text = _rendered_text(build_howto_html())
+    assert "Reading matrix" in text
+    assert "responsive" in text
