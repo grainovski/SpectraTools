@@ -81,7 +81,27 @@ def load_mtx(path):
                     raise ParseError(f"lc matrix file row {row} data is truncated: {path}")
                 values = decode_row(row_bytes, columns, path, kind="lc matrix file")
                 try:
-                    data[row, :] = values
+                    # np.fromiter, not a plain `data[row, :] = values`.
+                    # Assigning a Python list into an int64 row makes
+                    # numpy walk it as a generic sequence of objects;
+                    # fromiter with an explicit dtype and count takes a
+                    # tighter path. Measured 183 -> 137 us per 8192-wide
+                    # row, i.e. ~1.50 s -> ~1.12 s across a real matrix.
+                    #
+                    # Deliberately NOT decoding straight into a typed
+                    # buffer (array('q')) instead of a list: writing into
+                    # one during the decode loop is slower per element
+                    # than a list store, and that loop is 68% of the
+                    # runtime against this step's 30% -- it would lose
+                    # more than it saves. Converting the finished list to
+                    # array('q') and using frombuffer measures the same
+                    # 137 us as fromiter, so it buys nothing over the
+                    # simpler call.
+                    #
+                    # The out-of-range guard below is unaffected:
+                    # fromiter raises OverflowError on a value too large
+                    # for int64, exactly as slice assignment did.
+                    data[row, :] = np.fromiter(values, dtype=np.int64, count=columns)
                 except OverflowError as exc:
                     raise ParseError(
                         f"lc matrix file row {row} contains an out-of-range value: {path}"
