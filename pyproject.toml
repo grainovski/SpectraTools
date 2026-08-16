@@ -1,3 +1,13 @@
+# Minimum supported Python is 3.9 -- forced by the Linux build host, which
+# builds against AlmaLinux 8's system python39 (see packaging/linux/build.sh)
+# so the resulting .rpm/.deb keep their glibc-2.28 floor. Verified by an
+# ast.parse sweep of every tracked source file against the 3.9 grammar: zero
+# incompatibilities. Deliberately recorded as a comment rather than a PEP 621
+# `[project]` table -- this app is never pip-installed or built as a wheel
+# (PyInstaller consumes it directly), and a `[project]` table would require a
+# `version` field, creating a second source of truth that could drift from
+# packaging/windows/installer.iss's AppVersion, which is the real one.
+
 [tool.pytest.ini_options]
 # Scoped explicitly to tests/ rather than the repo root: pytest's default
 # collection walks the whole tree, and packaging/*/output/ (gitignored

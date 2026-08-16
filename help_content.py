@@ -585,7 +585,7 @@ Uncertainties propagate through the same derivative.</p>
 <figcaption>Figure 7. A schematic 2D coincidence matrix with a diagonal
 ridge of correlated counts (left) and its full X projection (right),
 with a cut region (orange) and background region (purple) marked on
-the X axis of both. Activating the cut sums only the gated rows to
+the X axis of both. Activating the cut sums only the gated columns to
 build a new spectrum on the <i>other</i> axis -- not shown
 here.</figcaption>
 </figure>

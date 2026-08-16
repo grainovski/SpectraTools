@@ -12,7 +12,6 @@ dist/
 packaging/windows/output/
 packaging/linux/output/
 packaging/linux/tools/
-*.AppDir/
 .worktrees/
 assets/
 .superpowers/

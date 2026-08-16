@@ -1,6 +1,10 @@
-# Files consumed by Linux tooling that rejects CRLF outright (e.g.
-# appimagetool's strict desktop-entry validator) -- force LF regardless of
-# a Windows checkout's core.autocrlf setting, which would otherwise
-# silently reintroduce CRLF the next time the file is touched.
+# Files consumed by Linux tooling that rejects CRLF outright (dpkg-deb and
+# rpmbuild both ship these verbatim into the package, and a CRLF shebang
+# line makes a shell script unrunnable) -- force LF regardless of a Windows
+# checkout's core.autocrlf setting, which would otherwise silently
+# reintroduce CRLF the next time the file is touched. This rule predates
+# the native .deb/.rpm pipeline (it was originally written for the
+# now-removed AppImage's strict desktop-entry validator) but is still
+# required by the tooling that replaced it.
 *.sh text eol=lf
 *.desktop text eol=lf

@@ -5,6 +5,13 @@
 # no Linux build-baseline choice can work around it. See
 # packaging/linux/INSTALL.md and docs/superpowers/specs/2026-08-03-linux-native-packages-design.md.
 PySide6>=6.6,<6.9
-matplotlib>=3.8
+# Upper bound is deliberate, matching PySide6's above: theme.py's
+# refresh_builtin_toolbar_icons() drives NavigationToolbar2QT._icon(), a
+# PRIVATE matplotlib API, to recolor the built-in Save/Home/Pan icons on a
+# theme toggle. A matplotlib release that renames or removes that method
+# would silently reintroduce the icon-theming bug it was written to fix,
+# and no test asserts icon color. Verified working on 3.10.x and 3.11.x --
+# raise the ceiling only after re-checking that path by hand.
+matplotlib>=3.8,<3.12
 numpy>=1.26
 scipy>=1.11
