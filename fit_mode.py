@@ -1329,6 +1329,11 @@ class FitModeController(QObject):
                 x, y, left, right, self.state.fit_region, list(self.state.peak_positions),
                 link_widths=link_widths, enable_left_tail=enable_left_tail,
                 fixed_params=fixed_params, initial_guess_overrides=initial_guess_overrides,
+                # None for a spectrum read from a file, which is Poisson in
+                # its own counts. Set for a matrix cut or an Add/Subtract
+                # result, where it is not -- see
+                # matrix_cut.compute_cut_with_variance.
+                variance=getattr(active, "variance", None),
             )
         except FitError as exc:
             self._show_status_message(f"Fit failed: {exc}", 5000)

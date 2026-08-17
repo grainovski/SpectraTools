@@ -365,7 +365,7 @@ def _build_param_damping(free_names, fixed_params, link_widths):
 def fit_peaks(
     x, y, left_bg_region, right_bg_region, fit_region, peak_positions,
     link_widths=True, enable_left_tail=False, fixed_params=None,
-    initial_guess_overrides=None,
+    initial_guess_overrides=None, variance=None,
 ):
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -397,7 +397,29 @@ def fit_peaks(
         )
 
     y_sub = y_fit - (slope * x_fit + intercept)
-    y_err = np.sqrt(np.maximum(y_fit, 1.0))
+    # Poisson unless the caller supplied a propagated variance. sqrt(N)
+    # is right for raw counts and wrong for anything derived: a matrix
+    # cut or an Add/Subtract result has variance `pos + f**2 * bg`, which
+    # exceeds its own counts, and can go negative -- where the max(y, 1.0)
+    # floor below would silently assign it an error of exactly 1 count.
+    # Weighting those channels as though they were Poisson misweights
+    # every one of them and makes the reported parameter errors and
+    # chi-square optimistic. HDTV avoids this by carrying ROOT's own
+    # propagated bin errors through every projection and cut; this is the
+    # same information arriving by a different route.
+    #
+    # The same floor is applied either way, for the same reason: a
+    # channel with (near-)zero variance would otherwise take an infinite
+    # weight and dominate the fit on its own.
+    if variance is None:
+        y_err = np.sqrt(np.maximum(y_fit, 1.0))
+    else:
+        variance = np.asarray(variance, dtype=float)
+        if variance.shape != y.shape:
+            raise FitError(
+                f"variance has length {variance.size}, expected {y.size} to match the spectrum"
+            )
+        y_err = np.sqrt(np.maximum(variance[mask], 1.0))
     model_named = _make_model(names, free_names, fixed_params, n_peaks, link_widths, enable_left_tail)
 
     if not free_names:

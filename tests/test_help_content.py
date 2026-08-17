@@ -574,8 +574,8 @@ def test_howto_says_ctrl_c_clears_cut_marks_in_the_matrix_panel():
 
 
 def test_knowledge_database_explains_gate_width_weighting():
-    # matrix_cut.compute_cut: net = cut - (W_cut / sum W_bg) * sum bg,
-    # with widths counted inclusively by _marked_width.
+    # matrix_cut.compute_cut: net = cut - (N_cut / N_bg) * sum bg, where
+    # the N terms are the channels actually summed, counted inclusively.
     text = _rendered_text(build_knowledge_database_html())
     assert "gate-width weighting" in text
     assert "net[ch]" in text
@@ -585,21 +585,40 @@ def test_knowledge_database_explains_gate_width_weighting():
     assert "51 channels, not" in text
 
 
-def test_knowledge_database_warns_about_background_regions_at_the_matrix_edge():
-    # The caveat that follows from widths coming from the marks while
-    # counts come from the data that exists.
+def test_knowledge_database_explains_background_regions_at_the_matrix_edge():
+    # This paragraph used to WARN that an overhanging band under-subtracts,
+    # because the width came from the marks while the counts came from the
+    # data that exists. Both now come from the channels actually summed
+    # (matrix_cut.compute_cut), so the page has to describe a rule that
+    # holds rather than a trap to avoid -- otherwise it tells the reader to
+    # fear something that no longer happens.
     text = _rendered_text(build_knowledge_database_html())
-    assert "Keep background regions inside the matrix" in text
-    assert "full marked width" in text
-    # And the two edge behaviours the code actually implements.
-    assert "ignored altogether" in text
-    assert "no subtraction is performed at all" in text
+    assert "Both halves of the ratio count the same channels" in text
+    assert "the subtraction stays correct" in text
+    # The two edge behaviours the code actually implements.
+    assert "contributes nothing at all" in text
+    assert "no subtraction is performed" in text
 
 
-def test_knowledge_database_records_the_one_intentional_tv_divergence():
-    # matrix_cut._overlaps skips a fully-outside background region; TV's
-    # MrkRange counts its width. The page should say so rather than
-    # claiming blanket parity.
+def test_knowledge_database_explains_that_overlapping_bands_count_once():
+    # matrix_cut.merge_regions merges overlapping regions, so a channel
+    # covered twice is summed and counted once. Worth stating because the
+    # accident that produces it -- a wide band with a narrower one inside
+    # -- is easy and its effect on the result is not obvious.
     text = _rendered_text(build_knowledge_database_html())
-    assert "intentional difference" in text
+    assert "Overlapping bands are counted once" in text
+    assert "summed once and counted once" in text
+
+
+def test_knowledge_database_records_both_intentional_tv_divergences():
+    # The page must scope its TV-parity claim to where parity actually
+    # holds -- fully-inside, non-overlapping bands -- and name both
+    # deliberate differences, rather than claiming blanket parity or
+    # mentioning only one of them.
+    text = _rendered_text(build_knowledge_database_html())
+    assert "do not\noverlap" in text or "do not overlap" in text
+    assert "both are deliberate" in text
     assert "TV" in text
+    # The rule's actual provenance, so a reader comparing against either
+    # program knows which one this follows.
+    assert "HDTV" in text

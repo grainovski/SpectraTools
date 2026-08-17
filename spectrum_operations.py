@@ -92,3 +92,36 @@ def subtract(data_a, data_b, factor):
     """result[i] = A[i] - factor * B[i], rounded to nearest integer.
     Same assumptions and TV-parity notes as add() above."""
     return _checked_int64(np.round(data_a - factor * data_b))
+
+
+def poisson_variance(data):
+    """Variance to assume for a spectrum that does not carry its own:
+    the counts themselves, floored at zero.
+
+    Correct for raw counts read from a file, where each channel is a
+    Poisson sample. The floor matters because a spectrum may already
+    hold subtracted, negative counts -- there is no Poisson variance to
+    read off those, and zero is the honest answer rather than a negative
+    variance.
+    """
+    return np.maximum(np.asarray(data, dtype=float), 0.0)
+
+
+def combined_variance(data_a, data_b, factor, variance_a=None, variance_b=None):
+    """Per-channel variance of add()/subtract()'s result.
+
+        var(A +/- f*B) = var(A) + f**2 * var(B)
+
+    The factor is squared either way, so addition and subtraction share
+    this. Note the variances ADD even when the counts cancel: two
+    spectra that subtract to zero produce a result whose uncertainty is
+    larger than either input's, not zero. Fitting such a result with
+    sqrt(counts) weights would claim near-perfect knowledge of a channel
+    about which nothing is known.
+
+    A None variance means the corresponding spectrum came from a file and
+    is assumed Poisson. Mirrors matrix_cut's `pos + factor**2 * bg`.
+    """
+    va = poisson_variance(data_a) if variance_a is None else np.asarray(variance_a, dtype=float)
+    vb = poisson_variance(data_b) if variance_b is None else np.asarray(variance_b, dtype=float)
+    return va + float(factor) ** 2 * vb

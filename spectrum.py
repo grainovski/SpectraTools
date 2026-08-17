@@ -33,13 +33,22 @@ COLOR_CYCLE = LIGHT_COLOR_CYCLE  # kept as the default/light-theme cycle
 
 
 class LoadedSpectrum:
-    def __init__(self, path, data, color):
+    def __init__(self, path, data, color, variance=None):
         self.path = path
         self.data = data
         self.color = color
         self.visible = True
         self.active = False
         self.fits = []
+        # Per-channel variance, or None for a spectrum read straight from
+        # a file. None means "assume Poisson", which is correct for raw
+        # counts and wrong for anything derived: a matrix cut or an
+        # Add/Subtract result has variance larger than its own counts and
+        # can go negative, where no Poisson error exists at all. Only the
+        # operations that know the propagated variance set this; see
+        # matrix_cut.compute_cut_with_variance and
+        # spectrum_operations.combined_variance.
+        self.variance = variance
 
 
 def active_spectrum(spectra):

@@ -49,7 +49,9 @@ from n42_io import load_n42
 from settings import Settings
 from spe_io import load_spe, save_spe
 from spectrum import LoadedSpectrum, active_spectrum, next_color, panned_xlim
-from spectrum_operations import add, multiply, normalize_factors, rebin, reference_value, subtract
+from spectrum_operations import (
+    add, combined_variance, multiply, normalize_factors, rebin, reference_value, subtract,
+)
 from spk_io import load_spk, save_spk
 from theme import qt_stylesheet, refresh_builtin_toolbar_icons, style_axes, style_nav_toolbar_palette
 
@@ -750,7 +752,10 @@ class MainWindow(QMainWindow):
         # cwd. Spectrum B's directory is dropped; there is no single
         # correct choice when the two operands live in different places.
         path = os.path.join(os.path.dirname(spectrum_a.path), label)
-        self._add_combined_spectrum(path, data)
+        self._add_combined_spectrum(path, data, variance=combined_variance(
+            spectrum_a.data, spectrum_b.data, factor,
+            spectrum_a.variance, spectrum_b.variance,
+        ))
 
     def _open_subtract_dialog(self):
         if len(self.spectra) < 2:
@@ -771,13 +776,26 @@ class MainWindow(QMainWindow):
         label = f"{name_a} - {name_b}" if factor == 1 else f"{name_a} - {factor}x{name_b}"
         # See _apply_add's comment: anchored at Spectrum A's directory.
         path = os.path.join(os.path.dirname(spectrum_a.path), label)
-        self._add_combined_spectrum(path, data)
+        # Variance ADDS on subtraction too -- the factor is squared. Two
+        # spectra that cancel to zero leave a result more uncertain than
+        # either input, not less.
+        path_variance = combined_variance(
+            spectrum_a.data, spectrum_b.data, factor,
+            spectrum_a.variance, spectrum_b.variance,
+        )
+        self._add_combined_spectrum(path, data, variance=path_variance)
 
-    def _add_combined_spectrum(self, path, data):
-        # Shared by _apply_add/_apply_subtract -- inserting a newly
-        # computed spectrum into the loaded list and refreshing every
-        # UI surface that depends on it is identical bookkeeping either
-        # way; only the operation and naming above differ.
+    def _add_combined_spectrum(self, path, data, variance=None):
+        # Shared by _apply_add/_apply_subtract and by the matrix panel's
+        # Activate Cut -- inserting a newly computed spectrum into the
+        # loaded list and refreshing every UI surface that depends on it
+        # is identical bookkeeping either way; only the operation and
+        # naming above differ.
+        #
+        # `variance` is the propagated per-channel variance where the
+        # caller knows it. Every spectrum reaching this method is DERIVED,
+        # so none of them is Poisson in its own counts; passing it through
+        # is what lets a fit weight them correctly.
         existing_paths = {s.path for s in self.spectra}
         if path in existing_paths:
             suffix = 2
@@ -786,7 +804,7 @@ class MainWindow(QMainWindow):
             path = f"{path} ({suffix})"
         color_index = self._next_color_index
         self._next_color_index += 1
-        spectrum = LoadedSpectrum(path, data, next_color(color_index, self._theme))
+        spectrum = LoadedSpectrum(path, data, next_color(color_index, self._theme), variance=variance)
         spectrum.color_index = color_index
         for s in self.spectra:
             s.active = False

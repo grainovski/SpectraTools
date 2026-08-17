@@ -641,10 +641,15 @@ class MatrixPanel(QMainWindow):
         self.activate_cut_button.setEnabled(self.cut_controller.state.cut_region is not None)
 
     def _activate_cut(self):
-        from matrix_cut import compute_cut
+        from matrix_cut import compute_cut_with_variance
 
         state = self.cut_controller.state
-        result = compute_cut(self.matrix, self.working_axis, state.cut_region, state.bg_regions)
+        # The variance travels with the cut so a fit on it is weighted by
+        # the real uncertainty rather than sqrt(counts) -- see
+        # compute_cut_with_variance for why the two differ.
+        result, variance = compute_cut_with_variance(
+            self.matrix, self.working_axis, state.cut_region, state.bg_regions
+        )
         # Path-shaped, not a free-form label -- same rationale and same
         # fix shape as _rebuild_spectra's own path construction above.
         # The region bounds used to be embedded as raw .1f floats right
@@ -671,7 +676,7 @@ class MatrixPanel(QMainWindow):
             f"{root}_{self.working_axis}_cut_"
             f"{round(state.cut_region[0])}_{round(state.cut_region[1])}{ext}"
         )
-        self.main_window._add_combined_spectrum(path, result)
+        self.main_window._add_combined_spectrum(path, result, variance=variance)
 
     def _open_heatmap(self):
         from matrix_heatmap import MatrixHeatmapWindow
