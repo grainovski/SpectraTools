@@ -4,7 +4,7 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
-## [3.1.4] - unreleased
+## [3.1.4] - 2026-08-17
 
 A refinement to the matrix cut, plus documentation of how its background
 subtraction actually works.
