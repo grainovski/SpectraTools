@@ -4,6 +4,40 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [3.1.3] - unreleased
+
+Corrects two faults in the matrix cut that removed too much background.
+If you have activated cuts whose regions reached beyond the edge of the
+matrix, those results were wrong and are worth recomputing.
+
+### Fixed
+
+- **Activating a cut could subtract far too much background.** Two
+  separate causes, both requiring a cut or background region marked
+  partly beyond the edge of the matrix — easily done by dragging past
+  the end of a projection:
+  - The background scale factor was computed from the part of each
+    region that overlapped the matrix, rather than from the region as
+    marked. That inflated the factor and removed too much: a single
+    background region reaching past the low edge left about 7% of the
+    correct net counts.
+  - A background region lying entirely below channel 0 was summed as
+    though it covered nearly the whole matrix, injecting a large
+    spurious background that was then subtracted. A region past the
+    upper edge was never affected.
+
+  Cuts whose regions lay wholly inside the matrix were already correct
+  and are unchanged.
+
+### Notes
+
+- Both faults were found by checking this code against the original TV
+  implementation line by line, and the corrected version now reproduces
+  TV's results exactly across a wide randomised comparison.
+- One consequence, matching TV: a background region marked entirely
+  outside the matrix still counts toward the background width, so it
+  weakens the subtraction rather than being ignored.
+
 ## [3.1.2] - 2026-08-17
 
 Results of a full audit of performance, stability and usability. The
