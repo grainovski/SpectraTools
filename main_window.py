@@ -48,7 +48,7 @@ from mtx_io import load_mtx
 from n42_io import load_n42
 from settings import Settings
 from spe_io import load_spe, save_spe
-from spectrum import LoadedSpectrum, active_spectrum, next_color
+from spectrum import LoadedSpectrum, active_spectrum, next_color, panned_xlim
 from spectrum_operations import add, multiply, normalize_factors, rebin, reference_value, subtract
 from spk_io import load_spk, save_spk
 from theme import qt_stylesheet, refresh_builtin_toolbar_icons, style_axes, style_nav_toolbar_palette
@@ -314,8 +314,11 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._update_recent_menu()
 
+        self._pan_last_px = None
         self.canvas.mpl_connect("motion_notify_event", self._on_mouse_move)
         self.canvas.mpl_connect("scroll_event", self._on_scroll)
+        self.canvas.mpl_connect("button_press_event", self._on_pan_press)
+        self.canvas.mpl_connect("button_release_event", self._on_pan_release)
 
         self._build_zoom_buttons()
         self._build_calibration_toolbar_buttons()
@@ -1094,7 +1097,62 @@ class MainWindow(QMainWindow):
         self._update_operations_availability()
         self.fit_controller.update_results_list()
 
+    def _on_pan_press(self, event):
+        """Starts a right-button drag-pan. Button 1 is left alone: it is
+        how fit marks are placed (fit_mode.on_click ignores anything
+        else), so the right button is free for navigation."""
+        if event.button != 3 or event.inaxes != self.axes or event.x is None:
+            return
+        self._pan_last_px = event.x
+
+    def _on_pan_release(self, event):
+        if self._pan_last_px is None:
+            return
+        self._pan_last_px = None
+        # Record the panned view so Home/Back/Forward know about it, the
+        # same way the zoom actions do.
+        self.nav_toolbar.push_current()
+
+    def _pan_to(self, event):
+        """Drags the view with the cursor. Returns True if it panned.
+
+        Works from the PIXEL delta between motion events, not from the
+        data coordinate the drag started at: xlim changes as the drag
+        proceeds, so event.xdata is expressed in a frame that has already
+        moved, and differencing against the original press point drifts.
+        An incremental pixel delta converted through the current span is
+        stable however far the drag goes.
+        """
+        if self._pan_last_px is None or event.x is None:
+            return False
+        visible = [s for s in self.spectra if s.visible]
+        if not visible:
+            return False
+        width_px = self.axes.bbox.width
+        if not width_px:
+            return False
+        xlim = self.axes.get_xlim()
+        # Content follows the cursor: dragging right moves the view left.
+        delta = -(event.x - self._pan_last_px) * (xlim[1] - xlim[0]) / width_px
+        self._pan_last_px = event.x
+        max_channel = max(len(s.data) for s in visible) - 1
+        new_xlim = panned_xlim(
+            xlim, delta, self.channel_to_display(0), self.channel_to_display(max_channel)
+        )
+        if new_xlim == xlim:
+            return True
+        self.axes.set_xlim(new_xlim)
+        # The X span is deliberately preserved while Y re-fits whatever
+        # is now on screen -- the whole point of the gesture is to walk
+        # along a spectrum at one zoom level without small peaks being
+        # flattened by a tall one that has scrolled off.
+        self._autoscale_y(new_xlim)
+        self.canvas.draw_idle()
+        return True
+
     def _on_mouse_move(self, event):
+        if self._pan_to(event):
+            return
         if time.monotonic() < self.fit_controller._status_message_until:
             return
         visible = [s for s in self.spectra if s.visible]

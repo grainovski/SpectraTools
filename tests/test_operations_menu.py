@@ -1639,3 +1639,105 @@ def test_zoom_still_actually_changes_the_view(qapp):
     after = main_window.axes.get_xlim()
 
     assert abs(after[1] - after[0]) < abs(before[1] - before[0])
+
+
+def test_right_drag_pans_x_keeping_span_and_refitting_y(qapp):
+    """Right-drag walks along the spectrum at the current zoom: the X
+    span is preserved and Y rescales to whatever is now visible, so a
+    small peak is not left flattened by a tall one that has scrolled off.
+    """
+    from matplotlib.backend_bases import MouseEvent
+
+    main_window = MainWindow()
+    main_window.resize(900, 600)
+    main_window.show()
+    qapp.processEvents()
+
+    length = 4000
+    data = np.full(length, 10, dtype=np.int64)
+    data[500] = 5000      # tall peak, visible at the start
+    data[3000] = 200      # small peak, only visible after panning
+    spectrum = LoadedSpectrum("pan.txt", data, "#1f77b4")
+    spectrum.active = True
+    main_window.spectra.append(spectrum)
+    main_window._plot_data()
+    main_window.axes.set_xlim(300, 800)
+    main_window._autoscale_y((300, 800))
+
+    before_x = main_window.axes.get_xlim()
+    before_top = main_window.axes.get_ylim()[1]
+
+    def px(xdata):
+        return float(main_window.axes.transData.transform((xdata, 0))[0])
+
+    ymid = float(main_window.axes.bbox.y0 + main_window.axes.bbox.height / 2)
+    main_window._on_pan_press(
+        MouseEvent("button_press_event", main_window.canvas, px(700), ymid, button=3)
+    )
+    main_window._on_mouse_move(
+        MouseEvent("motion_notify_event", main_window.canvas, px(400), ymid)
+    )
+    main_window._on_pan_release(
+        MouseEvent("button_release_event", main_window.canvas, px(400), ymid, button=3)
+    )
+
+    after_x = main_window.axes.get_xlim()
+    after_top = main_window.axes.get_ylim()[1]
+
+    assert after_x[0] > before_x[0], "dragging left should walk the view right"
+    assert abs((after_x[1] - after_x[0]) - (before_x[1] - before_x[0])) < 1e-6
+    assert after_top < before_top, "Y must rescale once the tall peak scrolls off"
+
+
+def test_pan_stops_at_the_edge_of_the_data(qapp):
+    from matplotlib.backend_bases import MouseEvent
+
+    main_window = MainWindow()
+    main_window.resize(900, 600)
+    main_window.show()
+    qapp.processEvents()
+    _make_active_spectrum(main_window)          # 200 channels
+    length = len(main_window.spectra[0].data)
+    main_window._plot_data()
+    main_window.axes.set_xlim(20, 70)
+    span = 50
+
+    def px(xdata):
+        return float(main_window.axes.transData.transform((xdata, 0))[0])
+
+    ymid = float(main_window.axes.bbox.y0 + main_window.axes.bbox.height / 2)
+    # Drag far past the left edge in several strokes.
+    for _ in range(10):
+        main_window._on_pan_press(
+            MouseEvent("button_press_event", main_window.canvas, px(30), ymid, button=3)
+        )
+        main_window._on_mouse_move(
+            MouseEvent("motion_notify_event", main_window.canvas, px(30) + 300, ymid)
+        )
+        main_window._on_pan_release(
+            MouseEvent("button_release_event", main_window.canvas, px(30) + 300, ymid, button=3)
+        )
+
+    lo, hi = main_window.axes.get_xlim()
+    assert lo >= -1e-6, f"panned past channel 0 (lo={lo})"
+    assert abs((hi - lo) - span) < 1e-6, "span must survive clamping at the edge"
+
+
+def test_left_drag_does_not_pan_the_main_window(qapp):
+    from matplotlib.backend_bases import MouseEvent
+
+    main_window = MainWindow()
+    main_window.resize(900, 600)
+    main_window.show()
+    qapp.processEvents()
+    _make_active_spectrum(main_window)
+    main_window._plot_data()
+    main_window.axes.set_xlim(20, 70)
+    before = main_window.axes.get_xlim()
+
+    x = float(main_window.axes.transData.transform((40, 0))[0])
+    ymid = float(main_window.axes.bbox.y0 + main_window.axes.bbox.height / 2)
+    main_window._on_pan_press(MouseEvent("button_press_event", main_window.canvas, x, ymid, button=1))
+    main_window._on_mouse_move(MouseEvent("motion_notify_event", main_window.canvas, x - 100, ymid))
+
+    assert main_window.axes.get_xlim() == before

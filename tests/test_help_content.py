@@ -555,3 +555,19 @@ def test_howto_documents_the_matrix_loading_progress_window():
     text = _rendered_text(build_howto_html())
     assert "Reading matrix" in text
     assert "responsive" in text
+
+
+def test_howto_documents_the_right_drag_pan():
+    # main_window._pan_to / matrix_panel._pan_to: right-button drag keeps
+    # the X span and rescales Y to what is visible.
+    text = _rendered_text(build_howto_html())
+    assert "right mouse button" in text
+    assert "keeps its width" in text
+    assert "rescales" in text
+
+
+def test_howto_says_ctrl_c_clears_cut_marks_in_the_matrix_panel():
+    # matrix_panel._clear_everything now clears cut/background marks too.
+    text = _rendered_text(build_howto_html())
+    assert "Clear the cut and background marks" in text
+    assert "Clear Marks" in text

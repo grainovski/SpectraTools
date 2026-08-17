@@ -127,6 +127,13 @@ program supports.</p>
 <tr><td><kbd>Ctrl+-</kbd></td><td>Zoom out (X axis)</td></tr>
 <tr><td><kbd>Ctrl+0</kbd></td><td>Show full spectrum</td></tr>
 </table>
+<p>The mouse wheel zooms the X axis about the cursor. <b>Dragging with
+the right mouse button held</b> slides the spectrum left and right at
+the current zoom: the X axis keeps its width, and the Y axis rescales as
+you go to fit whatever is now on screen, so a small peak is not left
+flattened by a tall one that has scrolled out of view. The view stops at
+the ends of the data. The left button is unaffected -- it is what places
+fit marks.</p>
 
 <h3>Fitting</h3>
 <table>
@@ -156,7 +163,7 @@ program supports.</p>
 <tr><td><kbd>Ctrl+F</kbd></td><td>Fit</td></tr>
 <tr><td><kbd>Ctrl+I</kbd></td><td>Integrate</td></tr>
 <tr><td><kbd>Ctrl+B</kbd></td><td>Preview the background fit from the two background regions alone (no fit region or peaks needed); press again to hide</td></tr>
-<tr><td><kbd>Ctrl+C</kbd></td><td>Clear in-progress marks and hide committed fits (not delete)</td></tr>
+<tr><td><kbd>Ctrl+C</kbd></td><td>Clear the cut and background marks (exactly as <b>Clear Marks</b> does), clear in-progress fit marks, and hide committed fits (not delete)</td></tr>
 <tr><td><kbd>Ctrl+Shift+C</kbd></td><td>Permanently delete the working projection's committed fits (in-progress marks untouched)</td></tr>
 <tr><td><kbd>Ctrl+E</kbd></td><td>Export the working projection's fits</td></tr>
 <tr><td><kbd>Ctrl+2</kbd></td><td>Toggle the Fit Results panel</td></tr>
@@ -363,7 +370,14 @@ main window's plot (and any other open matrix panel) immediately, and
 calibrating from the main window updates every open matrix panel the
 same way. <kbd>Ctrl+=</kbd>/<kbd>Ctrl+-</kbd>/<kbd>Ctrl+0</kbd> (or the
 scroll wheel) zoom the projection's X axis, matching the main window's
-own zoom.</p>
+own zoom, and dragging with the right mouse button held slides the
+projection along at the current zoom with the Y axis rescaling to suit,
+exactly as it does in the main window.</p>
+<p><kbd>Ctrl+C</kbd> here clears everything you have marked on the
+projection: the cut and background marks (the same thing the
+<b>Clear Marks</b> button does), any in-progress fit marks, and it hides
+the committed fits. An already-activated cut spectrum is a separate
+loaded spectrum and is not affected.</p>
 <p>Switching the dropdown between X and Y projection clears any
 in-progress cut/background marks, and discards any in-progress or
 committed fit marks for the projection you're leaving -- it's
