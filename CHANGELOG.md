@@ -4,6 +4,41 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [3.1.2] - unreleased
+
+Results of a full audit of performance, stability and usability. The
+memory fix is the one that matters in a long session.
+
+### Fixed
+
+- **Closing a matrix window now frees its memory.** A closed matrix
+  window was still holding its entire decoded matrix — around 500 MB for
+  a full-size one — so opening and closing several matrices in one
+  session steadily consumed memory until the application was restarted.
+- **A failed fit now names the peaks involved**, rather than the
+  program's internal parameter names. Where it previously read "could
+  not determine amp_0, amp_1, pos_0, ..." it now says "could not
+  determine peaks 1, 2, 3, 4", and explains that peaks marked at nearly
+  the same position, or too narrow a fit region, are the usual cause.
+
+### Performance
+
+- **Redrawing is faster on spectra carrying many fits.** Fits lying
+  entirely outside the visible range are no longer redrawn: with 100
+  committed fits, a redraw while zoomed in on part of the spectrum drops
+  from about half a second to under a tenth. Viewing the whole spectrum,
+  where every fit really is on screen, is unchanged.
+
+### Documentation
+
+- The Knowledge Database now explains **what "± n/a" means** when a fit
+  reports it — that the value is real and only its uncertainty could not
+  be determined, that a left tail on a peak without one is the usual
+  cause, and that unchecking Left tail removes it. It also covers how
+  that appears in exported reports and logs.
+- The HowTo now describes the progress window shown while a matrix
+  loads, and notes that loading is slower from a network share.
+
 ## [3.1.1] - 2026-08-16
 
 A performance and responsiveness release, addressing matrix loading and
