@@ -124,32 +124,21 @@ def test_compute_cut_out_of_range_cut_region_contributes_zero():
 
 def test_compute_cut_out_of_range_background_region_does_not_corrupt_result():
     # bg_regions mixes a valid region (3,4) with one entirely past the
-    # last column (10,20). The out-of-range region contributes no COUNTS,
-    # but it does still contribute its marked WIDTH -- that is what TV
-    # does (MrkRange, vsMark.c:29-37, is computed on the marks and knows
-    # nothing about the matrix), so it dilutes the background scale
-    # rather than being ignored outright.
+    # last column (10,20). A region with no channel inside the matrix
+    # contributes neither counts nor width, so the result is identical to
+    # using the valid region alone.
     #
-    # This test asserted the opposite until v3.1.3, when the cut was
-    # checked against the real TV source: it required the mixed result to
-    # equal the valid-region-only result, i.e. that the stray region be
-    # ignored completely. Matching TV is the point of this code, and the
-    # concerns the old version was guarding against (a negative width, a
-    # bg_width summing to exactly zero) cannot arise from marked widths,
-    # which are always at least 1.
+    # This is a DELIBERATE DIVERGENCE FROM TV, chosen by the user.
+    # TV's MrkRange (vsMark.c:29-37) counts every marked region's width
+    # whether or not it overlaps the data, so there a stray region
+    # silently weakens the subtraction. Being ignored is more predictable
+    # for a mark that plainly has no data under it. See
+    # test_a_background_region_fully_outside_is_ignored_unlike_tv, which
+    # pins the divergence explicitly against the TV oracle.
     matrix = _small_matrix()
     result_mixed = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(3, 4), (10, 20)])
     result_valid_only = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(3, 4)])
-    # The same counts are subtracted but divided by a larger declared
-    # width, so the result genuinely differs from using the valid region
-    # alone -- and it is TV that decides what it should be. No
-    # elementwise ordering is asserted: this fixture contains mixed
-    # signs, so "less background removed" does not translate into a
-    # uniform per-channel inequality.
-    assert result_mixed != pytest.approx(result_valid_only)
-    assert result_mixed == pytest.approx(
-        _tv_cut(matrix, "x", (0, 0), [(3, 4), (10, 20)])
-    )
+    assert result_mixed == pytest.approx(result_valid_only)
 
 
 def test_compute_cut_out_of_range_background_region_does_not_divide_by_zero():
@@ -160,15 +149,14 @@ def test_compute_cut_out_of_range_background_region_does_not_divide_by_zero():
     # from the marks (NINT(x2)-NINT(x1)+1) and are always at least 1, so
     # a total of zero is unreachable and no per-region flooring is needed.
     #
-    # Now asserts the real requirement -- it computes, and it agrees with
-    # TV -- rather than the old "equals the valid region alone", which
-    # was a consequence of clamping that TV does not do.
+    # (7,100) has no channel inside a 5-column matrix, so it is skipped
+    # outright and the result matches the valid region alone -- and,
+    # separately, nothing can divide by zero.
     matrix = _small_matrix()
     result_mixed = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(3, 4), (7, 100)])
+    result_valid_only = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(3, 4)])
     assert np.all(np.isfinite(result_mixed))
-    assert result_mixed == pytest.approx(
-        _tv_cut(matrix, "x", (0, 0), [(3, 4), (7, 100)])
-    )
+    assert result_mixed == pytest.approx(result_valid_only)
 
 
 def test_compute_cut_all_background_regions_out_of_range_means_no_subtraction():
@@ -273,16 +261,63 @@ def test_a_background_region_below_channel_zero_contributes_nothing():
 def test_cut_matches_tv_across_randomised_marks():
     """Sweep with marks deliberately spilling past both edges, on a
     matrix that includes negative counts (Subtract-Spectra results and
-    random-coincidence subtraction both produce them)."""
+    random-coincidence subtraction both produce them).
+
+    Background regions are generated so each one OVERLAPS the matrix.
+    That is the domain where TV parity is claimed: a background region
+    with no overlap at all is deliberately ignored here and counted by
+    TV, which
+    test_a_background_region_fully_outside_is_ignored_unlike_tv covers
+    instead. Constraining the sweep keeps it a real parity check rather
+    than one weakened to accommodate a known, intended difference.
+    """
     rng = np.random.default_rng(7)
     for matrix in (rng.integers(0, 50, size=(300, 300)).astype(np.int64),
                    rng.integers(-20, 80, size=(180, 240)).astype(np.int64)):
+        size = matrix.shape[0]
         for _ in range(60):
             axis = "y" if rng.random() < 0.5 else "x"
-            cut = tuple(sorted(rng.uniform(-40, 340, 2)))
-            bgs = [tuple(sorted(rng.uniform(-40, 340, 2)))
-                   for _ in range(int(rng.integers(0, 4)))]
+            limit = matrix.shape[0] if axis == "y" else matrix.shape[1]
+            cut = tuple(sorted(rng.uniform(-40, limit + 40, 2)))
+            bgs = []
+            for _ in range(int(rng.integers(0, 4))):
+                # One end inside the matrix guarantees overlap while
+                # still letting the other end hang past an edge.
+                inside = rng.uniform(0, limit - 1)
+                other = rng.uniform(-40, limit + 40)
+                bgs.append(tuple(sorted((inside, other))))
             ours = compute_cut(matrix, axis, cut, bgs).astype(float)
             assert np.allclose(ours, _tv_cut(matrix, axis, cut, bgs), atol=1e-8), (
                 f"diverges: axis={axis} cut={cut} bg={bgs}"
             )
+        del size
+
+
+def test_a_background_region_fully_outside_is_ignored_unlike_tv():
+    """The one deliberate divergence from TV in this module.
+
+    TV counts a background region's marked width even when the region has
+    no channel inside the matrix (MrkRange, vsMark.c:29-37, works purely
+    on the marks), so there a stray mark quietly weakens the subtraction.
+    Here it is skipped entirely. Pinned against the TV oracle so the
+    difference stays visible and intentional rather than becoming an
+    unexplained mismatch for whoever next compares the two.
+    """
+    rng = np.random.default_rng(23)
+    matrix = rng.integers(0, 50, size=(300, 300)).astype(np.int64)
+    cut = (100.0, 150.0)
+    valid = [(20.0, 40.0)]
+
+    for stray in ((400.0, 450.0), (-50.0, -10.0)):
+        ours = compute_cut(matrix, "y", cut, valid + [stray]).astype(float)
+        ignored = compute_cut(matrix, "y", cut, valid).astype(float)
+        assert np.allclose(ours, ignored), "a fully-outside region must be ignored"
+        assert not np.allclose(ours, _tv_cut(matrix, "y", cut, valid + [stray])), (
+            "TV counts the stray region's width; this divergence is intended, "
+            "so the two must NOT agree here"
+        )
+
+    # Every background region outside means no usable background at all.
+    none_usable = compute_cut(matrix, "y", cut, [(400.0, 450.0), (-50.0, -10.0)])
+    assert np.array_equal(none_usable, compute_cut(matrix, "y", cut, []))
+    assert np.all(np.isfinite(none_usable))

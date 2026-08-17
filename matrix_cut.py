@@ -28,6 +28,19 @@ def _region_bounds(matrix, axis, region):
     return lo_idx, hi_idx
 
 
+def _overlaps(matrix, axis, region):
+    """True when at least one channel of `region` lies inside the matrix.
+
+    Same test `_region_sum` uses to decide a region contributes nothing,
+    so "no counts" and "no width" cannot disagree: after clamping, an
+    empty range shows up as hi_idx < lo_idx -- either because the region
+    sits entirely above the last channel (lo clamped up past hi) or
+    entirely below channel 0 (hi still negative while lo clamped to 0).
+    """
+    lo_idx, hi_idx = _region_bounds(matrix, axis, region)
+    return hi_idx >= lo_idx
+
+
 def _marked_width(region):
     """Channel count a region MARKS, exactly as TV's MrkRange counts it
     (tv-1.9.13/lib/tv/vsMark.c:29-37): `NINT(x2) - NINT(x1)`, plus one
@@ -107,24 +120,41 @@ def compute_cut(matrix, axis, cut_region, bg_regions):
     if not bg_regions:
         return pos
 
-    # Widths come from the MARKS, unclamped; the sums above are clamped
-    # to the matrix. TV separates these the same way -- see
-    # _marked_width. Clamping the widths too is what caused
-    # over-subtraction for any region overhanging an edge.
+    # Widths come from the MARKS, unclamped; the sums are clamped to the
+    # matrix. TV separates these the same way -- see _marked_width.
+    # Clamping the widths too is what caused over-subtraction for any
+    # region overhanging an edge.
     pos_width = _marked_width(cut_region)
     bg = np.zeros_like(pos)
     bg_width = 0
     for region in bg_regions:
+        # A background region with no channel inside the matrix is
+        # skipped entirely -- no counts (it has none to give) and no
+        # width.
+        #
+        # DELIBERATE DIVERGENCE FROM TV, on explicit user instruction.
+        # TV's MrkRange (vsMark.c:29-37) counts every marked region's
+        # width regardless of whether it overlaps the data, so there a
+        # stray region silently weakens the subtraction instead of being
+        # ignored. Being ignored is the more predictable behaviour for a
+        # mark that contributes nothing: the alternative makes the result
+        # depend on a region the user can see has no data under it.
+        #
+        # Note this is only about regions with NO overlap. A region that
+        # merely hangs over an edge still contributes its full marked
+        # width, which is the TV-parity behaviour and the fix for the
+        # over-subtraction reported against v3.1.2.
+        if not _overlaps(matrix, axis, region):
+            continue
         bg = bg + _region_sum(matrix, axis, region)
         bg_width += _marked_width(region)
 
     if bg_width <= 0:
-        # Unreachable for normally-marked regions: with inclusive
-        # counting even a single-channel mark has width 1, and callers
-        # hand over (min, max) pairs. Kept as a guard because the
-        # alternative is a ZeroDivisionError (or a sign flip, for a
-        # negative total) on a caller that passed a reversed region --
-        # returning pos unchanged matches the no-background case above.
+        # Reachable now: every background region can be off the matrix,
+        # in which case there is no usable background and the right
+        # answer is the no-subtraction one above. Also still guards a
+        # caller that passes a reversed region, where the marked width
+        # would come out negative.
         return pos
 
     return pos - (pos_width / bg_width) * bg
