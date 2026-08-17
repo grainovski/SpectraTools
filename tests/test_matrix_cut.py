@@ -124,31 +124,51 @@ def test_compute_cut_out_of_range_cut_region_contributes_zero():
 
 def test_compute_cut_out_of_range_background_region_does_not_corrupt_result():
     # bg_regions mixes a valid region (3,4) with one entirely past the
-    # last column (10,20). Before clamping, (10,20) would resolve to
-    # lo_idx=10, hi_idx=4 -- a negative raw width -- which would shrink
-    # or flip the sign of the gate-width ratio and corrupt the result.
-    # The out-of-range region must instead contribute zero width and
-    # zero sum, leaving the result identical to using the valid region
-    # alone.
+    # last column (10,20). The out-of-range region contributes no COUNTS,
+    # but it does still contribute its marked WIDTH -- that is what TV
+    # does (MrkRange, vsMark.c:29-37, is computed on the marks and knows
+    # nothing about the matrix), so it dilutes the background scale
+    # rather than being ignored outright.
+    #
+    # This test asserted the opposite until v3.1.3, when the cut was
+    # checked against the real TV source: it required the mixed result to
+    # equal the valid-region-only result, i.e. that the stray region be
+    # ignored completely. Matching TV is the point of this code, and the
+    # concerns the old version was guarding against (a negative width, a
+    # bg_width summing to exactly zero) cannot arise from marked widths,
+    # which are always at least 1.
     matrix = _small_matrix()
     result_mixed = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(3, 4), (10, 20)])
     result_valid_only = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(3, 4)])
-    assert result_mixed == pytest.approx(result_valid_only)
+    # The same counts are subtracted but divided by a larger declared
+    # width, so the result genuinely differs from using the valid region
+    # alone -- and it is TV that decides what it should be. No
+    # elementwise ordering is asserted: this fixture contains mixed
+    # signs, so "less background removed" does not translate into a
+    # uniform per-channel inequality.
+    assert result_mixed != pytest.approx(result_valid_only)
+    assert result_mixed == pytest.approx(
+        _tv_cut(matrix, "x", (0, 0), [(3, 4), (10, 20)])
+    )
 
 
 def test_compute_cut_out_of_range_background_region_does_not_divide_by_zero():
-    # (3,4) has (clamped) width 2. (7,100) is entirely past the last
-    # column, and its *raw* (unclamped) width -- hi_idx=4, lo_idx=7 --
-    # is exactly -2, which would sum with (3,4)'s +2 to a total
-    # bg_width of exactly 0 (a ZeroDivisionError in the gate-width
-    # ratio) without per-region clamping. Flooring each region's width
-    # at 0 before summing means (7,100) contributes 0 instead of -2,
-    # so the total stays 2 and the result matches the valid region
-    # alone.
+    # The original hazard: with widths derived from CLAMPED indices,
+    # (7,100) resolved to lo_idx=7 > hi_idx=4, a raw width of -2, which
+    # cancelled (3,4)'s +2 and left bg_width at exactly 0 -- a
+    # ZeroDivisionError. Marked widths cannot do this: they come straight
+    # from the marks (NINT(x2)-NINT(x1)+1) and are always at least 1, so
+    # a total of zero is unreachable and no per-region flooring is needed.
+    #
+    # Now asserts the real requirement -- it computes, and it agrees with
+    # TV -- rather than the old "equals the valid region alone", which
+    # was a consequence of clamping that TV does not do.
     matrix = _small_matrix()
     result_mixed = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(3, 4), (7, 100)])
-    result_valid_only = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(3, 4)])
-    assert result_mixed == pytest.approx(result_valid_only)
+    assert np.all(np.isfinite(result_mixed))
+    assert result_mixed == pytest.approx(
+        _tv_cut(matrix, "x", (0, 0), [(3, 4), (7, 100)])
+    )
 
 
 def test_compute_cut_all_background_regions_out_of_range_means_no_subtraction():
@@ -163,3 +183,106 @@ def test_compute_cut_all_background_regions_out_of_range_means_no_subtraction():
     matrix = _small_matrix()
     result = compute_cut(matrix, "x", cut_region=(0, 0), bg_regions=[(100, 200)])
     assert list(result) == [1, 10, -1, 100]  # same as pos, unsubtracted
+
+
+# --- TV parity of the gate-width-weighted cut (v3.1.3) -----------------
+
+
+def _nint(value):
+    return int(np.floor(value + 0.5)) if value >= 0 else -int(np.floor(-value + 0.5))
+
+
+def _tv_cut(matrix, axis, cut_region, bg_regions):
+    """TV's algorithm transcribed literally from the C source, as an
+    independent oracle rather than a restatement of ours:
+
+      vsCut.c:80-99   CutCreateSpectrumUpdate -- sum of fac_i * projection_i
+      VsCut.c:466-482 Cut_CreateFacGate -- signal fac 1.0, every background
+                      fac = -(MrkRange(gate) / MrkRange(bgGate))
+      vsMark.c:29-37  MrkRange -- sum(NINT(x2)-NINT(x1)) + region count,
+                      computed on the MARKS, unclamped
+      vsSpectra.c:962-981 SpcProject -- sums NINT(x1)..NINT(x2) inclusive,
+                      clamped to [0, lines); contributes nothing if the
+                      clamp leaves the range empty
+    """
+    lines = matrix.shape[0] if axis == "y" else matrix.shape[1]
+    complementary = matrix.shape[1] if axis == "y" else matrix.shape[0]
+
+    def project(region):
+        lo = max(0, _nint(region[0]))
+        hi = min(_nint(region[1]) + 1, lines)
+        if hi <= lo:
+            return np.zeros(complementary)
+        return (matrix[lo:hi, :].sum(axis=0) if axis == "y"
+                else matrix[:, lo:hi].sum(axis=1))
+
+    def mrk_range(regions):
+        return sum(_nint(b) - _nint(a) for a, b in regions) + len(regions)
+
+    out = project(cut_region).astype(float)
+    if bg_regions:
+        factor = -(mrk_range([cut_region]) / mrk_range(bg_regions))
+        for region in bg_regions:
+            out = out + factor * project(region)
+    return out
+
+
+def test_cut_matches_tv_for_regions_overhanging_the_matrix_edge():
+    """The gate-width factor must come from the MARKS, not from bounds
+    clamped to the matrix. Clamping the widths shrank the denominator of
+    pos_width/bg_width, inflated the factor and over-subtracted: a single
+    background region hanging over the low edge produced a net spectrum
+    about 7% of TV's.
+    """
+    rng = np.random.default_rng(11)
+    matrix = rng.integers(0, 50, size=(300, 300)).astype(np.int64)
+
+    for cut, bgs in (
+        ((100.0, 150.0), [(-10.0, 20.0)]),
+        ((100.0, 150.0), [(280.0, 340.0)]),
+        ((280.0, 340.0), [(20.0, 40.0)]),
+        ((100.0, 150.0), [(-20.0, 10.0), (290.0, 330.0)]),
+    ):
+        ours = compute_cut(matrix, "y", cut, bgs).astype(float)
+        assert np.allclose(ours, _tv_cut(matrix, "y", cut, bgs), atol=1e-9), (
+            f"diverges from TV for cut={cut} bg={bgs}"
+        )
+
+
+def test_a_background_region_below_channel_zero_contributes_nothing():
+    """Clamping left lo_idx at 0 but hi_idx NEGATIVE, and matrix[0:-3] is
+    not an empty slice in numpy -- a negative stop counts back from the
+    end, so a background region marked entirely below channel 0 summed
+    almost the whole matrix and injected millions of counts of garbage as
+    "background", which was then subtracted. Marks past the HIGH edge
+    were always safe (lo > hi gives a genuinely empty slice).
+    """
+    matrix = np.ones((200, 120), dtype=np.int64)
+
+    # Entirely below the matrix: must behave exactly like no background.
+    below = compute_cut(matrix, "y", (50.0, 100.0), [(-30.0, -5.0)])
+    none = compute_cut(matrix, "y", (50.0, 100.0), [])
+    assert np.array_equal(below, none)
+
+    # And the same for the complementary axis.
+    below_x = compute_cut(matrix, "x", (10.0, 40.0), [(-25.0, -2.0)])
+    none_x = compute_cut(matrix, "x", (10.0, 40.0), [])
+    assert np.array_equal(below_x, none_x)
+
+
+def test_cut_matches_tv_across_randomised_marks():
+    """Sweep with marks deliberately spilling past both edges, on a
+    matrix that includes negative counts (Subtract-Spectra results and
+    random-coincidence subtraction both produce them)."""
+    rng = np.random.default_rng(7)
+    for matrix in (rng.integers(0, 50, size=(300, 300)).astype(np.int64),
+                   rng.integers(-20, 80, size=(180, 240)).astype(np.int64)):
+        for _ in range(60):
+            axis = "y" if rng.random() < 0.5 else "x"
+            cut = tuple(sorted(rng.uniform(-40, 340, 2)))
+            bgs = [tuple(sorted(rng.uniform(-40, 340, 2)))
+                   for _ in range(int(rng.integers(0, 4)))]
+            ours = compute_cut(matrix, axis, cut, bgs).astype(float)
+            assert np.allclose(ours, _tv_cut(matrix, axis, cut, bgs), atol=1e-8), (
+                f"diverges: axis={axis} cut={cut} bg={bgs}"
+            )

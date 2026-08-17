@@ -28,24 +28,52 @@ def _region_bounds(matrix, axis, region):
     return lo_idx, hi_idx
 
 
-def _region_width(matrix, axis, region):
-    """Channel count covered by `region` after clamping to the
-    matrix's extent. Floored at 0 -- a region entirely past an edge
-    (lo_idx clamped up to 0 while hi_idx is still below it, or hi_idx
-    clamped down to size-1 while lo_idx is already above it) would
-    otherwise yield a negative width, which would silently corrupt
-    compute_cut's gate-width ratio (or, in a coincidental case, divide
-    by exactly zero) instead of the region contributing nothing,
-    matching TV's own SpcProject clamping behavior on the sum side
-    (tv-1.9.13/lib/tv/vsSpectra.c:971-980)."""
-    lo_idx, hi_idx = _region_bounds(matrix, axis, region)
-    return max(0, hi_idx - lo_idx + 1)
+def _marked_width(region):
+    """Channel count a region MARKS, exactly as TV's MrkRange counts it
+    (tv-1.9.13/lib/tv/vsMark.c:29-37): `NINT(x2) - NINT(x1)`, plus one
+    per region for inclusive channel counting.
+
+    Deliberately NOT clamped to the matrix. TV clamps the SUM
+    (SpcProject, vsSpectra.c:962-981) but computes the gate-width factor
+    from the marks themselves (VsCut.c:478 calls MrkRange on
+    VcutsGate/VcutsBgGate, which hold the raw marks), and the two are
+    genuinely different quantities.
+
+    This function used to clamp, on the stated grounds that it "matches
+    TV's own SpcProject clamping behavior on the sum side" -- which
+    conflated the two. The consequence was real over-subtraction: a
+    background region dragged past the edge of the matrix had its width
+    clipped, which shrank the denominator of pos_width/bg_width, inflated
+    the factor, and subtracted far too much background. Measured against
+    a literal transcription of TV's algorithm, a single background region
+    overhanging the low edge produced a net spectrum ~7% of TV's; fully
+    in-bounds regions were already bit-identical.
+    """
+    lo, hi = region
+    return _nint(hi) - _nint(lo) + 1
 
 
 def _region_sum(matrix, axis, region):
     """Raw (unweighted) sum over `region`'s channel range on `axis`,
-    returned as a 1D array indexed by the COMPLEMENTARY axis."""
+    returned as a 1D array indexed by the COMPLEMENTARY axis.
+
+    A region that lies entirely outside the matrix contributes nothing,
+    matching TV's SpcProject, whose `for (i = l; i < r; i++)` loop simply
+    never executes when clamping leaves r <= l
+    (tv-1.9.13/lib/tv/vsSpectra.c:962-981).
+
+    The explicit check is load-bearing for a region below channel 0.
+    Clamping leaves lo_idx at 0 but hi_idx NEGATIVE, and `matrix[0:-3]`
+    is not an empty slice in numpy -- a negative stop counts back from
+    the end, so it summed almost the whole matrix and injected millions
+    of counts of pure garbage as "background", which was then subtracted.
+    Marks past the HIGH edge never had this problem: lo_idx > hi_idx
+    there produces a genuinely empty slice.
+    """
     lo_idx, hi_idx = _region_bounds(matrix, axis, region)
+    if hi_idx < lo_idx:
+        complementary = matrix.shape[1] if axis == "y" else matrix.shape[0]
+        return np.zeros(complementary, dtype=matrix.dtype)
     if axis == "y":
         return matrix[lo_idx : hi_idx + 1, :].sum(axis=0)
     else:
@@ -79,23 +107,24 @@ def compute_cut(matrix, axis, cut_region, bg_regions):
     if not bg_regions:
         return pos
 
-    pos_width = _region_width(matrix, axis, cut_region)
+    # Widths come from the MARKS, unclamped; the sums above are clamped
+    # to the matrix. TV separates these the same way -- see
+    # _marked_width. Clamping the widths too is what caused
+    # over-subtraction for any region overhanging an edge.
+    pos_width = _marked_width(cut_region)
     bg = np.zeros_like(pos)
     bg_width = 0
     for region in bg_regions:
         bg = bg + _region_sum(matrix, axis, region)
-        bg_width += _region_width(matrix, axis, region)
+        bg_width += _marked_width(region)
 
-    if bg_width == 0:
-        # Every bg region is individually out of the matrix's bounds
-        # (each one's floored width is 0) -- the same lo_idx > hi_idx
-        # condition that zeroes a region's width also zeroes its sum,
-        # so `bg` is guaranteed all-zero here too. Falling through to
-        # the division would be a ZeroDivisionError for no benefit:
-        # returning pos unchanged is the exact (not approximate)
-        # limiting value of the gate-width ratio, and matches the
-        # zero-bg_regions case above -- no valid background specified,
-        # so no subtraction.
+    if bg_width <= 0:
+        # Unreachable for normally-marked regions: with inclusive
+        # counting even a single-channel mark has width 1, and callers
+        # hand over (min, max) pairs. Kept as a guard because the
+        # alternative is a ZeroDivisionError (or a sign flip, for a
+        # negative total) on a caller that passed a reversed region --
+        # returning pos unchanged matches the no-background case above.
         return pos
 
     return pos - (pos_width / bg_width) * bg
