@@ -6,12 +6,28 @@ when individual pieces of work happened.
 
 ## [3.1.3] - unreleased
 
-Corrects two faults in the matrix cut that removed too much background.
-If you have activated cuts whose regions reached beyond the edge of the
-matrix, those results were wrong and are worth recomputing.
+Corrects two faults in the matrix cut that removed too much background,
+and adds a way to slide along a spectrum with the mouse. If you have
+activated cuts whose regions reached beyond the edge of the matrix, those
+results were wrong and are worth recomputing.
+
+### Added
+
+- **Drag with the right mouse button to slide the spectrum sideways.**
+  The X axis keeps its current width and the Y axis rescales as you go to
+  fit whatever is on screen, so a small peak is no longer flattened by a
+  tall one that has scrolled out of view. Panning stops at the ends of
+  the data. Works in the main window and in matrix panels. The left
+  button is unchanged — it still places marks.
 
 ### Fixed
 
+- **Ctrl+C in a matrix panel now clears the cut and background marks**
+  as well, exactly as the Clear Marks button does. It previously cleared
+  only fit marks, so cut marks survived it — and since redrawing the plot
+  removes their markers from view without forgetting them, it was
+  possible to be left with an active cut region you could no longer see.
+  An already-activated cut spectrum is separate and is not affected.
 - **Activating a cut could subtract far too much background.** Two
   separate causes, both requiring a cut or background region marked
   partly beyond the edge of the matrix — easily done by dragging past
