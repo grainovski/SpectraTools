@@ -4,6 +4,92 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [4.0.0] - 2026-08-18
+
+ROOT file support, and a set of corrections to how peak areas and
+uncertainties are computed. Both came out of a study of HDTV, the
+ROOT-based successor to the TV program this app ports.
+
+**Read this before comparing results against 3.1.4.** Several numbers
+this release reports are different, and in every case the old one was
+wrong. If you have results from an earlier version that matter, re-run
+those fits rather than assuming they still agree.
+
+### Numbers that changed
+
+- **Peak volume now includes the tail.** It was the integral of the
+  Gaussian core alone, so any fit with a left tail reported an area
+  short by whatever the tail held -- 5% for a small tail, 14% at a
+  typical one, and over 40% for a long tail. Volumes with no tail are
+  unaffected.
+- **Volume uncertainty now accounts for correlations.** It previously
+  added relative errors in quadrature, which assumes amplitude and width
+  are independent. In a peak fit they are strongly anti-correlated, so
+  the reported uncertainties were too large -- by about 14% in a typical
+  case.
+- **The background now carries its own uncertainty.** It was treated as
+  exact, which it is not: both ends of the background line are averages
+  of real counts. Background-included ("full") areas therefore have
+  slightly larger, and honest, uncertainties.
+- **Peak widths are seeded from the region's integral.** The old seed
+  was systematically about half the true width. Fits that previously
+  failed to converge on crowded multiplets now generally succeed --
+  measured over 1200 randomised hard cases, failures fell from 41 to 12.
+  Well-behaved fits land in the same place as before.
+- **Matrix cuts weight the background by the channels actually summed.**
+  A background band left hanging over the edge of a matrix used to
+  under-subtract, leaving up to a quarter of the gross counts behind.
+  Overlapping background bands also used to count their shared channels
+  twice.
+- **Rebinning now anchors the calibration on the centre of each group of
+  channels** rather than its first channel, correcting an energy offset
+  of half a channel at factor 2 and 3.5 channels at factor 8.
+
+### Added
+
+- **ROOT files.** File > Open ROOT File... reads 1D histograms as spectra
+  and 2D histograms as matrices, from anywhere in the file's directory
+  tree. A calibrated axis is read and applied automatically. Reading only;
+  nothing is written back.
+- **Save and reload fits.** File > Save Fits... and Load Fits... keep an
+  analysis across sessions. Loading offers either restoring the saved
+  numbers or re-running each fit from its saved marks with the current
+  code -- worth using given the changes above.
+- **Calibrate from fitted peaks.** Assign known energies to peaks you have
+  already fitted and calibrate from their fitted centroids, which is more
+  accurate than positioning a cursor. The worst residual is reported, so a
+  mistyped energy is visible rather than silently absorbed.
+- **Reload Spectrum (F5)** re-reads the active spectrum from disk while
+  keeping its calibration, fits and marks -- for watching a measurement
+  that is still running.
+- **CSV and LaTeX export** alongside the existing text report, one row per
+  peak.
+- **Fit background** option, fitting the background line together with the
+  peaks instead of subtracting it first. Off by default. Peak
+  uncertainties grow when it is on, because they then include how well the
+  background itself is known.
+- **Several gates per matrix cut**, for gating on more than one member of
+  a cascade at once.
+- **A shaded uncertainty band** around the background line, narrow between
+  the background regions and wider outside them.
+
+### Changed
+
+- Matrix cuts and Add/Subtract results now carry their propagated
+  per-channel uncertainties, and fits to them are weighted by those rather
+  than by assuming Poisson counts. Reported uncertainties on such fits
+  grow accordingly.
+- Re-opening a matrix is roughly 17x faster, from a cache of the decoded
+  data kept outside your data directory.
+
+### Fixed
+
+- Overlapping cut or background regions no longer count their shared
+  channels twice.
+- A background region marked entirely outside a matrix contributes
+  nothing, as a consequence of the weighting rule rather than a special
+  case.
+
 ## [3.1.4] - 2026-08-17
 
 A refinement to the matrix cut, plus documentation of how its background

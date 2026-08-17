@@ -710,3 +710,15 @@ def test_knowledge_database_documents_the_export_formats():
     # The two details a user would otherwise be caught by.
     assert "empty cell" in text
     assert "Areas are never converted" in text
+
+
+def test_knowledge_database_documents_calibrating_from_fitted_peaks():
+    # X3. The two things a user would otherwise get wrong: why the list is
+    # in channels, and that the residual is what says whether to trust it.
+    text = _rendered_text(build_knowledge_database_html())
+    assert "Calibrating from fitted peaks" in text
+    assert "circular" in text
+    assert "worst residual" in text
+    assert "assigned to the wrong line" in text
+    # And that the bare minimum is an interpolation, not a fit.
+    assert "interpolation rather than a fit" in text

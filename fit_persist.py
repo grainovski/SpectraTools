@@ -83,13 +83,26 @@ def to_record(result):
     return record
 
 
+def savable(results):
+    """Just the fits out of a spectrum's result list.
+
+    A spectrum's results hold integrations alongside fits, and an
+    IntegrationResult has no peaks at all -- it reports a region's
+    gross/background/net totals rather than fitted peak parameters, so it
+    does not fit this schema. Filtered here rather than at the call site so
+    every caller agrees on what a fit file contains.
+    """
+    return [result for result in results if getattr(result, "peaks", None) is not None]
+
+
 def save(path, results, spectrum_path):
-    """Writes `results` (a list of FitResult) to `path`."""
+    """Writes the fits among `results` to `path`. Integration results are
+    skipped -- see savable()."""
     document = {
         "format": "spectratools-fits",
         "schema_version": SCHEMA_VERSION,
         "spectrum": str(spectrum_path),
-        "fits": [to_record(result) for result in results],
+        "fits": [to_record(result) for result in savable(results)],
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(document, f, indent=2)

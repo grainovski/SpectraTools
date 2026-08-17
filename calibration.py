@@ -5,6 +5,8 @@ dependency -- calibration_dialog.py is the thin Qt layer on top of this."""
 import math
 from dataclasses import dataclass
 
+import numpy as np
+
 # TV's own Newton's-method precision/iteration-cap constants
 # (vsCal.c:15-16), reused verbatim rather than re-derived, for exact
 # parity with an already source-verified reference.
@@ -97,13 +99,91 @@ class Calibration:
         return x
 
     def rescaled(self, factor):
-        """A new Calibration equivalent to this one after every channel
-        number is divided by `factor` (e.g. after rebinning by `factor`,
-        where new channel k represents old channel k*factor) -- exact
-        algebraic substitution ch_old = ch_new*factor into
-        E = a + b*ch_old + c*ch_old**2, giving a'=a, b'=b*factor,
-        c'=c*factor**2."""
-        return Calibration(kind=self.kind, a=self.a, b=self.b * factor, c=self.c * factor ** 2)
+        """A new Calibration equivalent to this one after rebinning by
+        `factor`.
+
+        Rebinning sums old channels [k*n, k*n + n - 1] into new channel k,
+        so new channel k sits at the CENTRE of that group -- old channel
+        k*n + (n-1)/2, not k*n. Substituting
+
+            ch_old = ch_new * n + d,    d = (n - 1) / 2
+
+        into E = a + b*ch_old + c*ch_old**2 gives
+
+            a' = a + b*d + c*d**2
+            b' = n * (b + 2*c*d)
+            c' = c * n**2
+
+        This previously mapped new channel k to old channel k*n exactly,
+        i.e. to the FIRST old channel of the group rather than its centre,
+        leaving every rebinned spectrum's energy axis low by b*(n-1)/2 --
+        half a channel at factor 2, three and a half at factor 8. The
+        centre is the right anchor because a rebinned bin's counts come
+        from the whole group, and it is the convention used everywhere
+        else here: root_io derives a calibration from a ROOT axis as
+        edges[0] + width/2, the centre of bin 0.
+        """
+        offset = (factor - 1) / 2.0
+        return Calibration(
+            kind=self.kind,
+            a=self.a + self.b * offset + self.c * offset ** 2,
+            b=factor * (self.b + 2.0 * self.c * offset),
+            c=self.c * factor ** 2,
+        )
+
+
+def from_points(channels, energies, quadratic=False):
+    """Least-squares Calibration through (channel, energy) pairs.
+
+    This is what turns calibration from a clerical job into a physics one:
+    the channels come from FITTED peak centroids rather than from reading
+    a cursor position off the screen, so the calibration inherits the
+    fit's precision instead of the user's aim.
+
+    A quadratic needs at least three points and a line at least two --
+    fewer would pass exactly through them and describe nothing. Exactly
+    the minimum is allowed but is an interpolation, not a fit: it cannot
+    disagree with the data, so it says nothing about how good it is.
+    """
+    channels = np.asarray(channels, dtype=float)
+    energies = np.asarray(energies, dtype=float)
+    if channels.size != energies.size:
+        raise CalibrationError("Each channel needs exactly one energy")
+
+    degree = 2 if quadratic else 1
+    needed = degree + 1
+    if channels.size < needed:
+        raise CalibrationError(
+            f"A {'quadratic' if quadratic else 'linear'} calibration needs at least "
+            f"{needed} assigned peaks; {channels.size} given"
+        )
+    if len(set(channels.tolist())) < needed:
+        # Two peaks at the same channel constrain one point, not two, and
+        # numpy would return a fit with a silently meaningless slope.
+        raise CalibrationError(
+            "Assigned peaks must be at different channels to determine a calibration"
+        )
+
+    coefficients = np.polyfit(channels, energies, degree)
+    if not np.all(np.isfinite(coefficients)):
+        raise CalibrationError("Could not determine a calibration from those points")
+    # polyfit returns highest power first; this app stores lowest first.
+    if quadratic:
+        c, b, a = coefficients
+        return Calibration(kind="quadratic", a=float(a), b=float(b), c=float(c))
+    b, a = coefficients
+    return Calibration(kind="linear", a=float(a), b=float(b))
+
+
+def residuals(calibration, channels, energies):
+    """Assigned energy minus what the calibration predicts, per point.
+
+    Worth showing rather than just the coefficients: a single mistyped
+    energy, or a peak assigned to the wrong line, moves the whole fit and
+    is obvious in the residuals while being invisible in a and b."""
+    channels = np.asarray(channels, dtype=float)
+    energies = np.asarray(energies, dtype=float)
+    return energies - np.array([calibration.apply(ch) for ch in channels])
 
 
 def read_coefficients_file(path, quadratic):

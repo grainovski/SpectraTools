@@ -627,6 +627,31 @@ longer counts), and one with non-uniform bin widths, which no polynomial
 channel calibration can express.</p>
 <p>Reading is one-way. Nothing is written back to a ROOT file.</p>
 
+<h2>Calibrating from fitted peaks</h2>
+<p><b>Operations &rarr; Calibrate from Fitted Peaks...</b> lists every
+peak you have already fitted. Type the known energy beside the ones you
+can identify, leave the rest blank, and the calibration is fitted by
+least squares through those points.</p>
+<p>This is the more accurate way to calibrate. The channel positions come
+from fitted centroids, so the calibration inherits the precision of the
+fits rather than of your aim with a cursor -- and because the fits are
+already there, identifying two known lines is all it takes.</p>
+<p>Peak positions are always listed in <b>channels</b>, even when a
+calibration is already active. You are assigning energies in order to
+determine the calibration, so showing positions that an earlier
+calibration had already converted would be circular.</p>
+<p>The status bar reports the <b>worst residual</b> -- the largest
+disagreement between an energy you typed and what the fitted calibration
+predicts there. This is the number that says whether to believe the
+result: a single mistyped energy, or a peak assigned to the wrong line,
+shifts the whole fit while leaving the coefficients looking perfectly
+reasonable. A residual much larger than your peaks' own position
+uncertainties means one of the assignments is wrong.</p>
+<p>Two assignments determine a line and three a quadratic. Supplying
+exactly the minimum works but is an interpolation rather than a fit: it
+passes through the points exactly and so cannot tell you anything about
+how good it is. Assign more than the minimum whenever you can.</p>
+
 <h2>Saving and reloading your work</h2>
 <p><b>File &rarr; Save Fits...</b> writes every fit on the active
 spectrum to a <code>.json</code> file, and <b>Load Fits...</b> brings

@@ -475,6 +475,21 @@ class MainWindow(QMainWindow):
         self.calibration_active_menu_action.toggled.connect(self._on_calibration_toggle_action)
         self.operations_menu.addAction(self.calibration_active_menu_action)
 
+        # After the two existing calibration entries rather than between
+        # them: those two are the primitives (set the coefficients, turn
+        # them on) and belong together, while this one is a way of
+        # arriving at coefficients.
+        self.calibrate_from_peaks_action = QAction("Calibrate from Fitted Peaks...", self)
+        self.calibrate_from_peaks_action.setEnabled(False)
+        self.calibrate_from_peaks_action.setToolTip(
+            "Assign known energies to peaks you have already fitted, and "
+            "calibrate from their fitted centroids"
+        )
+        self.calibrate_from_peaks_action.triggered.connect(
+            self._open_calibrate_from_peaks_dialog
+        )
+        self.operations_menu.addAction(self.calibrate_from_peaks_action)
+
         self.operations_menu.addSeparator()
 
         self.multiply_action = QAction("Multiply by Factor...", self)
@@ -963,9 +978,57 @@ class MainWindow(QMainWindow):
             self._open_matrix_panel(path, matrix=matrix)
             self.settings.set_last_folder(os.path.dirname(path))
 
+    def fitted_peak_choices(self):
+        """(label, channel) for every committed peak on the active
+        spectrum, in Fit Results order.
+
+        Always in CHANNELS, even when a calibration is already active: the
+        user is assigning energies in order to determine the calibration,
+        so offering them positions that a previous calibration already
+        converted would be circular.
+        """
+        active = active_spectrum(self.spectra)
+        if active is None:
+            return []
+        choices = []
+        for fit_index, result in enumerate(active.fits, start=1):
+            # active.fits holds integration results alongside fits, and an
+            # IntegrationResult has no peaks at all -- it reports a region's
+            # gross/background/net totals, not fitted centroids. The index
+            # still advances over them so the numbering here matches what
+            # the Fit Results panel shows.
+            for peak_index, peak in enumerate(getattr(result, "peaks", []) or [], start=1):
+                choices.append(
+                    (f"Fit {fit_index}, peak {peak_index}", peak.position)
+                )
+        return choices
+
+    def _open_calibrate_from_peaks_dialog(self):
+        from energy_assign_dialog import EnergyAssignDialog
+
+        choices = self.fitted_peak_choices()
+        if not choices:
+            return
+        dialog = EnergyAssignDialog(
+            self, choices,
+            quadratic=(self._calibration is not None
+                       and self._calibration.kind == "quadratic"),
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        calibration = dialog.result_calibration
+        self._apply_calibration_change(calibration, True)
+        worst = getattr(dialog, "_worst_residual", None)
+        message = f"Calibrated from fitted peaks: {calibration.kind}"
+        if worst is not None:
+            # The residual is the number that says whether to believe it;
+            # the coefficients alone look equally plausible either way.
+            message += f", worst residual {worst:.3g} keV"
+        self.fit_controller._show_status_message(message, 8000)
+
     def _save_fits_dialog(self):
         active = active_spectrum(self.spectra)
-        if active is None or not active.fits:
+        if active is None or not fit_persist.savable(active.fits):
             return
         stem = os.path.splitext(os.path.basename(active.path.split("::", 1)[0]))[0]
         directory = os.path.dirname(active.path.split("::", 1)[0])
@@ -975,14 +1038,20 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
+        saved = fit_persist.savable(active.fits)
         try:
             fit_persist.save(path, active.fits, active.path)
         except OSError as exc:
             QMessageBox.warning(self, "Could not save fits", str(exc))
             return
-        self.fit_controller._show_status_message(
-            f"Saved {len(active.fits)} fit(s).", 4000
-        )
+        skipped = len(active.fits) - len(saved)
+        message = f"Saved {len(saved)} fit(s)."
+        if skipped:
+            # Said out loud rather than left for the user to discover on
+            # reload: integrations are visible in the same panel, so
+            # "Saved 2 fits" when the panel shows 5 rows needs explaining.
+            message += f" {skipped} integration result(s) were not saved."
+        self.fit_controller._show_status_message(message, 5000)
 
     def _load_fits_dialog(self):
         active = active_spectrum(self.spectra)
@@ -1824,8 +1893,15 @@ class MainWindow(QMainWindow):
         )
         # Saving needs something to save; loading only needs somewhere to
         # put it.
-        self.save_fits_action.setEnabled(active is not None and bool(active.fits))
+        self.save_fits_action.setEnabled(
+            active is not None and bool(fit_persist.savable(active.fits))
+        )
         self.load_fits_action.setEnabled(active is not None)
+        # Needs at least two fitted peaks, since that is the fewest a line
+        # can be drawn through.
+        self.calibrate_from_peaks_action.setEnabled(
+            len(self.fitted_peak_choices()) >= 2
+        )
         visible_count = sum(1 for s in self.spectra if s.visible)
         self.normalize_action.setEnabled(visible_count >= 2)
         self.add_action.setEnabled(len(self.spectra) >= 2)

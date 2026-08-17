@@ -304,7 +304,12 @@ def test_apply_rebin_adjusts_linear_calibration(qapp):
 
     main_window._apply_rebin(spectrum, 2)
 
-    assert main_window._calibration.a == 1.0
+    # New channel k is the sum of old channels 2k and 2k+1, so it sits at
+    # old channel 2k + 0.5 -- the CENTRE of the group. The constant term
+    # therefore moves to the old energy at channel 0.5, not at 0. It used
+    # to stay at a=1.0, which left every rebinned spectrum's energy axis
+    # low by half a channel (3.5 channels at factor 8).
+    assert main_window._calibration.a == pytest.approx(1.0 + 2.0 * 0.5)
     assert main_window._calibration.b == 4.0
 
 
@@ -317,9 +322,11 @@ def test_apply_rebin_adjusts_quadratic_calibration(qapp):
 
     main_window._apply_rebin(spectrum, 3)
 
-    assert main_window._calibration.a == 1.0
-    assert main_window._calibration.b == 6.0
-    assert main_window._calibration.c == 4.5
+    # Factor 3 groups old channels [3k, 3k+2], centred at 3k + 1.
+    offset = 1.0
+    assert main_window._calibration.a == pytest.approx(1.0 + 2.0 * offset + 0.5 * offset ** 2)
+    assert main_window._calibration.b == pytest.approx(3 * (2.0 + 2 * 0.5 * offset))
+    assert main_window._calibration.c == pytest.approx(4.5)
 
 
 def test_apply_rebin_with_no_calibration_leaves_it_none(qapp):

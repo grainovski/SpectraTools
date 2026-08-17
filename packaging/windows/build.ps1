@@ -48,7 +48,14 @@ Write-Host "Stamped build_info.py: VERSION=$version BUILD_DATE=$buildDate"
 # a more common antivirus false-positive target. Revisit if startup
 # time or AV false positives become a real user complaint -- see the
 # v3.1.0 audit finding that first raised this.
-& "$root/.venv/Scripts/python.exe" -m PyInstaller --noconfirm --onefile --windowed --name SpectraTools --icon "$root/assets/icon.ico" main.py
+# --collect-all awkward_cpp is REQUIRED, not defensive. uproot (the ROOT
+# reader added in v4.0.0) depends on awkward, whose awkward_cpp component
+# loads awkward-cpu-kernels.dll through ctypes. PyInstaller's analysis
+# does not see a ctypes load, so without this the build succeeds and then
+# fails at IMPORT with "Failed to load dynlib/dll ... awkward-cpu-kernels
+# .dll" -- found by building and running a onefile exe, not by reading
+# documentation. Costs about 35 MB.
+& "$root/.venv/Scripts/python.exe" -m PyInstaller --noconfirm --onefile --windowed --collect-all awkward_cpp --name SpectraTools --icon "$root/assets/icon.ico" main.py
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed with exit code $LASTEXITCODE"
 }

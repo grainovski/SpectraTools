@@ -159,30 +159,53 @@ def test_read_coefficients_file_non_utf8_raises(tmp_path):
 
 
 def test_rescaled_linear_calibration():
+    # Rebinning by 4 sums old channels [4k, 4k+3] into new channel k, whose
+    # CENTRE is old channel 4k + 1.5. So the new constant term is the old
+    # energy at old channel 1.5, not at old channel 0.
     cal = Calibration(kind="linear", a=5.0, b=2.0)
     rescaled = cal.rescaled(4)
     assert rescaled.kind == "linear"
-    assert rescaled.a == 5.0
+    assert rescaled.a == pytest.approx(5.0 + 2.0 * 1.5)
     assert rescaled.b == 8.0
 
 
 def test_rescaled_quadratic_calibration():
     cal = Calibration(kind="quadratic", a=1.0, b=2.0, c=3.0)
     rescaled = cal.rescaled(2)
-    assert rescaled.a == 1.0
-    assert rescaled.b == 4.0
-    assert rescaled.c == 12.0
+    offset = 0.5  # (2 - 1) / 2
+    assert rescaled.a == pytest.approx(1.0 + 2.0 * offset + 3.0 * offset ** 2)
+    assert rescaled.b == pytest.approx(2 * (2.0 + 2 * 3.0 * offset))
+    assert rescaled.c == pytest.approx(12.0)
 
 
-def test_rescaled_is_algebraically_equivalent_at_the_new_channel():
-    # Defining property of the transform: E_old(new_channel * factor)
-    # must equal E_new(new_channel), for arbitrary coefficients/factor/
-    # channel -- not just the hand-verified numbers above.
+def test_rescaled_is_algebraically_equivalent_at_the_group_centre():
+    """Defining property of the transform: a rebinned channel must report
+    the energy of the CENTRE of the old channels it was summed from.
+
+    This test previously asserted equivalence at old channel
+    new_channel*factor -- the FIRST channel of the group -- which left
+    every rebinned spectrum's energy axis low by half a bin at factor 2
+    and by 3.5 bins at factor 8. The centre is the right anchor because a
+    rebinned bin's counts come from the whole group, and it is the
+    convention used everywhere else here (root_io reads a ROOT axis as
+    edges[0] + width/2, the centre of bin 0).
+    """
     cal = Calibration(kind="quadratic", a=3.0, b=1.5, c=0.02)
     factor = 5
     rescaled = cal.rescaled(factor)
-    new_channel = 37
-    assert rescaled.apply(new_channel) == pytest.approx(cal.apply(new_channel * factor))
+    for new_channel in (0, 1, 37, 512):
+        centre = new_channel * factor + (factor - 1) / 2.0
+        assert rescaled.apply(new_channel) == pytest.approx(cal.apply(centre))
+
+
+def test_rescaling_by_one_changes_nothing():
+    """factor 1 is the identity: the group is one channel, so its centre
+    is itself."""
+    cal = Calibration(kind="quadratic", a=3.0, b=1.5, c=0.02)
+    rescaled = cal.rescaled(1)
+    assert rescaled.a == pytest.approx(cal.a)
+    assert rescaled.b == pytest.approx(cal.b)
+    assert rescaled.c == pytest.approx(cal.c)
 
 
 # --- non-finite coefficient rejection (v3.1.0 audit, Minor) -------------
@@ -231,3 +254,89 @@ def test_read_coefficients_file_rejects_non_finite(tmp_path, text):
     path.write_text(f"10.5\n{text}\n")
     with pytest.raises(CalibrationFileError, match="finite"):
         read_coefficients_file(str(path), quadratic=False)
+
+
+# --- X3: calibrating from assigned peak energies (v4.0.0) --------------
+
+
+def test_from_points_recovers_a_known_linear_calibration():
+    import calibration as calibration_module
+
+    channels = [100.0, 300.0, 700.0, 1500.0]
+    energies = [10.0 + 0.5 * ch for ch in channels]
+    cal = calibration_module.from_points(channels, energies)
+
+    assert cal.kind == "linear"
+    assert cal.a == pytest.approx(10.0)
+    assert cal.b == pytest.approx(0.5)
+
+
+def test_from_points_recovers_a_known_quadratic_calibration():
+    import calibration as calibration_module
+
+    channels = [50.0, 400.0, 900.0, 1600.0, 2000.0]
+    energies = [2.0 + 0.4 * ch + 1e-5 * ch ** 2 for ch in channels]
+    cal = calibration_module.from_points(channels, energies, quadratic=True)
+
+    assert cal.kind == "quadratic"
+    assert cal.a == pytest.approx(2.0, abs=1e-6)
+    assert cal.b == pytest.approx(0.4, abs=1e-8)
+    assert cal.c == pytest.approx(1e-5, abs=1e-12)
+
+
+def test_from_points_needs_enough_points_to_say_anything():
+    """Fewer than the minimum would pass exactly through the points and
+    describe nothing."""
+    import calibration as calibration_module
+    from calibration import CalibrationError
+
+    with pytest.raises(CalibrationError, match="at least 2"):
+        calibration_module.from_points([100.0], [50.0])
+    with pytest.raises(CalibrationError, match="at least 3"):
+        calibration_module.from_points([100.0, 200.0], [50.0, 90.0], quadratic=True)
+
+
+def test_from_points_refuses_duplicate_channels():
+    """Two peaks at the same channel constrain one point, not two --
+    numpy would otherwise return a fit with a silently meaningless
+    slope."""
+    import calibration as calibration_module
+    from calibration import CalibrationError
+
+    with pytest.raises(CalibrationError, match="different channels"):
+        calibration_module.from_points([500.0, 500.0], [100.0, 200.0])
+
+
+def test_from_points_requires_one_energy_per_channel():
+    import calibration as calibration_module
+    from calibration import CalibrationError
+
+    with pytest.raises(CalibrationError, match="exactly one energy"):
+        calibration_module.from_points([1.0, 2.0, 3.0], [10.0, 20.0])
+
+
+def test_residuals_expose_a_single_mistyped_energy():
+    """The reason residuals are reported and not just the coefficients: one
+    wrong energy moves the whole fit, and a and b look equally plausible
+    either way."""
+    import calibration as calibration_module
+
+    channels = [100.0, 300.0, 700.0, 1500.0]
+    energies = [10.0 + 0.5 * ch for ch in channels]
+    energies[2] += 40.0  # a fat-fingered entry
+
+    cal = calibration_module.from_points(channels, energies)
+    residuals = calibration_module.residuals(cal, channels, energies)
+
+    assert max(abs(r) for r in residuals) > 10.0
+    # The bad point is the one that stands out.
+    assert abs(residuals[2]) == pytest.approx(max(abs(r) for r in residuals))
+
+
+def test_residuals_are_essentially_zero_for_consistent_assignments():
+    import calibration as calibration_module
+
+    channels = [100.0, 300.0, 700.0, 1500.0]
+    energies = [10.0 + 0.5 * ch for ch in channels]
+    cal = calibration_module.from_points(channels, energies)
+    assert max(abs(r) for r in calibration_module.residuals(cal, channels, energies)) < 1e-9

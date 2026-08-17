@@ -102,7 +102,11 @@ BUILD_DATE = "$BUILD_DATE"
 EOF
 echo "Stamped build_info.py: VERSION=$VERSION BUILD_DATE=$BUILD_DATE"
 
-.venv/bin/python3 -m PyInstaller --noconfirm --onedir --windowed --name SpectraTools main.py
+# --collect-all awkward_cpp: see the same note in packaging/windows/
+# build.ps1. uproot's awkward_cpp loads its kernel library through ctypes,
+# which PyInstaller's analysis cannot see, so the app builds and then dies
+# at import without this.
+.venv/bin/python3 -m PyInstaller --noconfirm --onedir --windowed --collect-all awkward_cpp --name SpectraTools main.py
 
 # Hand-off point for build_deb.sh (run separately, on the Ubuntu-24.04 WSL
 # host): copy the PyInstaller output to the repo's own (gitignored) output
