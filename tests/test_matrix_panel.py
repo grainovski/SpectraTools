@@ -1061,3 +1061,106 @@ def test_clear_marks_button_still_redraws(qapp):
     panel._clear_marks()
 
     assert len(draws) == 1
+
+
+def test_ctrl_c_clears_cut_marks_exactly_like_the_clear_marks_button(qapp):
+    """Ctrl+C used to call fit_controller.clear() only, so cut and
+    background marks survived it. Worse, a replot drops their artists
+    without redrawing them, so they could disappear from the plot while
+    the state still held them and Activate Cut stayed enabled. Ctrl+C now
+    does what Clear Marks does as well.
+    """
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    cut = panel.cut_controller
+
+    cut._held_key = "cut"
+    cut.state.add_cut_click(1000)
+    cut.state.add_cut_click(1200)
+    cut._held_key = "gate_bg"
+    cut.state.add_bg_click(500)
+    cut.state.add_bg_click(600)
+    cut._held_key = None
+    assert cut.state.cut_region is not None
+    assert cut.state.bg_regions
+
+    panel._clear_everything()
+
+    assert cut.state.cut_region is None
+    assert cut.state.bg_regions == []
+    assert cut.state._pending_cut_click is None
+    assert cut.state._pending_bg_click is None
+    assert panel.activate_cut_button.isEnabled() is False
+
+
+def test_ctrl_c_leaves_the_panel_in_the_same_cut_state_as_clear_marks(qapp):
+    """"Exact analogy" is the requirement, so compare the two paths
+    directly rather than asserting a hand-written expectation."""
+    main_window = MainWindow()
+
+    def marked_panel():
+        panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+        cut = panel.cut_controller
+        cut._held_key = "cut"
+        cut.state.add_cut_click(800)
+        cut.state.add_cut_click(900)
+        cut._held_key = "gate_bg"
+        cut.state.add_bg_click(200)
+        cut.state.add_bg_click(300)
+        cut._held_key = None
+        return panel
+
+    via_button = marked_panel()
+    via_button._clear_marks()
+    via_ctrl_c = marked_panel()
+    via_ctrl_c._clear_everything()
+
+    for attr in ("cut_region", "bg_regions", "_pending_cut_click", "_pending_bg_click"):
+        assert getattr(via_ctrl_c.cut_controller.state, attr) == \
+               getattr(via_button.cut_controller.state, attr), f"{attr} differs"
+
+
+def test_right_drag_pans_the_projection_keeping_span_and_refitting_y(qapp):
+    from matplotlib.backend_bases import MouseEvent
+
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    panel.resize(900, 600)
+    panel.show()
+    qapp.processEvents()
+
+    panel.axes.set_xlim(1000, 1500)
+    panel._autoscale_y((1000, 1500))
+    before = panel.axes.get_xlim()
+
+    def px(xdata):
+        return float(panel.axes.transData.transform((xdata, 0))[0])
+
+    ymid = float(panel.axes.bbox.y0 + panel.axes.bbox.height / 2)
+    panel._on_pan_press(MouseEvent("button_press_event", panel.canvas, px(1400), ymid, button=3))
+    panel._pan_to(MouseEvent("motion_notify_event", panel.canvas, px(1100), ymid))
+    panel._on_pan_release(MouseEvent("button_release_event", panel.canvas, px(1100), ymid, button=3))
+
+    after = panel.axes.get_xlim()
+    assert after[0] > before[0], "dragging left should walk the view right"
+    assert abs((after[1] - after[0]) - (before[1] - before[0])) < 1e-6, "X span must be preserved"
+
+
+def test_left_button_does_not_pan(qapp):
+    # Button 1 places cut/background marks; panning must not steal it.
+    from matplotlib.backend_bases import MouseEvent
+
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    panel.resize(900, 600)
+    panel.show()
+    qapp.processEvents()
+    panel.axes.set_xlim(1000, 1500)
+    before = panel.axes.get_xlim()
+
+    x = float(panel.axes.transData.transform((1200, 0))[0])
+    ymid = float(panel.axes.bbox.y0 + panel.axes.bbox.height / 2)
+    panel._on_pan_press(MouseEvent("button_press_event", panel.canvas, x, ymid, button=1))
+    panel._pan_to(MouseEvent("motion_notify_event", panel.canvas, x - 80, ymid))
+
+    assert panel.axes.get_xlim() == before

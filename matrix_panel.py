@@ -20,7 +20,7 @@ from calibration_dialog import CalibrationDialog
 from fit_mode import FitModeController
 from matrix_cut import compute_projection
 from mtx_io import load_mtx
-from spectrum import LIGHT_COLOR_CYCLE, LoadedSpectrum
+from spectrum import LIGHT_COLOR_CYCLE, LoadedSpectrum, panned_xlim
 from theme import refresh_builtin_toolbar_icons, style_axes, style_nav_toolbar_palette
 
 CUT_REGION_COLOR = "tab:red"
@@ -238,6 +238,10 @@ class MatrixPanel(QMainWindow):
         self.nav_toolbar.addAction(self.full_view_action)
 
         self.canvas.mpl_connect("scroll_event", self._on_scroll)
+        self._pan_last_px = None
+        self.canvas.mpl_connect("button_press_event", self._on_pan_press)
+        self.canvas.mpl_connect("button_release_event", self._on_pan_release)
+        self.canvas.mpl_connect("motion_notify_event", self._pan_to)
 
         self.axis_selector = QComboBox()
         self.axis_selector.addItem("X projection", "x")
@@ -289,7 +293,7 @@ class MatrixPanel(QMainWindow):
 
         self.clear_fit_button = QAction("Clear", self)
         self.clear_fit_button.setShortcut("Ctrl+C")
-        self.clear_fit_button.triggered.connect(self.fit_controller.clear)
+        self.clear_fit_button.triggered.connect(self._clear_everything)
         self.addAction(self.clear_fit_button)
 
         self.integrate_button = QAction("Integrate", self)
@@ -502,6 +506,43 @@ class MatrixPanel(QMainWindow):
         self.canvas.draw_idle()
         self.nav_toolbar.push_current()
 
+    def _on_pan_press(self, event):
+        """Right-button drag-pan, mirroring main_window's. Button 1 is
+        left alone -- it places cut/background marks."""
+        if event.button != 3 or event.inaxes != self.axes or event.x is None:
+            return
+        self._pan_last_px = event.x
+
+    def _on_pan_release(self, event):
+        if self._pan_last_px is None:
+            return
+        self._pan_last_px = None
+        self.nav_toolbar.push_current()
+
+    def _pan_to(self, event):
+        """See main_window._pan_to for why this works from the pixel
+        delta between motion events rather than from the data coordinate
+        the drag started at."""
+        if self._pan_last_px is None or event.x is None:
+            return
+        width_px = self.axes.bbox.width
+        if not width_px:
+            return
+        spectrum = self.spectra[0]
+        xlim = self.axes.get_xlim()
+        delta = -(event.x - self._pan_last_px) * (xlim[1] - xlim[0]) / width_px
+        self._pan_last_px = event.x
+        new_xlim = panned_xlim(
+            xlim, delta,
+            self.channel_to_display(0),
+            self.channel_to_display(len(spectrum.data) - 1),
+        )
+        if new_xlim == xlim:
+            return
+        self.axes.set_xlim(new_xlim)
+        self._autoscale_y(new_xlim)
+        self.canvas.draw_idle()
+
     def _show_full_view(self):
         spectrum = self.spectra[0]
         max_channel = len(spectrum.data) - 1
@@ -577,6 +618,24 @@ class MatrixPanel(QMainWindow):
 
     def _clear_marks(self):
         self.cut_controller.clear()
+
+    def _clear_everything(self):
+        """Ctrl+C in a matrix panel.
+
+        Does what the Clear Marks button does to the cut and background
+        marks, AND what Ctrl+C has always done to fit marks and committed
+        fits. Previously it only did the latter, so cut/background marks
+        survived it -- and because a replot drops their artists without
+        redrawing them, they could vanish from the plot while the state
+        still held them and Activate Cut stayed enabled. One key now
+        leaves the panel genuinely clear.
+
+        redraw=False on the cut clear because fit_controller.clear()
+        replots the whole panel immediately afterwards; drawing twice
+        would only paint a frame nobody sees.
+        """
+        self.cut_controller.clear(redraw=False)
+        self.fit_controller.clear()
 
     def _update_activate_button(self):
         self.activate_cut_button.setEnabled(self.cut_controller.state.cut_region is not None)
