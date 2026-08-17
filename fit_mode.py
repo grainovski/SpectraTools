@@ -221,6 +221,13 @@ def _parameter_label(name, calibrated=False):
         return "Tail fraction (r)"
     if name == "tail_beta":
         return "Tail beta (β)"
+    if name == "bg_c0":
+        # Named for what it is to a user -- the height of the background
+        # line -- rather than for the centred coefficient it is internally.
+        # No " (keV)" suffix: this is a count level, not a position.
+        return "Background level"
+    if name == "bg_c1":
+        return "Background slope"
     prefix, index = name.rsplit("_", 1)
     peak_num = int(index) + 1
     kind = {"amp": "amplitude", "pos": "position", "sigma": "FWHM"}[prefix]
@@ -929,6 +936,12 @@ class FitModeController(QObject):
         mw.left_tail_action.setToolTip(
             "Allow a small low-channel tail contribution to each peak's shape"
         )
+        mw.fit_background_action = QCheckBox("Fit background")
+        mw.fit_background_action.setToolTip(
+            "Fit the background line together with the peaks instead of "
+            "subtracting it first. Peak uncertainties grow, because they then "
+            "include how well the background itself is known"
+        )
 
         self.parameters_table = QTableWidget(0, 3)
         self.parameters_table.setHorizontalHeaderLabels(["Parameter", "Value", "Fix"])
@@ -937,6 +950,7 @@ class FitModeController(QObject):
         layout = QVBoxLayout(container)
         layout.addWidget(mw.independent_widths_action)
         layout.addWidget(mw.left_tail_action)
+        layout.addWidget(mw.fit_background_action)
         layout.addWidget(self.parameters_table)
 
         self.parameters_dock = QDockWidget("Fit Parameters", mw)
@@ -1326,6 +1340,7 @@ class FitModeController(QObject):
         y = active.data
         link_widths = not self.main_window.independent_widths_action.isChecked()
         enable_left_tail = self.main_window.left_tail_action.isChecked()
+        fit_background = self.main_window.fit_background_action.isChecked()
         try:
             # A Fix checkbox (or an edited value) from a since-changed
             # row set (e.g. independent widths or left tail toggled
@@ -1335,7 +1350,8 @@ class FitModeController(QObject):
             # update_parameters_panel() would reset that row anyway
             # once this fit succeeds and rebuilds the row set.
             current_names = set(
-                parameter_names(len(self.state.peak_positions), link_widths, enable_left_tail)
+                parameter_names(len(self.state.peak_positions), link_widths,
+                                enable_left_tail, fit_background)
             )
             fixed_params = {
                 name: value for name, value in self.fixed_params_from_panel().items()
@@ -1354,13 +1370,15 @@ class FitModeController(QObject):
                 # result, where it is not -- see
                 # matrix_cut.compute_cut_with_variance.
                 variance=getattr(active, "variance", None),
+                fit_background=fit_background,
             )
         except FitError as exc:
             self._show_status_message(f"Fit failed: {exc}", 5000)
             return
         result.timestamp = datetime.now().isoformat(timespec="seconds")
         self._commit_result(active, result)
-        names = parameter_names(len(result.peaks), result.link_widths, result.tail_fraction is not None)
+        names = parameter_names(len(result.peaks), result.link_widths,
+                                result.tail_fraction is not None, result.fit_background)
         self.update_parameters_panel(names, fit_result_values_by_name(result))
         self.main_window._plot_data(preserve_view=True)
 

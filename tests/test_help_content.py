@@ -437,6 +437,32 @@ def test_knowledge_database_html_explains_position_volume_and_uncertainties():
     assert "anti-correlated" in text
 
 
+def test_knowledge_database_explains_fitting_the_background_jointly():
+    # F5: fit_peaks(fit_background=True), opt-in via the Fit Parameters
+    # checkbox. The page must say WHY errors grow (that is the correction,
+    # and a user seeing bigger numbers will otherwise think it broke) and be
+    # honest that it is not always the better choice.
+    text = _rendered_text(build_knowledge_database_html())
+    assert "Fitting the background with the peaks" in text
+    assert "Fit background" in text
+    assert "claims information nobody has" in text
+    assert "grow" in text
+    # The honest caveat, and the actionable guidance.
+    assert "cost two degrees of freedom" in text
+    assert "steeply sloping" in text
+    # And the non-obvious detail about what "level" means.
+    assert "not at channel zero" in text
+
+
+def test_knowledge_database_explains_why_widths_are_shared():
+    # F4: shared width is the default. A user who does not know that will
+    # not understand why one peak's width moved when a neighbour was added.
+    text = _rendered_text(build_knowledge_database_html())
+    assert "Why peaks in one fit share a width" in text
+    assert "Independent widths" in text
+    assert "same detector" in text
+
+
 def test_knowledge_database_explains_the_background_uncertainty_band():
     # F6: background_error() / FitResult.background_level_error(), drawn by
     # fit_mode._draw_fit_curves as a shaded band. The page has to explain

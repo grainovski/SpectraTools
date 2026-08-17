@@ -572,6 +572,53 @@ region stays on genuine background. A region stretched over the
 shoulder of a neighbouring peak measures something that is not
 background at all, and no amount of averaging fixes that.</p>
 
+<h2>Fitting the background with the peaks</h2>
+<p>By default the background is fixed <i>before</i> the peaks are fitted:
+the line through the two regions is subtracted, and the peaks are then
+fitted to what remains. That is what TV does, and it is fast and
+predictable.</p>
+<p>It also quietly overstates how well the peaks are known. The data
+cannot really distinguish a slightly taller peak sitting on a slightly
+lower background from the reverse, so treating the background as exact
+claims information nobody has, and every peak uncertainty comes out
+smaller than it should be.</p>
+<p>Ticking <b>Fit background</b> in the Fit Parameters panel fits the
+background's level and slope <i>together with</i> the peaks, as two more
+free parameters. The marked background regions then only provide the
+starting guess. Two things follow:</p>
+<ul>
+<li>Peak uncertainties <b>grow</b>. That is the correction, not a
+problem -- they now include how well the background itself is known.</li>
+<li>The background gets its own fitted uncertainty, and the shaded band
+is computed from that instead of from the two regions.</li>
+</ul>
+<p>It is not automatically the better choice. Two extra free parameters
+cost two degrees of freedom, and on a short fit region the background
+slope and the peak width start to describe the same thing, which can
+make the fit less stable rather than more honest. Use it when the
+background matters to your answer -- a weak peak on a steeply sloping
+continuum -- and leave it off for a strong, well-isolated peak on a flat
+background, where it buys nothing.</p>
+<p>Rows for <b>Background level</b> and <b>Background slope</b> appear in
+the Fit Parameters panel while it is on, and can be fixed like any other
+parameter. "Level" is the height of the line at the middle of the fit
+region, not at channel zero.</p>
+
+<h2>Why peaks in one fit share a width</h2>
+<p>Every peak in a single fit is fitted with <i>one</i> width by
+default. That is TV's behaviour, and it is deliberate: peaks close
+enough in energy to be fitted together came from the same detector at
+essentially the same resolution, so their widths genuinely should agree.
+Tying them together also stabilises the fit, because a width is what a
+multiplet is worst at determining -- given a blended hump, a fit with
+free widths can trade width against amplitude between neighbours almost
+without penalty.</p>
+<p>Tick <b>Independent widths</b> when you have reason to expect
+genuinely different widths -- a doublet where one component is a sum
+peak, say, or peaks far enough apart that detector resolution really has
+changed between them. Expect larger uncertainties on all of them, since
+each width is then determined by its own peak alone.</p>
+
 <h2>When an uncertainty reads "n/a"</h2>
 <p>Occasionally a fit succeeds but one of its numbers is shown as
 <code>&plusmn; n/a</code> in the Fit Results panel, in a row's tooltip,

@@ -1117,6 +1117,84 @@ def test_refitting_a_different_region_does_not_hide_the_first(qapp):
     assert spectrum.fits[1].visible is True
 
 
+def test_fit_background_checkbox_is_off_by_default_and_drives_the_fit(qapp):
+    """F5 is opt-in: two extra free parameters cost degrees of freedom and
+    TV, which this app ports, has no such mode -- so leaving it on would
+    move every result away from TV without being asked."""
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    assert main_window.fit_background_action.isChecked() is False
+    assert main_window.fit_background_action.parentWidget() is (
+        main_window.fit_controller.parameters_dock.widget()
+    )
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+    assert spectrum.fits[-1].fit_background is False
+
+    main_window.fit_background_action.setChecked(True)
+    main_window.fit_controller.run_fit()
+    joint = spectrum.fits[-1]
+    assert joint.fit_background is True
+    assert joint.background_covariance
+
+    # The Fit Parameters panel gains rows for the two background
+    # coefficients, so they can be inspected and fixed like any other.
+    labels = [
+        main_window.fit_controller.parameters_table.item(row, 0).text()
+        for row in range(main_window.fit_controller.parameters_table.rowCount())
+    ]
+    assert "Background level" in labels
+    assert "Background slope" in labels
+
+
+def test_peaks_in_one_fit_share_a_width_by_default(qapp):
+    """F4: shared width is the default, matching TV, with "Independent
+    widths" as the opt-out.
+
+    No code change was needed for this -- the checkbox starts unchecked and
+    link_widths is its negation, so the behaviour was already right. The
+    test exists because the DEFAULT is the whole point of the finding: it
+    is the stabilising assumption that keeps a multiplet's widths tied
+    together, and nothing previously stated it as an intention rather than
+    an accident of Qt's default checkbox state.
+    """
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    assert main_window.independent_widths_action.isChecked() is False
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 98)
+    _held_key_click(main_window, "p", 103)
+    main_window.fit_controller.run_fit()
+
+    assert len(spectrum.fits) == 1
+    result = spectrum.fits[0]
+    assert result.link_widths is True
+    # Shared means literally one width, not two that happen to agree.
+    assert len(result.peaks) == 2
+    assert result.peaks[0].sigma == pytest.approx(result.peaks[1].sigma)
+    assert result.peaks[0].sigma_err == pytest.approx(result.peaks[1].sigma_err)
+
+    # And the opt-out genuinely unlinks them.
+    main_window.independent_widths_action.setChecked(True)
+    main_window.fit_controller.run_fit()
+    assert spectrum.fits[-1].link_widths is False
+
+
 def test_draw_committed_fits_shades_the_background_uncertainty_band(qapp):
     """F6: the background's own uncertainty is drawn as a shaded band
     (fill_between -> a PolyCollection), so a user can see how well the

@@ -1486,45 +1486,152 @@ def test_channel_indices_is_unaffected_by_in_place_data_mutation():
 # --- TV parity: initial width seed (v3.1.0 audit, M1) ------------------
 
 
-def test_initial_sigma_seed_is_half_the_measured_width_matching_tv():
-    # TV's FSInitWidth (vsFitSetup.c:384) sets width = w * FWHM_TO_SIGMA
-    # with w a HALF-width, so its seed is half the sigma the measured
-    # FWHM implies. This port previously seeded the full sigma (2x TV).
-    from peak_fit import _initial_guess, _measure_width, parameter_names
+def _negative_volume_region():
+    """A region whose counts cannot support the integral width estimate --
+    a positive peak on a baseline so negative that the region sums below
+    zero, as an over-subtracted spectrum can produce -- so _integral_sigma
+    returns None and the measured-width fallback is exercised.
+
+    The baseline has to be deep enough to outweigh the peak's own volume:
+    at -60 the region still sums to +1927 and the integral estimate
+    succeeds, which is why this uses -200 (sum -3813)."""
+    x = np.arange(200, dtype=float)
+    y_sub = np.full(200, -200.0)
+    y_sub = y_sub + 500.0 * np.exp(-((x - 100.0) ** 2) / (2.0 * 3.5 ** 2))
+    mask = (x >= 80) & (x <= 120)
+    return x[mask], y_sub[mask]
+
+
+def test_initial_sigma_seed_comes_from_the_region_integral():
+    """The width seed is HDTV's integral estimate,
+    sum(volume)/(sum(amplitude)*sqrt(2*pi)), not a measured width.
+
+    Adopted on measurement, which is what the v4.0.0 plan required: over
+    1200 randomised hard multiplets, convergence failures fell from 41 to
+    12 (33 cases converged only with this seed against 4 only with the
+    old one, two-sided p < 0.0001) with accuracy unchanged. See
+    _integral_sigma.
+    """
+    from peak_fit import _initial_guess, _integral_sigma, parameter_names
 
     x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.5)], slope=0.0, intercept=20.0)
     lo, hi = 80, 120
     mask = (x >= lo) & (x <= hi)
     x_fit, y_sub = x[mask], y[mask] - 20.0
 
-    measured = _measure_width(x_fit, y_sub, [100.0], fallback=10.0)
     names = parameter_names(1, link_widths=True, enable_left_tail=False)
     guess = _initial_guess(names, x_fit, y_sub, (lo, hi), [100.0],
                            link_widths=True, enable_left_tail=False)
 
-    seeded_sigma = guess[names.index("sigma")]
-    assert seeded_sigma == pytest.approx(measured / 2.0)
-    # ... and the measurement itself still reports the real width.
-    assert measured == pytest.approx(3.5, abs=0.5)
+    expected = _integral_sigma(x_fit, y_sub, [100.0])
+    assert expected is not None
+    assert guess[names.index("sigma")] == pytest.approx(expected)
+    # For a clean single peak the integral estimate IS the real width --
+    # it is only under overlap that the two diverge.
+    assert expected == pytest.approx(3.5, abs=0.2)
 
 
-def test_tail_beta_seed_uses_the_measured_width_not_the_halved_seed():
-    # TV's halving is specific to its width parameter; nothing in
-    # vsFitSetup.c propagates it to the tail decay length.
-    from peak_fit import TAIL_BETA_MIN, _initial_guess, _measure_width, parameter_names
+def test_integral_sigma_recovers_the_true_width_for_resolved_peaks():
+    """The actual reason for the change, which is NOT what I first assumed.
+
+    The old seed was TV's measured width halved, which is a systematic
+    factor of two too narrow however clean the data is. The integral
+    estimate is simply correct once the peaks are resolved. Under overlap
+    both err narrow and land in much the same place, so overlap robustness
+    is not where the win comes from -- resolved peaks are.
+    """
+    from peak_fit import _integral_sigma, _measure_width
+
+    sigma = 4.0
+
+    def seeds(separation_in_sigma):
+        positions = [180.0, 180.0 + separation_in_sigma * sigma]
+        x = np.arange(400, dtype=float)
+        y = np.zeros(400)
+        for pos in positions:
+            y = y + 900.0 * np.exp(-((x - pos) ** 2) / (2.0 * sigma ** 2))
+        mask = (x >= positions[0] - 8 * sigma) & (x <= positions[-1] + 8 * sigma)
+        measured = _measure_width(x[mask], y[mask], positions, fallback=None)
+        return measured / 2.0, _integral_sigma(x[mask], y[mask], positions)
+
+    # Well resolved: the integral estimate is the true width; the old seed
+    # is half of it.
+    old, new = seeds(6.0)
+    assert new == pytest.approx(sigma, rel=0.01)
+    assert old == pytest.approx(sigma / 2.0, rel=0.02)
+
+    old, new = seeds(3.0)
+    assert new == pytest.approx(sigma, rel=0.02)
+    assert old < sigma * 0.55
+
+    # Heavily overlapped: both err NARROW, within ~0.1 sigma of each other.
+    # Erring narrow is the forgiving direction -- see _integral_sigma.
+    old, new = seeds(0.5)
+    assert new < sigma
+    assert old < sigma
+    assert abs(new - old) < 0.1 * sigma
+
+    # And a width MEASUREMENT is biased the other way, inflated by the
+    # blend, which is what makes it the worse thing to build a seed on.
+    positions = [180.0, 180.0 + 2.0 * sigma]
+    x = np.arange(400, dtype=float)
+    y = np.zeros(400)
+    for pos in positions:
+        y = y + 900.0 * np.exp(-((x - pos) ** 2) / (2.0 * sigma ** 2))
+    mask = (x >= positions[0] - 8 * sigma) & (x <= positions[-1] + 8 * sigma)
+    assert _measure_width(x[mask], y[mask], positions, fallback=None) > sigma * 1.5
+
+
+def test_initial_sigma_falls_back_to_tvs_halved_measurement():
+    """TV's FSInitWidth (vsFitSetup.c:384) sets width = w * FWHM_TO_SIGMA
+    with w a HALF-width, so its seed is half the sigma the measured FWHM
+    implies. That path is still the fallback when the region's counts
+    cannot support the integral estimate, and it must stay halved -- this
+    port originally seeded the full sigma (2x TV) and measurably suffered
+    for it (v3.1.0, M1).
+    """
+    from peak_fit import _initial_guess, _integral_sigma, _measure_width, parameter_names
+
+    x_fit, y_sub = _negative_volume_region()
+    assert _integral_sigma(x_fit, y_sub, [100.0]) is None, "precondition"
+
+    measured = _measure_width(x_fit, y_sub, [100.0], fallback=10.0)
+    names = parameter_names(1, link_widths=True, enable_left_tail=False)
+    guess = _initial_guess(names, x_fit, y_sub, (80, 120), [100.0],
+                           link_widths=True, enable_left_tail=False)
+    assert guess[names.index("sigma")] == pytest.approx(measured / 2.0)
+
+
+def test_tail_beta_seed_uses_a_full_width_estimate_never_a_halved_one():
+    """TV's halving is specific to its width parameter; nothing in
+    vsFitSetup.c propagates it to the tail decay length, which is a decay
+    length rather than a width.
+    """
+    from peak_fit import (
+        TAIL_BETA_MIN, _initial_guess, _integral_sigma, _measure_width, parameter_names,
+    )
 
     x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.5)], slope=0.0, intercept=20.0)
     lo, hi = 80, 120
     mask = (x >= lo) & (x <= hi)
     x_fit, y_sub = x[mask], y[mask] - 20.0
 
-    measured = _measure_width(x_fit, y_sub, [100.0], fallback=10.0)
     names = parameter_names(1, link_widths=True, enable_left_tail=True)
     guess = _initial_guess(names, x_fit, y_sub, (lo, hi), [100.0],
                            link_widths=True, enable_left_tail=True)
+    integral = _integral_sigma(x_fit, y_sub, [100.0])
+    assert guess[names.index("tail_beta")] == pytest.approx(max(integral, TAIL_BETA_MIN))
 
-    assert guess[names.index("tail_beta")] == pytest.approx(max(measured, TAIL_BETA_MIN))
-    assert guess[names.index("sigma")] == pytest.approx(measured / 2.0)
+    # And on the fallback path, where the width seed IS halved, tail_beta
+    # takes the unhalved measurement -- so the two remain distinct there.
+    x_fb, y_fb = _negative_volume_region()
+    measured = _measure_width(x_fb, y_fb, [100.0], fallback=10.0)
+    fallback_guess = _initial_guess(names, x_fb, y_fb, (80, 120), [100.0],
+                                    link_widths=True, enable_left_tail=True)
+    assert fallback_guess[names.index("tail_beta")] == pytest.approx(
+        max(measured, TAIL_BETA_MIN)
+    )
+    assert fallback_guess[names.index("sigma")] == pytest.approx(measured / 2.0)
 
 
 def test_initial_guess_falls_back_without_halving_when_width_cannot_be_measured():
@@ -2069,6 +2176,148 @@ def test_a_fit_result_without_anchors_reports_zero_background_error():
     assert result.background_anchors == ()
     errs = np.asarray(result.background_level_error(np.array([10.0, 50.0])), dtype=float)
     assert errs == pytest.approx([0.0, 0.0])
+
+
+# --- F5: background fitted jointly with the peaks (v4.0.0) -------------
+
+
+def _joint_case(channels=300, centre=150.0, sigma=4.0, amplitude=900.0,
+                slope=0.06, intercept=30.0, seed=17):
+    """A peak on a genuinely SLOPED background, which is where fitting the
+    two together differs from subtracting first."""
+    x = np.arange(channels, dtype=float)
+    clean = intercept + slope * x + amplitude * np.exp(
+        -((x - centre) ** 2) / (2.0 * sigma ** 2))
+    y = np.random.default_rng(seed).poisson(clean).astype(float)
+    return x, y, dict(left_bg_region=(60.0, 100.0), right_bg_region=(200.0, 240.0),
+                      fit_region=(120.0, 180.0), peak_positions=[centre])
+
+
+def test_fitting_the_background_recovers_the_peak_and_the_line():
+    x, y, kwargs = _joint_case()
+    result = fit_peaks(x, y, **kwargs, fit_background=True)
+
+    assert result.fit_background is True
+    assert result.peaks[0].position == pytest.approx(150.0, abs=0.5)
+    assert result.peaks[0].sigma == pytest.approx(4.0, rel=0.15)
+    # The line itself is recovered, in the un-centred form every caller
+    # that draws it expects.
+    assert result.background_slope == pytest.approx(0.06, abs=0.05)
+    assert result.background_intercept == pytest.approx(30.0, abs=8.0)
+
+
+def test_fitting_the_background_grows_the_peak_uncertainties():
+    """The whole point of F5. Subtracting a background and then fitting as
+    though it were exact discards the peak-background correlation, so peak
+    uncertainties come out too small. Fitting the two together restores it,
+    and the honest errors are LARGER.
+    """
+    x, y, kwargs = _joint_case()
+    subtracted = fit_peaks(x, y, **kwargs)
+    joint = fit_peaks(x, y, **kwargs, fit_background=True)
+
+    assert joint.peaks[0].area_err > subtracted.peaks[0].area_err
+    assert joint.peaks[0].amplitude_err > subtracted.peaks[0].amplitude_err
+    # The VALUES should stay close -- this is about how well they are known,
+    # not about moving them somewhere else.
+    assert joint.peaks[0].area == pytest.approx(subtracted.peaks[0].area, rel=0.15)
+    assert joint.peaks[0].position == pytest.approx(subtracted.peaks[0].position, abs=0.5)
+
+
+def test_fitting_the_background_uses_its_covariance_for_the_error_band():
+    """In joint mode the band comes from the fitted covariance -- HDTV's
+    sqrt(v C v) -- not from the two marked regions, which only seeded it."""
+    x, y, kwargs = _joint_case()
+    joint = fit_peaks(x, y, **kwargs, fit_background=True)
+
+    assert joint.background_covariance, "the fitted covariance must be recorded"
+    assert len(joint.background_covariance) == 4
+    reference, var_c0, cov, var_c1 = joint.background_covariance
+    assert reference == pytest.approx(0.5 * (kwargs["fit_region"][0] + kwargs["fit_region"][1]))
+    assert var_c0 > 0 and var_c1 > 0
+
+    # Matches the hand-written quadratic form at a few positions.
+    for at in (120.0, 150.0, 180.0):
+        dx = at - reference
+        expected = math.sqrt(var_c0 + 2.0 * cov * dx + var_c1 * dx * dx)
+        assert float(joint.background_level_error(at)) == pytest.approx(expected)
+
+    # Narrowest at the reference channel, since that is where the constant
+    # term is measured.
+    assert (float(joint.background_level_error(reference))
+            < float(joint.background_level_error(reference + 60.0)))
+
+
+def test_the_fitted_covariance_takes_precedence_over_the_anchors():
+    """Both error models can be present on one result; the fitted one wins,
+    because in joint mode the regions only supplied a starting guess."""
+    x, y, kwargs = _joint_case()
+    joint = fit_peaks(x, y, **kwargs, fit_background=True)
+    assert joint.background_anchors, "anchors are still recorded"
+    assert joint.background_covariance
+
+    from peak_fit import anchor_error
+
+    from_covariance = float(joint.background_level_error(150.0))
+    from_anchors = float(anchor_error(joint.background_anchors, 150.0))
+    assert from_covariance != pytest.approx(from_anchors)
+
+
+def test_the_default_fit_is_unchanged_and_has_no_background_parameters():
+    """Off by default: two extra free parameters cost degrees of freedom,
+    can go degenerate against a peak width on a short region, and TV -- which
+    this app ports -- has no such mode."""
+    from peak_fit import parameter_names
+
+    assert "bg_c0" not in parameter_names(1, True, False)
+    assert "bg_c0" in parameter_names(1, True, False, fit_background=True)
+    assert parameter_names(1, True, False, fit_background=True)[-2:] == ["bg_c0", "bg_c1"]
+
+    x, y, kwargs = _joint_case()
+    result = fit_peaks(x, y, **kwargs)
+    assert result.fit_background is False
+    assert result.background_covariance == ()
+
+
+def test_joint_background_parameters_round_trip_through_the_panel_mapping():
+    """fit_result_values_by_name must return the CENTRED coefficients the
+    fit actually used, or a Fix checkbox on a background row would hold it
+    at a wildly different line."""
+    from peak_fit import fit_result_values_by_name
+
+    x, y, kwargs = _joint_case()
+    joint = fit_peaks(x, y, **kwargs, fit_background=True)
+    values = fit_result_values_by_name(joint)
+
+    assert "bg_c0" in values and "bg_c1" in values
+    reference = joint.background_covariance[0]
+    # Evaluating the centred form must reproduce the un-centred line.
+    for at in (120.0, 150.0, 180.0):
+        centred = values["bg_c0"] + values["bg_c1"] * (at - reference)
+        plain = joint.background_slope * at + joint.background_intercept
+        assert centred == pytest.approx(plain)
+
+
+def test_every_free_parameter_has_a_damping_rule():
+    """_apply_step_damping walks the damping list and the parameter vector
+    by the same index, so a name with no rule would not merely go undamped
+    -- it would shift every later parameter's rule onto the wrong
+    parameter, silently. Adding bg_c0/bg_c1 was exactly such an
+    opportunity.
+    """
+    from peak_fit import _build_param_damping, parameter_names
+
+    for link_widths in (True, False):
+        for tail in (True, False):
+            for bg in (True, False):
+                names = parameter_names(3, link_widths, tail, bg)
+                damping = _build_param_damping(names, {}, link_widths)
+                assert len(damping) == len(names), (
+                    f"link_widths={link_widths} tail={tail} bg={bg}"
+                )
+
+    with pytest.raises(FitError, match="No damping rule"):
+        _build_param_damping(["amp_0", "not_a_parameter"], {}, True)
 
 
 def test_background_error_accepts_an_array_of_positions():
