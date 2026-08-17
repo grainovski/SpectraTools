@@ -125,10 +125,19 @@ def hypermet_left_tail(x, position, sigma, r, beta):
     z = w + y
     erfcx_y = erfcx(y)
     near = z > -25.0
+    # np.where evaluates BOTH branches for every element and only then
+    # selects, so each branch has to stay finite on the other's inputs or
+    # it raises overflow warnings for values that are immediately thrown
+    # away. erfcx's argument is pinned inside the near branch's domain, and
+    # the far branch's exponent is clamped at 0 -- which is a no-op where
+    # that branch is actually used, since z <= -25 forces
+    # dx/beta + y^2 <= -50y - y^2 < 0, and merely tames the discarded
+    # near-branch values where dx/beta can be large and positive.
+    far_exponent = np.minimum(dx / beta + y * y, 0.0)
     tail = np.where(
         near,
         gaussian_core * erfcx(np.where(near, z, 0.0)) / erfcx_y,
-        2.0 * np.exp(np.where(near, -np.inf, dx / beta + y * y)) / erfcx_y,
+        2.0 * np.exp(far_exponent) / erfcx_y,
     )
 
     return (1 - r) * gaussian_core + r * tail

@@ -1,6 +1,7 @@
 import math
 import os
 import time
+from datetime import datetime
 
 import matplotlib
 
@@ -42,11 +43,13 @@ from help_content import (
     build_knowledge_database_html,
     open_help_page,
 )
+import fit_persist
 from histogram_io import ParseError, load_histogram, save_histogram
 from matrix_panel import MatrixPanel
 import matrix_cache
 from mtx_io import load_mtx
 from n42_io import load_n42
+from peak_fit import FitError, channel_indices
 from settings import Settings
 from spe_io import load_spe, save_spe
 from spectrum import LoadedSpectrum, active_spectrum, next_color, panned_xlim
@@ -400,6 +403,16 @@ class MainWindow(QMainWindow):
         self.open_root_action = QAction("Open ROOT File...", self)
         self.open_root_action.triggered.connect(self._open_root_dialog)
         self.file_menu.addAction(self.open_root_action)
+
+        self.save_fits_action = QAction("Save Fits...", self)
+        self.save_fits_action.setEnabled(False)
+        self.save_fits_action.triggered.connect(self._save_fits_dialog)
+        self.file_menu.addAction(self.save_fits_action)
+
+        self.load_fits_action = QAction("Load Fits...", self)
+        self.load_fits_action.setEnabled(False)
+        self.load_fits_action.triggered.connect(self._load_fits_dialog)
+        self.file_menu.addAction(self.load_fits_action)
 
         self.reload_spectrum_action = QAction("Reload Spectrum", self)
         self.reload_spectrum_action.setShortcut("F5")
@@ -949,6 +962,98 @@ class MainWindow(QMainWindow):
                 return
             self._open_matrix_panel(path, matrix=matrix)
             self.settings.set_last_folder(os.path.dirname(path))
+
+    def _save_fits_dialog(self):
+        active = active_spectrum(self.spectra)
+        if active is None or not active.fits:
+            return
+        stem = os.path.splitext(os.path.basename(active.path.split("::", 1)[0]))[0]
+        directory = os.path.dirname(active.path.split("::", 1)[0])
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Fits", os.path.join(directory, f"{stem}_fits.json"),
+            "Fit files (*.json);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            fit_persist.save(path, active.fits, active.path)
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not save fits", str(exc))
+            return
+        self.fit_controller._show_status_message(
+            f"Saved {len(active.fits)} fit(s).", 4000
+        )
+
+    def _load_fits_dialog(self):
+        active = active_spectrum(self.spectra)
+        if active is None:
+            return
+        directory = os.path.dirname(active.path.split("::", 1)[0])
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Fits", directory, "Fit files (*.json);;All files (*)"
+        )
+        if not path:
+            return
+        try:
+            results, saved_spectrum = fit_persist.load(path)
+        except fit_persist.FitFileError as exc:
+            QMessageBox.warning(self, "Could not load fits", str(exc))
+            return
+        if not results:
+            QMessageBox.warning(self, "Could not load fits", "That file holds no fits.")
+            return
+
+        # Loading fits saved against a DIFFERENT spectrum is allowed --
+        # comparing one run's fits against another's is a real thing to
+        # want -- but it is worth saying out loud, because the marks will
+        # land wherever those channel numbers fall in this spectrum.
+        note = ""
+        if saved_spectrum and saved_spectrum != active.path:
+            note = (
+                f"\n\nThese fits were saved against:\n{saved_spectrum}\n"
+                f"and will be applied to:\n{active.path}"
+            )
+
+        choice = QMessageBox.question(
+            self, "Load Fits",
+            f"Load {len(results)} fit(s)?\n\n"
+            "Yes  - restore the saved results exactly as they were\n"
+            "No   - re-run each fit from its saved marks using the current "
+            "fitting code" + note,
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No
+            | QMessageBox.StandardButton.Cancel,
+        )
+        if choice == QMessageBox.StandardButton.Cancel:
+            return
+
+        if choice == QMessageBox.StandardButton.Yes:
+            loaded = results
+            failures = []
+        else:
+            loaded, failures = [], []
+            x = channel_indices(len(active.data))
+            for index, result in enumerate(results, start=1):
+                try:
+                    refitted = fit_persist.refit(
+                        result, x, active.data, getattr(active, "variance", None)
+                    )
+                except FitError as exc:
+                    failures.append(f"Fit {index}: {exc}")
+                    continue
+                refitted.timestamp = datetime.now().isoformat(timespec="seconds")
+                loaded.append(refitted)
+
+        active.fits.extend(loaded)
+        self.fit_controller.update_results_list()
+        self._plot_data(preserve_view=True)
+        self.fit_controller._show_status_message(
+            f"Loaded {len(loaded)} fit(s)"
+            + (f"; {len(failures)} could not be refitted." if failures else "."),
+            6000,
+        )
+        if failures:
+            QMessageBox.warning(self, "Some fits could not be refitted", "\n".join(failures))
 
     def _reload_active_spectrum(self):
         """Re-read the active spectrum's file in place, keeping its
@@ -1717,6 +1822,10 @@ class MainWindow(QMainWindow):
         self.reload_spectrum_action.setEnabled(
             active is not None and os.path.exists(active.path.split("::", 1)[0])
         )
+        # Saving needs something to save; loading only needs somewhere to
+        # put it.
+        self.save_fits_action.setEnabled(active is not None and bool(active.fits))
+        self.load_fits_action.setEnabled(active is not None)
         visible_count = sum(1 for s in self.spectra if s.visible)
         self.normalize_action.setEnabled(visible_count >= 2)
         self.add_action.setEnabled(len(self.spectra) >= 2)

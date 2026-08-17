@@ -604,6 +604,73 @@ the Fit Parameters panel while it is on, and can be fixed like any other
 parameter. "Level" is the height of the line at the middle of the fit
 region, not at channel zero.</p>
 
+<h2>ROOT files</h2>
+<p>A ROOT file (<code>.root</code>) is not one spectrum -- it is a
+directory tree that can hold dozens of named objects. <b>File &rarr; Open
+ROOT File...</b> therefore asks twice: first for the file, then for what
+to take out of it. Select one or more 1D histograms to load them as
+spectra, or a single 2D histogram to open it as a matrix. The two cannot
+be mixed in one go, because a matrix opens its own window while spectra
+join the list.</p>
+<p>Only 1D and 2D histograms are listed. Trees, graphs and
+instrument-specific objects are left out rather than offered and then
+refused.</p>
+<p><b>Calibration comes free when the file has one.</b> A ROOT axis
+carries real coordinates, so a histogram binned in keV already describes
+its own calibration -- it is read and applied automatically, exactly as
+an N42 file's is. A histogram binned in plain channels reports no
+calibration, since an identity transform would be noise.</p>
+<p>Two things are refused rather than guessed at, because guessing would
+produce numbers that look fine and are wrong: a histogram whose contents
+are fractional (one that has been scaled or weighted, so its bins are no
+longer counts), and one with non-uniform bin widths, which no polynomial
+channel calibration can express.</p>
+<p>Reading is one-way. Nothing is written back to a ROOT file.</p>
+
+<h2>Saving and reloading your work</h2>
+<p><b>File &rarr; Save Fits...</b> writes every fit on the active
+spectrum to a <code>.json</code> file, and <b>Load Fits...</b> brings
+them back -- so an analysis survives closing the program.</p>
+<p>Loading asks how you want them back:</p>
+<ul>
+<li><b>Restore</b> reproduces the saved numbers exactly as they were
+reported when the file was written.</li>
+<li><b>Re-run</b> fits again from the saved marks using the current
+version of the program. Use this to bring an older analysis up to date --
+v4.0.0 changed how peak areas and their uncertainties are computed, so a
+fit saved before it will not agree with one made today.</li>
+</ul>
+<p>Fits saved against a different spectrum can be loaded too -- comparing
+one run's fits against another's is a normal thing to want -- and you are
+told when that is what is happening, because the marks land wherever
+those channel numbers fall in the spectrum you are looking at.</p>
+<p>Every file records the schema version it was written with, and the
+program keeps a reader for each one, so files written by older versions
+keep opening.</p>
+<p><b>File &rarr; Reload Spectrum</b> (<kbd>F5</kbd>) re-reads the active
+spectrum from disk while keeping its calibration, fits and marks -- for
+watching a measurement that is still running. If the file has changed
+length, the fits and marks are cleared and you are told: they are
+anchored to channel numbers, which after a length change may no longer
+point at the same thing.</p>
+
+<h2>Exporting results</h2>
+<p>"Export Fit..." and "Export All Fits..." write in whichever format the
+filename's extension asks for:</p>
+<ul>
+<li><code>.txt</code> -- the readable report, with the full breakdown per
+fit.</li>
+<li><code>.csv</code> -- one row per peak, for a spreadsheet. An
+uncertainty the fit could not determine is left as an empty cell rather
+than the text "n/a", so a spreadsheet still treats the column as
+numbers.</li>
+<li><code>.tex</code> -- a LaTeX <code>tabular</code>, one row per peak,
+ready to paste into a paper.</li>
+</ul>
+<p>When a calibration is active, positions and widths are exported in keV
+and the column headers say so. Areas are never converted -- they are
+counts, and counts have no energy equivalent.</p>
+
 <h2>Why peaks in one fit share a width</h2>
 <p>Every peak in a single fit is fitted with <i>one</i> width by
 default. That is TV's behaviour, and it is deliberate: peaks close

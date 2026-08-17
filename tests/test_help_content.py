@@ -671,3 +671,42 @@ def test_knowledge_database_records_both_intentional_tv_divergences():
     # The rule's actual provenance, so a reader comparing against either
     # program knows which one this follows.
     assert "HDTV" in text
+
+
+def test_knowledge_database_documents_root_file_support():
+    # root_io / root_dialog: a ROOT file is a directory tree, so opening it
+    # asks twice. The page must also state the two refusals, since a user
+    # meeting them needs to know they are deliberate.
+    text = _rendered_text(build_knowledge_database_html())
+    assert "ROOT files" in text
+    assert "directory tree" in text
+    assert "asks twice" in text
+    # Calibration comes from the axis when the file has one.
+    assert "carries real coordinates" in text
+    # The refusals, and that reading is one-way.
+    assert "fractional" in text
+    assert "non-uniform bin widths" in text
+    assert "Nothing is written back" in text
+
+
+def test_knowledge_database_documents_saving_and_reloading_work():
+    # fit_persist: restore vs re-run is a real choice, and the reason it
+    # matters is that v4.0.0 changed the numbers.
+    text = _rendered_text(build_knowledge_database_html())
+    assert "Saving and reloading your work" in text
+    assert "Restore" in text and "Re-run" in text
+    assert "changed how peak areas" in text
+    # Schema versioning, so old files keep opening.
+    assert "schema version" in text
+    # Reload, and why a length change clears the marks.
+    assert "Reload Spectrum" in text
+    assert "anchored to channel numbers" in text
+
+
+def test_knowledge_database_documents_the_export_formats():
+    text = _rendered_text(build_knowledge_database_html())
+    assert "Exporting results" in text
+    assert ".csv" in text and ".tex" in text
+    # The two details a user would otherwise be caught by.
+    assert "empty cell" in text
+    assert "Areas are never converted" in text
