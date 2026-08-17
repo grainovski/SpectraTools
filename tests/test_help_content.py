@@ -571,3 +571,35 @@ def test_howto_says_ctrl_c_clears_cut_marks_in_the_matrix_panel():
     text = _rendered_text(build_howto_html())
     assert "Clear the cut and background marks" in text
     assert "Clear Marks" in text
+
+
+def test_knowledge_database_explains_gate_width_weighting():
+    # matrix_cut.compute_cut: net = cut - (W_cut / sum W_bg) * sum bg,
+    # with widths counted inclusively by _marked_width.
+    text = _rendered_text(build_knowledge_database_html())
+    assert "gate-width weighting" in text
+    assert "net[ch]" in text
+    # The worked example and the inclusive-counting rule, both of which a
+    # reader needs to reproduce the number themselves.
+    assert "40/20" in text
+    assert "51 channels, not" in text
+
+
+def test_knowledge_database_warns_about_background_regions_at_the_matrix_edge():
+    # The caveat that follows from widths coming from the marks while
+    # counts come from the data that exists.
+    text = _rendered_text(build_knowledge_database_html())
+    assert "Keep background regions inside the matrix" in text
+    assert "full marked width" in text
+    # And the two edge behaviours the code actually implements.
+    assert "ignored altogether" in text
+    assert "no subtraction is performed at all" in text
+
+
+def test_knowledge_database_records_the_one_intentional_tv_divergence():
+    # matrix_cut._overlaps skips a fully-outside background region; TV's
+    # MrkRange counts its width. The page should say so rather than
+    # claiming blanket parity.
+    text = _rendered_text(build_knowledge_database_html())
+    assert "intentional difference" in text
+    assert "TV" in text

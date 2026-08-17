@@ -679,6 +679,43 @@ background, and net" above). Zero background regions means no
 subtraction happens at all, and the result can legitimately go negative
 where the scaled background outweighs the gated counts -- expected, not
 an error.</p>
+
+<h2>How the cut's background is weighted</h2>
+<p>Written out, activating a cut computes, for every channel of the
+<i>other</i> axis:</p>
+<p style="text-align:center"><code>net[ch] = cut[ch] &minus; (W<sub>cut</sub> / &Sigma;W<sub>bg</sub>) &middot; &Sigma;bg[ch]</code></p>
+<p>where <code>cut[ch]</code> is the raw sum over the gated band,
+<code>&Sigma;bg[ch]</code> is the raw sum over every background band
+pooled together, and the <b>W</b> terms are those regions' widths in
+channels. This is <b>gate-width weighting</b>: the background bands are
+almost never the same width as the cut, so their pooled counts have to
+be rescaled to the cut's own width before they can be subtracted. Two
+background bands of 10 channels each stand in for 20 channels' worth of
+background; if the cut is 40 channels wide, that pooled background is
+multiplied by 40/20 = 2 before subtraction.</p>
+<p>Because it is a ratio of widths rather than an average, adding more
+background regions does not weaken the subtraction -- it improves its
+statistics, since a wider total background is measured from more counts
+and the ratio compensates for the width exactly. Widths are counted
+inclusively: a band marked from channel 100 to 150 is 51 channels, not
+50.</p>
+<p><b>Keep background regions inside the matrix.</b> The widths above
+come from where you marked, while the counts can only come from data
+that exists. A background band left hanging over the edge of the matrix
+therefore contributes its <i>full</i> marked width to
+<code>&Sigma;W<sub>bg</sub></code> but only the counts of the part
+actually inside -- so it behaves like a band of background that happens
+to be unusually empty, and less background is removed than you probably
+intended. The effect is entirely avoidable: mark background bands well
+within the data. A band marked <i>completely</i> outside the matrix is
+ignored altogether, contributing neither counts nor width, and if every
+background band is outside then no subtraction is performed at all.</p>
+<p>This weighting, and the inclusive channel counting behind it,
+reproduce TV's own cut exactly -- verified against TV's source across a
+wide range of marked regions, including ones overhanging an edge. The
+single intentional difference is the one just described: TV counts a
+completely-outside band's width anyway, which quietly weakens the
+subtraction, whereas here such a band is ignored.</p>
 """
     return _page("SpectraTools -- Knowledge Database", body)
 
