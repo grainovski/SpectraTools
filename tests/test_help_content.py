@@ -424,8 +424,31 @@ def test_knowledge_database_html_explains_sigma_and_fwhm():
 def test_knowledge_database_html_explains_position_volume_and_uncertainties():
     html = _strip_base64_images(build_knowledge_database_html())
     assert "area = amplitude &middot; &sigma; &middot; &radic;(2&pi;)" in html
-    assert "area_err = |area|" in html
     assert "full_area = area + (background_slope" in html
+    # The tailed form too: the volume is the integral of the WHOLE fitted
+    # shape now, not of its Gaussian core. The page previously published
+    # the quadrature-of-relative-errors formula for area_err, which
+    # assumed amplitude and sigma were uncorrelated -- it is gone because
+    # the code no longer does that.
+    assert "2r&beta; / erfcx(y)" in html
+    assert "area_err = |area|" not in html
+    text = _rendered_text(build_knowledge_database_html())
+    assert "including the correlations" in text
+    assert "anti-correlated" in text
+
+
+def test_knowledge_database_explains_the_background_uncertainty_band():
+    # F6: background_error() / FitResult.background_level_error(), drawn by
+    # fit_mode._draw_fit_curves as a shaded band. The page has to explain
+    # both the formula and -- more useful to a reader -- why the band is
+    # narrow between the regions and wide outside them.
+    text = _rendered_text(build_knowledge_database_html())
+    assert "How certain is the background?" in text
+    assert "shaded band" in text
+    assert "no cross term" in text
+    # The actionable part: what a wide band means and what to do about it.
+    assert "extrapolated" in text
+    assert "moving the background regions closer" in text
 
 
 def test_knowledge_database_html_explains_integration_moments():

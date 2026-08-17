@@ -3,7 +3,14 @@ import math
 import numpy as np
 import pytest
 
-from peak_fit import FitError, FitResult, PeakResult, compute_background, hypermet_left_tail
+from peak_fit import (
+    FitError,
+    FitResult,
+    PeakResult,
+    background_error,
+    compute_background,
+    hypermet_left_tail,
+)
 
 
 def test_hypermet_left_tail_biases_left_not_right():
@@ -310,25 +317,35 @@ def test_fit_peaks_reports_full_area_per_peak():
     """Each peak's own full_area is its net area plus the local linear
     background (evaluated at the peak's own center) integrated over that
     peak's own FWHM -- the standard gamma-spectroscopy way to split a
-    shared background back out per peak. full_area_err equals area_err
-    since the background term is a deterministic offset with no
-    uncertainty of its own."""
+    shared background back out per peak.
+
+    full_area_err now COMBINES the fit's own area error with the
+    background's. This test previously asserted the two were equal, on the
+    grounds that a two-point background line is "a deterministic offset
+    with no uncertainty of its own". That was wrong: both anchors are
+    means of real counts and carry Poisson error. See background_error().
+    """
     x, y = _make_spectrum(
         channels=200, peaks=[(500.0, 100.0, 3.0)], slope=0.0, intercept=20.0,
     )
+    regions = {"left_bg_region": (70.0, 85.0), "right_bg_region": (115.0, 130.0)}
     result = fit_peaks(
-        x, y,
-        left_bg_region=(70.0, 85.0),
-        right_bg_region=(115.0, 130.0),
-        fit_region=(85.0, 115.0),
-        peak_positions=[100.0],
+        x, y, fit_region=(85.0, 115.0), peak_positions=[100.0], **regions,
     )
     peak = result.peaks[0]
     background_under_peak = (
         result.background_slope * peak.position + result.background_intercept
     ) * peak.fwhm
     assert peak.full_area == pytest.approx(peak.area + background_under_peak)
-    assert peak.full_area_err == pytest.approx(peak.area_err)
+
+    expected_bg_err = peak.fwhm * float(background_error(
+        x, y, regions["left_bg_region"], regions["right_bg_region"], peak.position,
+    ))
+    assert expected_bg_err > 0, "the background must contribute a real uncertainty"
+    assert peak.full_area_err == pytest.approx(
+        math.sqrt(peak.area_err ** 2 + expected_bg_err ** 2)
+    )
+    assert peak.full_area_err > peak.area_err
 
 
 def test_fit_peaks_reports_reduced_chi2():
@@ -1597,8 +1614,32 @@ def test_tail_stays_active_where_gf3_would_disable_it():
     shape = hypermet_left_tail(x, 0.0, sigma, r, beta)
     pure_gaussian = np.exp(-((x / (sigma * np.sqrt(2))) ** 2))
 
-    # If the tail were disabled, `shape` would BE the pure Gaussian.
-    assert np.max(np.abs(shape - pure_gaussian)) > 0.05
+    # Asserted through ASYMMETRY rather than a deviation threshold. gf3's
+    # notail switch collapses the shape to (1-r)*gaussian + r*gaussian,
+    # i.e. exactly the pure Gaussian, which is perfectly symmetric -- so
+    # any measurable left/right imbalance proves the tail is still live,
+    # whatever its magnitude.
+    #
+    # This test previously asserted max|shape - gaussian| > 0.05, and that
+    # threshold was calibrated against a BUG. The old evaluation zeroed
+    # the tail wherever |dx/beta| > 12, which for beta=0.2 is |dx| > 2.4,
+    # leaving a bare 0.7*gaussian out in the flanks -- a deviation of
+    # ~0.22 that came from the cutoff, not from the tail. With the cutoff
+    # gone (see hypermet_left_tail) the true deviation here is 0.0129,
+    # because at large y the Hypermet tail genuinely does approach the
+    # Gaussian. The old assertion was passing for the wrong reason.
+    assert np.max(np.abs(shape - pure_gaussian)) > 1e-3
+
+    # Split strictly either side of the centroid, excluding x == 0 from
+    # both -- an off-by-one that puts the peak channel in one half skews
+    # the ratio on its own and has nothing to do with the tail.
+    left = float(np.trapezoid(shape[x < 0], x[x < 0]))
+    right = float(np.trapezoid(shape[x > 0], x[x > 0]))
+    assert left > right
+    assert left / right == pytest.approx(1.0327, abs=5e-3), (
+        "the tail must still bias weight to the left; a notail collapse "
+        "would make this ratio exactly 1"
+    )
 
     # And it must still lean left -- the physical point of the tail.
     left = shape[x < 0].sum()
@@ -1621,33 +1662,60 @@ def test_tail_and_gaussian_agree_when_gf3_would_also_keep_the_tail():
 # --- undetermined parameters are reported as NaN, not fatal (2026-08-16)
 
 
-def test_undetermined_tail_reports_the_fit_with_nan_tail_uncertainty():
-    """A peak with no real tail drives tail_fraction to ~0, at which
-    point tail_beta stops affecting the model and its Jacobian column
-    vanishes. That used to make the covariance uninvertible and sink the
-    ENTIRE fit. The well-determined parameters are now reported with real
-    uncertainties and only the undetermined ones come back NaN.
-    """
-    rng = np.random.default_rng(5)
-    reported = []
-    for sigma, beta in [(1.5, 0.3), (3.0, 1.0), (5.0, 1.0), (5.0, 4.0)]:
-        x = np.arange(300, dtype=float)
-        y = 30.0 + 800.0 * hypermet_left_tail(x, 150.0, sigma, 0.2, beta)
-        y = rng.poisson(np.maximum(y, 0)).astype(np.int64)
-        result = fit_peaks(x, y, (100, 120), (180, 200), (120, 180), [150.0],
-                           link_widths=True, enable_left_tail=True)
-        reported.append(result)
+def test_undetermined_tail_reports_the_fit_with_nan_tail_uncertainty(monkeypatch):
+    """An undetermined tail parameter must be reported as NaN with the rest
+    of the fit intact, rather than sinking the ENTIRE fit as it once did.
 
-    assert len(reported) == 4, "these fits must no longer be rejected outright"
-    # At least one of them is the degenerate-tail case that used to fail.
-    undetermined = [r for r in reported if math.isnan(r.tail_beta_err)]
-    assert undetermined, "expected at least one undetermined tail_beta"
-    for result in undetermined:
-        peak = result.peaks[0]
-        # The parameters the data DOES constrain keep real uncertainties.
-        assert math.isfinite(peak.position_err) and peak.position_err > 0
-        assert math.isfinite(peak.fwhm_err) and peak.fwhm_err > 0
-        assert 140.0 < peak.position < 160.0
+    The condition is now INJECTED rather than provoked with real data,
+    because real data no longer reaches it. It used to be reached by
+    fitting a nearly-tailless peak: tail_fraction went to ~0, tail_beta
+    stopped affecting the model, and its Jacobian column vanished. Since
+    the |dx/beta| > 12 cutoff was removed from hypermet_left_tail the tail
+    term contributes over the whole fit region instead of a narrow window,
+    so tail_beta stays constrained -- a sweep over sigma 1.5-8 and
+    amplitude 200-5000 on tailless data produced no undetermined tail at
+    all, where it previously did.
+
+    That makes the fitter more robust, but it leaves the REPORTING path
+    with no natural test case, and that path is what protects a real user
+    from losing a whole fit to an unconstrained nuisance parameter. So the
+    covariance is corrupted directly, which tests the reporting rather
+    than the numerical accident that used to trigger it.
+    """
+    import peak_fit as pf
+
+    real_marquardt = pf._marquardt_fit
+
+    def blind_tail(*args, **kwargs):
+        popt, pcov = real_marquardt(*args, **kwargs)
+        # Names for one peak, linked widths, tail on:
+        # amp_0, pos_0, sigma, tail_fraction, tail_beta -> tail is 3 and 4.
+        pcov = np.array(pcov, dtype=float)
+        pcov[4, :] = np.nan
+        pcov[:, 4] = np.nan
+        return popt, pcov
+
+    monkeypatch.setattr(pf, "_marquardt_fit", blind_tail)
+
+    x = np.arange(300, dtype=float)
+    y = 30.0 + 800.0 * hypermet_left_tail(x, 150.0, 3.0, 0.2, 1.0)
+    y = np.random.default_rng(5).poisson(np.maximum(y, 0)).astype(np.int64)
+
+    result = fit_peaks(x, y, (100, 120), (180, 200), (120, 180), [150.0],
+                       link_widths=True, enable_left_tail=True)
+
+    # The undetermined parameter alone comes back NaN...
+    assert math.isnan(result.tail_beta_err)
+    # ... and the fit is still reported, with everything the data does
+    # constrain keeping a real uncertainty.
+    peak = result.peaks[0]
+    assert math.isfinite(peak.position_err) and peak.position_err > 0
+    assert math.isfinite(peak.fwhm_err) and peak.fwhm_err > 0
+    assert 140.0 < peak.position < 160.0
+    # Including the area: it is derived from the same covariance block as
+    # position and width, so it must not be the one quantity that degrades
+    # to n/a because a nuisance parameter went blind.
+    assert math.isfinite(peak.area_err) and peak.area_err > 0
 
 
 def test_a_wholly_degenerate_fit_still_fails():
@@ -1700,3 +1768,313 @@ def test_pseudo_inverse_is_not_used_for_undetermined_parameters():
     pcov = _covariance_from(np.diag([4.0, 0.0]), 2, optional=[1])
     assert np.isnan(pcov[1, 1])
     assert not np.isclose(np.nan_to_num(pcov[1, 1]), 0.0) or np.isnan(pcov[1, 1])
+
+
+# --- F3: peak area includes the tail (v4.0.0) --------------------------
+
+
+def test_hypermet_area_reduces_to_the_gaussian_integral_without_a_tail():
+    from peak_fit import SQRT_2PI, hypermet_area
+
+    for amplitude, sigma in ((1.0, 1.0), (800.0, 3.0), (12.5, 0.7)):
+        # beta is irrelevant at r=0 and only has to keep erfcx(y) finite.
+        for beta in (0.1, 1.0, 40.0):
+            assert hypermet_area(amplitude, sigma, 0.0, beta) == pytest.approx(
+                amplitude * sigma * SQRT_2PI
+            )
+
+
+def test_hypermet_area_matches_numeric_integration_of_the_fitted_shape():
+    """The closed form must integrate the function the fitter actually
+    evaluates -- otherwise the reported area describes a different curve
+    from the one drawn. Dense fixed grid rather than adaptive quadrature:
+    for a short tail the shape has a narrow feature on a wide domain,
+    which quad silently steps over (it did, during development, and
+    produced a fictitious 100% discrepancy).
+    """
+    from peak_fit import hypermet_area, hypermet_left_tail
+
+    for sigma in (1.2, 3.0, 8.0):
+        for beta in (0.3, 1.0, 3.0, 10.0):
+            for r in (0.05, 0.3):
+                step = min(sigma, beta) / 400.0
+                reach = max(40.0 * sigma, 60.0 * beta)
+                x = np.arange(-reach, reach + step, step)
+                numeric = float(np.trapezoid(
+                    900.0 * hypermet_left_tail(x, 0.0, sigma, r, beta), x
+                ))
+                closed = hypermet_area(900.0, sigma, r, beta)
+                assert closed == pytest.approx(numeric, rel=2e-5), (
+                    f"sigma={sigma} beta={beta} r={r}"
+                )
+
+
+def test_hypermet_area_tends_to_the_gaussian_area_for_a_very_short_tail():
+    """As y grows the tail degenerates toward the core, so the total
+    approaches sigma*sqrt(2*pi) FROM ABOVE rather than diverging. Worth
+    pinning because the closed form divides by erfcx(y), and getting that
+    limit wrong would show up as a runaway area exactly where the old
+    |dx/beta| cutoff used to bite hardest.
+    """
+    from peak_fit import SQRT_2PI, hypermet_area
+
+    gaussian = 1000.0 * 8.0 * SQRT_2PI
+    previous = None
+    for beta in (2.0, 1.0, 0.5, 0.2, 0.1):
+        area = hypermet_area(1000.0, 8.0, 1.0, beta)
+        assert area > gaussian
+        if previous is not None:
+            assert area < previous, "shorter tail must mean less area, monotonically"
+        previous = area
+    assert hypermet_area(1000.0, 8.0, 1.0, 0.1) == pytest.approx(gaussian, rel=1e-3)
+
+
+def test_reported_area_now_includes_the_tail_contribution():
+    """The regression this fixes: the reported area was the Gaussian core
+    alone, so every tailed peak read low by whatever the tail held.
+    """
+    from peak_fit import SQRT_2PI, hypermet_area
+
+    x = np.arange(400, dtype=float)
+    sigma, beta, r, amplitude = 3.0, 3.0, 0.3, 900.0
+    y = 20.0 + amplitude * hypermet_left_tail(x, 200.0, sigma, r, beta)
+
+    result = fit_peaks(x, y, (100, 140), (260, 300), (160, 240), [200.0],
+                       link_widths=True, enable_left_tail=True)
+    peak = result.peaks[0]
+
+    core_only = peak.amplitude * peak.sigma * SQRT_2PI
+    assert peak.area > core_only, "the tail's counts must be included"
+    # The understatement is large, not a rounding difference: ~13.6% at
+    # r=0.3 with beta=sigma.
+    assert core_only / peak.area == pytest.approx(0.864, abs=0.02)
+    # And the reported figure is the closed form for the fitted parameters.
+    assert peak.area == pytest.approx(
+        hypermet_area(peak.amplitude, peak.sigma, result.tail_fraction, result.tail_beta),
+        rel=1e-9,
+    )
+
+
+def test_untailed_fits_report_exactly_the_gaussian_area():
+    """No existing untailed result may move -- r=0 must recover the old
+    formula bit for bit."""
+    from peak_fit import SQRT_2PI
+
+    x, y = _make_spectrum(channels=300, peaks=[(1000.0, 150.0, 4.0)],
+                          slope=0.0, intercept=25.0)
+    result = fit_peaks(x, y, (40, 70), (230, 260), (120, 180), [150.0],
+                       enable_left_tail=False)
+    peak = result.peaks[0]
+    assert peak.area == pytest.approx(peak.amplitude * peak.sigma * SQRT_2PI, rel=1e-12)
+
+
+# --- F2: area uncertainty via the covariance (v4.0.0) ------------------
+
+
+def test_area_error_uses_the_covariance_including_off_diagonals():
+    """Propagating g^T C g over a KNOWN covariance, checked against the
+    value worked out by hand.
+
+    For a pure Gaussian, area = A*sigma*sqrt(2*pi), so
+      g = (sigma*S, A*S)  with S = sqrt(2*pi)
+      var = (sigma*S)^2 Caa + 2 (sigma*S)(A*S) Cas + (A*S)^2 Css
+    The middle term is the one the old quadrature-of-relative-errors
+    formula dropped, and with the negative Cas of a real peak fit it makes
+    the true error SMALLER than that formula reported.
+    """
+    from peak_fit import SQRT_2PI, _area_param_names, _area_with_error
+
+    amplitude, sigma = 500.0, 4.0
+    free_names = ["amp_0", "pos_0", "sigma"]
+    params = _area_param_names(0, link_widths=True, enable_left_tail=False)
+
+    caa, css, cas = 25.0, 0.04, -0.6
+    pcov = np.array([
+        [caa, 0.0, cas],
+        [0.0, 1.0, 0.0],
+        [cas, 0.0, css],
+    ])
+
+    area, area_err = _area_with_error(amplitude, sigma, 0.0, 1.0, params, free_names, pcov)
+
+    ga, gs = sigma * SQRT_2PI, amplitude * SQRT_2PI
+    expected = math.sqrt(ga * ga * caa + 2.0 * ga * gs * cas + gs * gs * css)
+    assert area == pytest.approx(amplitude * sigma * SQRT_2PI)
+    assert area_err == pytest.approx(expected, rel=1e-6)
+
+    # The old formula ignored Cas; with Cas < 0 it overstates the error.
+    quadrature = area * math.sqrt((math.sqrt(caa) / amplitude) ** 2
+                                  + (math.sqrt(css) / sigma) ** 2)
+    assert area_err < quadrature
+    # A correlation coefficient of -0.6 between amplitude and sigma makes
+    # the old formula overstate the error by 14%.
+    assert cas / math.sqrt(caa * css) == pytest.approx(-0.6)
+    assert quadrature / area_err == pytest.approx(1.14, abs=0.02)
+
+
+def test_area_error_ignores_parameters_that_were_held_fixed():
+    """A fixed parameter has no uncertainty to contribute, and no column
+    in the covariance either -- it must be skipped rather than
+    mis-indexed against the free-parameter ordering."""
+    from peak_fit import SQRT_2PI, _area_param_names, _area_with_error
+
+    amplitude, sigma = 500.0, 4.0
+    # sigma held fixed: only amp_0 is free among the area's parameters.
+    free_names = ["amp_0", "pos_0"]
+    params = _area_param_names(0, link_widths=True, enable_left_tail=False)
+    pcov = np.array([[25.0, 0.0], [0.0, 1.0]])
+
+    _, area_err = _area_with_error(amplitude, sigma, 0.0, 1.0, params, free_names, pcov)
+    assert area_err == pytest.approx(sigma * SQRT_2PI * 5.0, rel=1e-6)
+
+
+def test_area_error_is_zero_when_nothing_was_fitted():
+    """Every parameter fixed means no fit and therefore no uncertainty --
+    zero, not NaN, matching how the other parameters report it."""
+    from peak_fit import _area_param_names, _area_with_error
+
+    params = _area_param_names(0, link_widths=True, enable_left_tail=False)
+    area, area_err = _area_with_error(500.0, 4.0, 0.0, 1.0, params, [], None)
+    assert area > 0
+    assert area_err == 0.0
+
+
+def test_area_error_is_nan_when_the_covariance_is_unusable():
+    from peak_fit import _area_param_names, _area_with_error
+
+    params = _area_param_names(0, link_widths=True, enable_left_tail=False)
+    free_names = ["amp_0", "sigma"]
+    # A negative variance means undetermined; with BOTH of the area's
+    # parameters undetermined there is nothing left to propagate.
+    pcov = np.array([[-1.0, 0.0], [0.0, -1.0]])
+    _, area_err = _area_with_error(500.0, 4.0, 0.0, 1.0, params, free_names, pcov)
+    assert math.isnan(area_err)
+
+
+def test_area_error_includes_the_tail_parameters_when_they_are_free():
+    """With a tail fitted, tail_fraction and tail_beta genuinely move the
+    area, so they must enter the propagation -- otherwise a peak whose
+    area is largely tail reports an error that ignores where most of that
+    area came from.
+    """
+    from peak_fit import _area_param_names, _area_with_error
+
+    amplitude, sigma, r, beta = 500.0, 3.0, 0.3, 6.0
+    free_names = ["amp_0", "pos_0", "sigma", "tail_fraction", "tail_beta"]
+    params = _area_param_names(0, link_widths=True, enable_left_tail=True)
+
+    base = np.diag([25.0, 1.0, 0.04, 1e-4, 0.25])
+    _, with_tail = _area_with_error(amplitude, sigma, r, beta, params, free_names, base)
+
+    # Same covariance but the tail declared undetermined: the remaining
+    # error must be strictly smaller, since two positive variance
+    # contributions were removed.
+    blinded = base.copy()
+    blinded[3, 3] = np.nan
+    blinded[4, 4] = np.nan
+    _, without_tail = _area_with_error(amplitude, sigma, r, beta, params, free_names, blinded)
+
+    assert with_tail > without_tail
+    assert math.isfinite(without_tail)
+
+
+# --- F6: the background carries its own uncertainty (v4.0.0) -----------
+
+
+def test_background_error_matches_the_hand_derived_two_point_formula():
+    """bg(x) = (1-t)*y1 + t*y2 over two INDEPENDENT region means, so
+    var = (1-t)^2 var(y1) + t^2 var(y2) with no covariance term.
+    """
+    x = np.arange(200, dtype=float)
+    y = np.full(200, 100.0)
+    left, right = (10.0, 29.0), (170.0, 189.0)
+
+    # 20 channels of 100 counts each: var(mean) = 20*100/20^2 = 5.
+    var_mean = 5.0
+    left_x, right_x = 19.5, 179.5  # region centroids
+
+    for at in (19.5, 100.0, 179.5, 250.0, -30.0):
+        t = (at - left_x) / (right_x - left_x)
+        expected = math.sqrt((1.0 - t) ** 2 * var_mean + t ** 2 * var_mean)
+        assert float(background_error(x, y, left, right, at)) == pytest.approx(expected)
+
+
+def test_background_error_is_smallest_between_the_regions_and_grows_outside():
+    """The shape that makes this worth showing a user: interpolating
+    between the two marked regions is the well-determined case, and
+    extrapolating past them is where the background is least known.
+    """
+    x = np.arange(300, dtype=float)
+    y = np.full(300, 80.0)
+    left, right = (20.0, 39.0), (200.0, 219.0)
+
+    inside = float(background_error(x, y, left, right, 120.0))
+    at_left = float(background_error(x, y, left, right, 29.5))
+    far_right = float(background_error(x, y, left, right, 290.0))
+    far_left = float(background_error(x, y, left, right, 0.0))
+
+    assert inside < at_left
+    assert far_right > at_left
+    assert far_left > at_left
+
+
+def test_background_error_uses_a_supplied_variance_when_given_one():
+    """A cut spectrum's background regions are not Poisson either, so the
+    propagated variance has to be honoured here as well as in the fit
+    weights."""
+    x = np.arange(200, dtype=float)
+    y = np.full(200, 100.0)
+    left, right = (10.0, 29.0), (170.0, 189.0)
+
+    poisson = float(background_error(x, y, left, right, 100.0))
+    inflated = float(background_error(x, y, left, right, 100.0,
+                                      variance=np.full(200, 400.0)))
+    # 4x the per-channel variance is 2x the error on the mean.
+    assert inflated == pytest.approx(2.0 * poisson, rel=1e-9)
+
+
+def test_background_error_ignores_negative_counts_rather_than_taking_a_root_of_them():
+    x = np.arange(120, dtype=float)
+    y = np.full(120, -50.0)
+    err = float(background_error(x, y, (10.0, 29.0), (90.0, 109.0), 60.0))
+    assert err == 0.0
+    assert math.isfinite(err)
+
+
+def test_a_fit_result_can_reproduce_its_own_background_band():
+    """The anchors travel on the result so a redraw -- or a fit restored
+    from disk later -- can draw the band without the spectrum."""
+    x, y = _make_spectrum(channels=200, peaks=[(500.0, 100.0, 3.0)],
+                          slope=0.0, intercept=20.0)
+    result = fit_peaks(x, y, (70.0, 85.0), (115.0, 130.0), (85.0, 115.0), [100.0])
+
+    assert len(result.background_anchors) == 2
+    at = np.array([80.0, 100.0, 125.0])
+    from_result = np.asarray(result.background_level_error(at), dtype=float)
+    from_data = np.asarray(
+        background_error(x, y, (70.0, 85.0), (115.0, 130.0), at), dtype=float
+    )
+    assert from_result == pytest.approx(from_data)
+    assert np.all(from_result > 0)
+
+
+def test_a_fit_result_without_anchors_reports_zero_background_error():
+    """Hand-built and pre-existing results have no anchors; they must
+    report no band rather than raising."""
+    result = FitResult(
+        left_bg_region=(0.0, 10.0), right_bg_region=(90.0, 100.0),
+        fit_region=(40.0, 60.0), background_slope=0.0,
+        background_intercept=5.0, peaks=[],
+    )
+    assert result.background_anchors == ()
+    errs = np.asarray(result.background_level_error(np.array([10.0, 50.0])), dtype=float)
+    assert errs == pytest.approx([0.0, 0.0])
+
+
+def test_background_error_accepts_an_array_of_positions():
+    x = np.arange(200, dtype=float)
+    y = np.full(200, 100.0)
+    at = np.array([50.0, 100.0, 150.0])
+    errs = background_error(x, y, (10.0, 29.0), (170.0, 189.0), at)
+    assert errs.shape == at.shape
+    assert np.all(errs > 0)

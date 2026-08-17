@@ -2,9 +2,10 @@ import math
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy.special import erfc
+from scipy.special import erfcx
 
 FWHM_FACTOR = 2.3548200450309493  # 2*sqrt(2*ln(2))
+SQRT_2PI = 2.5066282746310002  # sqrt(2*pi)
 
 TAIL_FRACTION_MAX = 0.3
 TAIL_BETA_MIN = 0.1
@@ -63,31 +64,109 @@ def hypermet_left_tail(x, position, sigma, r, beta):
         pass. tests/test_peak_fit.py::
         test_tail_stays_active_where_gf3_would_disable_it locks it in.
     """
+    x = np.asarray(x, dtype=float)
     dx = x - position
     w = dx / (sigma * np.sqrt(2))
     gaussian_core = np.exp(-w ** 2)
-
     y = sigma / (beta * np.sqrt(2))
-    erfc_y = erfc(y)
-    if erfc_y < 1e-300:
-        # y is so large that erfc(y) has underflowed to zero -- an
-        # extreme, unphysical width/decay ratio that only an
-        # unconverged optimizer iterate would ever produce. Treat the
-        # tail as vanishing rather than divide by (effectively) zero.
-        return (1 - r) * gaussian_core
 
-    # Matches gf3's own overflow guard: exp(dx/beta) grows unbounded
-    # for dx/beta > 0, but the true (mathematically bounded) tail
-    # contribution there is negligible once |dx/beta| is large -- gf3
-    # itself zeroes the tail term entirely past this same threshold
-    # rather than risk exp() overflowing before erfc() can suppress it.
-    ratio = dx / beta
-    tail = np.zeros_like(x, dtype=float)
-    safe = np.abs(ratio) <= 12.0
-    z = w[safe] + y
-    tail[safe] = np.exp(ratio[safe]) * erfc(z) / erfc_y
+    # Evaluated via the scaled complementary error function, which is
+    # algebraically identical to the formula in the docstring and free of
+    # the huge*tiny product that made a cutoff necessary:
+    #
+    #   exp(dx/beta) * erfc(w+y) / erfc(y)
+    #     = exp(dx/beta) * erfcx(w+y)exp(-(w+y)^2) / erfcx(y)exp(-y^2)
+    #     = exp(dx/beta - w^2 - 2wy) * erfcx(w+y)/erfcx(y)
+    #     = exp(-w^2) * erfcx(w+y)/erfcx(y)
+    #
+    # because 2wy = 2*(dx/(sigma*sqrt2))*(sigma/(beta*sqrt2)) = dx/beta
+    # exactly -- the same cancellation that makes the area integrable in
+    # closed form (see hypermet_area).
+    #
+    # This REPLACES gf3's `|dx/beta| > 12 -> tail := 0` cutoff
+    # (:2949-2953), which was previously ported. gf3 needs it because it
+    # evaluates exp(dx/beta) directly, which overflows long before erfc()
+    # can suppress it; nothing here evaluates that quantity at all. The
+    # cutoff was not free: it discarded up to 65% of the tail's own area
+    # for a short tail (measured at sigma=8, beta=0.3, r=1 -- and 14% at
+    # beta=1), which would have left the reported area disagreeing with
+    # the curve actually fitted and drawn. Dropping it is the same
+    # reasoning already applied to gf3's other three float32-era
+    # safeguards listed above, and the same reasoning behind the user's
+    # decision to keep the true Hypermet function rather than gf3's
+    # collapse-to-Gaussian switch.
+    #
+    # erfcx(y) needs no guard of its own: beta >= TAIL_BETA_MIN > 0 and
+    # sigma > 0, so y > 0, where erfcx lies in (0, 1] -- it can neither
+    # overflow nor underflow, which is why the old erfc(y) < 1e-300 check
+    # is gone too.
+    #
+    # erfcx(z) grows like 2exp(z^2) and overflows for strongly negative z,
+    # which is the deep left flank -- exactly where a LEFT tail carries
+    # its weight, so it cannot simply be floored to zero. exp(-w^2) is
+    # underflowing to zero there at the same time; only their product is
+    # well scaled. Reflecting with erfcx(z) = 2exp(z^2) - erfcx(-z) gives
+    #
+    #   exp(-w^2) * erfcx(z) = 2exp(z^2 - w^2) - exp(-w^2)*erfcx(-z)
+    #                        = 2exp(dx/beta + y^2) - exp(-w^2)*erfcx(-z)
+    #
+    # using z^2 - w^2 = 2wy + y^2 = dx/beta + y^2. In that branch the
+    # first term is computed directly (its exponent is always strongly
+    # negative there: z < -25 forces dx/beta + y^2 < -50y - y^2 < 0, so it
+    # underflows gracefully instead of overflowing) and the second is
+    # dropped -- at the crossover it is ~1e-275 of the peak amplitude
+    # against a tail value of ~3e-2, i.e. 273 orders of magnitude down.
+    #
+    # A first attempt floored the tail to zero for z < -25 instead. That
+    # is wrong for a LONG tail: with sigma=1.2, beta=10 the crossover
+    # falls at dx = -43, where the true tail is still 3% of the peak
+    # amplitude, and the area came out 0.4% low. Caught by
+    # test_hypermet_area_matches_numeric_integration_of_the_fitted_shape.
+    z = w + y
+    erfcx_y = erfcx(y)
+    near = z > -25.0
+    tail = np.where(
+        near,
+        gaussian_core * erfcx(np.where(near, z, 0.0)) / erfcx_y,
+        2.0 * np.exp(np.where(near, -np.inf, dx / beta + y * y)) / erfcx_y,
+    )
 
     return (1 - r) * gaussian_core + r * tail
+
+
+def hypermet_area(amplitude, sigma, r, beta):
+    """Exact analytic integral of `amplitude * hypermet_left_tail(...)`
+    over all x:
+
+        A * [ (1-r) * sigma*sqrt(2*pi) + 2*r*beta / erfcx(y) ]
+
+    with y = sigma/(beta*sqrt(2)) as everywhere else.
+
+    Derivation: the Gaussian core integrates to sigma*sqrt(2*pi) in the
+    usual way. For the tail, integrating by parts leaves
+    (2b/(a*sqrt(pi))) * integral of exp(a*u - (b*u+c)^2), and completing
+    the square there cancels the linear term EXACTLY -- because
+    c = a/(2b) is precisely what y = sigma/(beta*sqrt(2)) encodes. What
+    remains is elementary and gives 2*beta*exp(-y^2)/erfc(y), written
+    above as 2*beta/erfcx(y) so that neither factor underflows for large
+    y. Verified against dense numeric integration of the untruncated
+    shape across sigma 1.2-8, beta 0.3-40 and r 0.05-1: agreement to
+    4.3e-16, i.e. machine precision.
+
+    Two limits worth knowing, both of which the tests pin:
+      * r = 0 gives sigma*sqrt(2*pi), the plain Gaussian area.
+      * y -> large (short tail) gives erfcx(y) -> 1/(y*sqrt(pi)) and
+        hence 2*r*beta*y*sqrt(pi) = r*sigma*sqrt(2*pi), so the total
+        tends to sigma*sqrt(2*pi) from above -- the tail degenerates
+        toward the core rather than diverging.
+
+    This replaces `amplitude * sigma * sqrt(2*pi)`, which integrated the
+    Gaussian core ALONE and so understated every tailed peak's area by
+    whatever the tail held: measured 5.0% at r=0.1, 13.6% at r=0.3, and
+    41.1% for a long tail (sigma=3, beta=10, r=0.3).
+    """
+    y = sigma / (beta * np.sqrt(2.0))
+    return amplitude * ((1.0 - r) * sigma * SQRT_2PI + 2.0 * r * beta / erfcx(y))
 
 
 class FitError(Exception):
@@ -131,6 +210,20 @@ class FitResult:
     net_area: float = 0.0
     net_area_err: float = 0.0
     reduced_chi2: float = None
+    # ((x1, var1), (x2, var2)) from background_anchors() -- enough to
+    # reproduce the background's uncertainty band without keeping the
+    # spectrum around, so a redraw does not have to re-sum the regions and
+    # a restored fit can still draw it. Empty for a result built before
+    # this field existed (or by hand in a test), which
+    # background_level_error() reports as zero error rather than crashing.
+    background_anchors: tuple = ()
+
+    def background_level_error(self, at):
+        """Standard error of this fit's background line at position(s)
+        `at`, in counts. Zero everywhere if the anchors are unavailable."""
+        if not self.background_anchors:
+            return np.zeros_like(np.asarray(at, dtype=float))
+        return anchor_error(self.background_anchors, at)
 
 
 @dataclass
@@ -177,6 +270,84 @@ def _region_centroid(x, y, region):
     if not np.any(mask):
         raise FitError(f"Background region {region} contains no data")
     return float(np.mean(x[mask])), float(np.mean(y[mask]))
+
+
+def _region_mean_variance(x, y, region, variance=None):
+    """Variance of a background region's MEAN level.
+
+    The mean of n channels has variance sum(var_i)/n**2. With no supplied
+    variance the channels are Poisson, so var_i is the count itself,
+    floored at zero -- a region of an already-subtracted spectrum can hold
+    negative counts, which carry no Poisson variance to read off.
+    """
+    lo, hi = region
+    mask = (x >= lo) & (x <= hi)
+    n = int(np.count_nonzero(mask))
+    if n == 0:
+        raise FitError(f"Background region {region} contains no data")
+    if variance is None:
+        total = float(np.sum(np.maximum(y[mask], 0.0)))
+    else:
+        total = float(np.sum(np.asarray(variance, dtype=float)[mask]))
+    return total / float(n * n)
+
+
+def background_anchors(x, y, left_bg_region, right_bg_region, variance=None):
+    """((x1, var1), (x2, var2)) -- the two independent anchors the
+    background line is drawn through, each with the variance of its own
+    region mean.
+
+    Returned as plain numbers so a FitResult can carry them and reproduce
+    its own uncertainty band later without holding on to the spectrum.
+    """
+    left_x, _ = _region_centroid(x, y, left_bg_region)
+    right_x, _ = _region_centroid(x, y, right_bg_region)
+    if right_x == left_x:
+        raise FitError("Background regions must not share the same mean channel")
+    return (
+        (left_x, _region_mean_variance(x, y, left_bg_region, variance)),
+        (right_x, _region_mean_variance(x, y, right_bg_region, variance)),
+    )
+
+
+def anchor_error(anchors, at):
+    """Standard error of the two-point background line at position(s)
+    `at`. Single source of the formula, shared by background_error() and
+    FitResult.background_level_error()."""
+    (left_x, var_left), (right_x, var_right) = anchors
+    t = (np.asarray(at, dtype=float) - left_x) / (right_x - left_x)
+    return np.sqrt((1.0 - t) ** 2 * var_left + t ** 2 * var_right)
+
+
+def background_error(x, y, left_bg_region, right_bg_region, at, variance=None):
+    """Standard error of the fitted background level at position(s) `at`.
+
+    Our background is not a least-squares polynomial but a line through
+    the MEANS of the two marked regions, which makes its uncertainty
+    exact rather than approximate. Writing t for the fractional position
+    between the two region centroids,
+
+        bg(x) = (1 - t) * y1 + t * y2,   t = (x - x1) / (x2 - x1)
+
+    so bg is a linear combination of two independent measurements -- the
+    regions are disjoint, so there is no covariance term -- and
+
+        var(bg(x)) = (1 - t)**2 var(y1) + t**2 var(y2)
+
+    This is the counterpart of HDTV's PolyBg::EvalError, which evaluates
+    sqrt(sum_ij cov(c_i,c_j) x^i x^j) over a fitted polynomial's
+    covariance matrix (src/fit/PolyBg.cxx:238-262). A two-point line has
+    no covariance matrix to read, but it does not need one: the two
+    anchors ARE the independent parameters.
+
+    Note the shape this implies. The error is smallest at the two
+    centroids and grows linearly outside them, so extrapolating the
+    background under a peak far from both regions is exactly where it is
+    least certain -- which is the useful thing for a user to see.
+    """
+    return anchor_error(
+        background_anchors(x, y, left_bg_region, right_bg_region, variance), at
+    )
 
 
 _channel_indices_cache = {}
@@ -376,6 +547,7 @@ def fit_peaks(
 
     slope, intercept = compute_background(x, y, left_bg_region, right_bg_region)
 
+
     lo, hi = fit_region
     mask = (x >= lo) & (x <= hi)
     x_fit = x[mask]
@@ -420,6 +592,16 @@ def fit_peaks(
                 f"variance has length {variance.size}, expected {y.size} to match the spectrum"
             )
         y_err = np.sqrt(np.maximum(variance[mask], 1.0))
+
+    # After the variance has been validated above, so a wrong-length array
+    # is reported as a FitError rather than mis-indexing in here.
+    bg_anchors = background_anchors(x, y, left_bg_region, right_bg_region, variance)
+
+    def bg_level_err_at(at):
+        """The background's own standard error, so a peak's
+        background-included area can carry it (see full_area_err below)."""
+        return anchor_error(bg_anchors, at)
+
     model_named = _make_model(names, free_names, fixed_params, n_peaks, link_widths, enable_left_tail)
 
     if not free_names:
@@ -429,6 +611,10 @@ def fit_peaks(
         # every value's uncertainty is exactly 0.0.
         values_by_name = dict(fixed_params)
         err_by_name = {name: 0.0 for name in names}
+        # No fit was performed, so there is no covariance to propagate an
+        # area uncertainty from -- and none is needed, since every
+        # parameter's uncertainty is exactly 0 here rather than unknown.
+        pcov = None
     else:
         p0 = _initial_guess(
             free_names, x_fit, y_sub, fit_region, peak_positions, link_widths, enable_left_tail,
@@ -545,29 +731,40 @@ def fit_peaks(
         sigma_err = sigma_errs[i]
         fwhm = FWHM_FACTOR * sigma
         fwhm_err = FWHM_FACTOR * sigma_err
-        # This is the analytic integral of the plain Gaussian core only.
-        # When enable_left_tail is True, the fitted shape also carries a
-        # tail term (see hypermet_left_tail) whose own contribution to the
-        # true integral is not included here -- a known approximation.
-        area = amplitude * sigma * np.sqrt(2 * np.pi)
-        rel_err_sq = 0.0
-        if amplitude != 0:
-            rel_err_sq += (amplitude_err / amplitude) ** 2
-        if sigma != 0:
-            rel_err_sq += (sigma_err / sigma) ** 2
-        area_err = abs(area) * np.sqrt(rel_err_sq)
+        # Exact integral of the FULL fitted shape, tail included -- see
+        # hypermet_area. This used to integrate the Gaussian core alone
+        # and so understated every tailed peak's area by whatever the
+        # tail held (measured 5.0% at r=0.1, 13.6% at r=0.3, 41.1% for a
+        # long tail). r=0 recovers the plain Gaussian area exactly, so
+        # untailed fits are unaffected; beta is then irrelevant and only
+        # needs to be positive to keep erfcx(y) finite.
+        area, area_err = _area_with_error(
+            amplitude,
+            sigma,
+            tail_fraction if tail_fraction is not None else 0.0,
+            tail_beta if tail_beta is not None else 1.0,
+            _area_param_names(i, link_widths, enable_left_tail),
+            free_names,
+            pcov,
+        )
         # Full (background-included) area for this one peak: its own net
         # area plus the background "under" it, using the standard
         # gamma-spectroscopy convention of the local linear-background
         # level at the peak's own center times that peak's own FWHM --
         # the per-peak analog of Integration mode's flat
-        # density-times-width background area. The background term is a
-        # deterministic function of the (unweighted, uncertainty-free)
-        # linear fit, so it adds no uncertainty of its own: full_area_err
-        # is exactly area_err.
+        # density-times-width background area.
+        #
+        # The background term used to be treated as exact -- full_area_err
+        # was set to area_err on the stated grounds that a two-point line
+        # is "uncertainty-free". It is not: both anchors are means of real
+        # counts and carry Poisson error, which background_error()
+        # propagates exactly. Combined in quadrature here, as HDTV does
+        # for its own background-subtracted integral
+        # (TH1BgsubIntegral::GetBinError2 = eh**2 + eb**2).
         background_under_peak = (slope * position + intercept) * fwhm
+        background_area_err = float(fwhm * bg_level_err_at(position))
         full_area = area + background_under_peak
-        full_area_err = area_err
+        full_area_err = float(math.sqrt(area_err ** 2 + background_area_err ** 2))
         peaks.append(
             PeakResult(
                 position=float(position), position_err=float(position_err),
@@ -584,10 +781,20 @@ def fit_peaks(
     # region -- same Poisson formula as integrate_region()'s gross_area.
     # net is the total of the fitted peaks' own (background-excluded)
     # areas, with their already-fit-propagated uncertainties combined in
-    # quadrature -- unlike Integration, there's no separate "background
-    # area uncertainty" to add in here, since the linear background used
-    # by this fit path is a deterministic two-point line, not a
-    # statistically-fit quantity with its own propagated uncertainty.
+    # quadrature.
+    #
+    # The background's own uncertainty is deliberately NOT added here,
+    # even though background_error() now provides it and each peak's
+    # full_area_err does include it. Net area excludes the background by
+    # definition, so there is no background term to add; what a rigorous
+    # treatment would capture instead is the peaks' SENSITIVITY to the
+    # background level, since they were fitted against data from which it
+    # had already been subtracted as though exact. That sensitivity is not
+    # 1-times-width in general and cannot be recovered post hoc -- it
+    # falls out naturally only from fitting the background jointly with
+    # the peaks, which is a separate change (F5 in the v4.0.0 plan). Until
+    # then net_area_err is conditional on the background, and saying so
+    # here is better than adding a term that looks rigorous and is not.
     gross_area = float(np.sum(y_fit))
     # Deliberately no guard here, matching TV's own lack of one: unlike
     # integrate_region() (which now rejects a negative-count region
@@ -612,6 +819,7 @@ def fit_peaks(
         gross_area=gross_area, gross_area_err=gross_area_err,
         net_area=net_area, net_area_err=net_area_err,
         reduced_chi2=reduced_chi2,
+        background_anchors=bg_anchors,
     )
 
 
@@ -1112,6 +1320,99 @@ def _marquardt_fit(model, x, y, y_err, p0, damping, fit_region_bounds=None):
         if meta.kind in ("tail_fraction", "tail_beta")
     ]
     return p, _covariance_from(J.T @ J, n, optional)
+
+
+def _area_with_error(amplitude, sigma, r, beta, area_params, free_names, pcov):
+    """A peak's area and its uncertainty.
+
+    The area is hypermet_area()'s closed form. The uncertainty is the
+    full first-order propagation
+
+        var = g^T C g,    g_k = d(area)/d(param_k)
+
+    over the covariance block for whichever of this peak's parameters
+    were free. That matters because it keeps the OFF-DIAGONAL terms.
+    The previous code added relative errors in quadrature:
+
+        area_err = area * sqrt((dA/A)^2 + (dsigma/sigma)^2)
+
+    which is what g^T C g reduces to only if amplitude and sigma are
+    uncorrelated. In a peak fit they are strongly ANTI-correlated -- a
+    wider peak with a lower amplitude fits almost as well -- and both
+    partials are positive, so a negative covariance makes the true
+    variance SMALLER than the quadrature sum. The old figure was
+    therefore too large, which is the safe direction to be wrong in but
+    wrong nonetheless, and it got worse the more the fit relied on the
+    tail parameters, whose correlations it ignored entirely.
+
+    Undetermined parameters (NaN or negative variance, see
+    _uncertainties_from) are left out of the block rather than poisoning
+    the result to NaN. That is not a shortcut: _covariance_from already
+    drops those parameters and re-inverts, so the matrix here is the
+    covariance CONDITIONAL on them, and it is the same matrix every other
+    uncertainty this function reports is derived from. Including a NaN row
+    would make the area the only quantity that degrades to "n/a" when a
+    nuisance tail parameter is unconstrained, while position and width --
+    computed from the same block -- still report numbers.
+
+    Gradients are central differences. The area is a smooth scalar
+    function of at most four parameters, so this is accurate to ~1e-10
+    relative, and it avoids four hand-derived partials involving
+    erfcx' -- the same trade _numeric_jacobian makes for the model.
+    """
+    area = float(hypermet_area(amplitude, sigma, r, beta))
+    if pcov is None:
+        # Nothing was fitted (every parameter fixed), so there is no
+        # uncertainty rather than an unknown one.
+        return area, 0.0
+
+    values = {"amp": amplitude, "sigma": sigma, "r": r, "beta": beta}
+    diag = np.diag(pcov)
+
+    indices, partials = [], []
+    for kind, name in area_params:
+        if name not in free_names:
+            continue  # held fixed: contributes no uncertainty
+        index = free_names.index(name)
+        if not (math.isfinite(diag[index]) and diag[index] >= 0.0):
+            continue  # undetermined -- see the docstring
+        value = values[kind]
+        step = 1e-6 * max(abs(value), 1e-3)
+        hi = value + step
+        lo = value - step
+        if kind in ("sigma", "beta") and lo <= 0.0:
+            # Keep the perturbation inside the domain; sigma and beta are
+            # strictly positive and erfcx(y) changes character across 0.
+            lo = value * 0.5
+        def _at(**override):
+            v = dict(values, **override)
+            return float(hypermet_area(v["amp"], v["sigma"], v["r"], v["beta"]))
+        partials.append((_at(**{kind: hi}) - _at(**{kind: lo})) / (hi - lo))
+        indices.append(index)
+
+    if not indices:
+        return area, float("nan")
+
+    gradient = np.asarray(partials, dtype=float)
+    block = np.asarray(pcov)[np.ix_(indices, indices)]
+    variance = float(gradient @ block @ gradient)
+    if not math.isfinite(variance) or variance < 0.0:
+        return area, float("nan")
+    return area, math.sqrt(variance)
+
+
+def _area_param_names(index, link_widths, enable_left_tail):
+    """(kind, parameter-name) pairs for the parameters a peak's area
+    depends on. `kind` is hypermet_area's own argument name, so
+    _area_with_error can perturb the right one without re-deriving which
+    fitted parameter is which."""
+    params = [
+        ("amp", f"amp_{index}"),
+        ("sigma", "sigma" if link_widths else f"sigma_{index}"),
+    ]
+    if enable_left_tail:
+        params += [("r", "tail_fraction"), ("beta", "tail_beta")]
+    return params
 
 
 def _uncertainties_from(pcov, n):

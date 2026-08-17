@@ -1117,6 +1117,45 @@ def test_refitting_a_different_region_does_not_hide_the_first(qapp):
     assert spectrum.fits[1].visible is True
 
 
+def test_draw_committed_fits_shades_the_background_uncertainty_band(qapp):
+    """F6: the background's own uncertainty is drawn as a shaded band
+    (fill_between -> a PolyCollection), so a user can see how well the
+    background under the peak is actually determined.
+
+    Asserted through a real run_fit() rather than a hand-built FitResult,
+    because the band needs the background anchors that only a real fit
+    computes -- and a hand-built result deliberately reports no band.
+    """
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+    assert len(spectrum.fits) == 1
+
+    collections_before = len(main_window.axes.collections)
+    main_window.fit_controller.draw_committed_fits(spectrum)
+    added = main_window.axes.collections[collections_before:]
+    assert added, "the background uncertainty band must be drawn"
+
+    # Under the model curves, not over them.
+    band = added[0]
+    assert band.get_alpha() == pytest.approx(0.18)
+    # And the band has real width -- a zero-width fill would be invisible
+    # and would mean the anchors never made it onto the result.
+    errs = np.asarray(
+        spectrum.fits[0].background_level_error(np.linspace(85.0, 115.0, 20)),
+        dtype=float,
+    )
+    assert np.all(errs > 0)
+
+
 def test_draw_committed_fits_skips_hidden_results(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
@@ -2229,7 +2268,12 @@ def test_results_panel_shows_tail_and_width_link_info(qapp):
     tooltip = main_window.fit_controller.results_table.item(0, 0).toolTip()
     assert "independent widths" in tooltip
     assert "r=0.10" in tooltip
-    assert "volume excludes tail" in tooltip
+    # The tooltip read "volume excludes tail" while the reported area was
+    # the Gaussian core alone. The area is now the exact integral of the
+    # whole fitted shape, so the note has to say the opposite -- a stale
+    # "excludes" here would tell the user to add a correction that is
+    # already in the number.
+    assert "volume includes tail" in tooltip
 
 
 def test_results_panel_shows_full_and_net_area_for_a_gaussian_fit(qapp):

@@ -832,6 +832,26 @@ class FitModeController(QObject):
         # never the values used in the model math itself.
         x_dense = np.linspace(lo, hi, 200)
         background_dense = result.background_slope * x_dense + result.background_intercept
+
+        # How well the background itself is determined. The band is
+        # narrowest at the two background regions' centroids and widens
+        # away from them, so a fit region far from both marked regions
+        # visibly shows that its background is extrapolated. Drawn first so
+        # it sits UNDER the model curves rather than veiling them.
+        #
+        # Colour comes from bg_line_color, which the theme already
+        # supplies, rather than a literal -- a hard-coded shade is how the
+        # background line itself ended up invisible in the dark theme
+        # during v2.2.0.
+        bg_err = np.asarray(result.background_level_error(x_dense), dtype=float)
+        if np.any(bg_err > 0):
+            axes.fill_between(
+                to_display(x_dense),
+                background_dense - bg_err,
+                background_dense + bg_err,
+                color=context.bg_line_color, alpha=0.18, linewidth=0,
+            )
+
         total = background_dense.copy()
         for peak in result.peaks:
             total = total + _peak_component(x_dense, peak, result)
@@ -1131,7 +1151,7 @@ class FitModeController(QObject):
                     f"left tail: r={result.tail_fraction:.2f}"
                     f"±{_err_text(result.tail_fraction_err)}, "
                     f"β={result.tail_beta:.1f}±{_err_text(result.tail_beta_err, '.1f')} "
-                    f"(volume excludes tail)"
+                    f"(volume includes tail)"
                 )
 
             for peak in result.peaks:

@@ -512,29 +512,65 @@ optimization entirely -- it's held at its Value cell's number rather
 than fit, so its own uncertainty is reported as exactly zero instead
 of coming from the covariance matrix.</p>
 <p>The Fit Results panel's Volume column shows one number per peak: its
-<b>net</b> volume -- the analytic integral of just that peak's Gaussian
-core (background excluded):</p>
+<b>net</b> volume -- the exact integral of that peak's fitted shape,
+background excluded. Without a tail that is the familiar Gaussian
+integral:</p>
 <p style="text-align:center"><code>area = amplitude &middot; &sigma; &middot; &radic;(2&pi;)</code></p>
-<p>with its own uncertainty propagated from amplitude's and &sigma;'s
-(their correlation is not included -- a documented simplification):</p>
-<p style="text-align:center"><code>area_err = |area| &middot; &radic;[(amplitude_err/amplitude)&sup2; + (&sigma;_err/&sigma;)&sup2;]</code></p>
-<p>If the fit has a tail (tail fraction r &gt; 0), the tail's own
-contribution isn't included in this number -- a known simplification,
-flagged directly in the panel's own tooltip as "volume excludes tail."
-Hover over a row for the full breakdown: that same peak's <b>full</b>
+<p>and with a tail enabled the tail's own counts are included too, via
+the closed-form integral of the full Hypermet shape:</p>
+<p style="text-align:center"><code>area = amplitude &middot; [ (1&minus;r) &middot; &sigma;&radic;(2&pi;) + 2r&beta; / erfcx(y) ]</code></p>
+<p>where <code>y = &sigma;/(&beta;&radic;2)</code> as elsewhere and
+<code>erfcx</code> is the scaled complementary error function. Setting
+r = 0 recovers the line above exactly, so untailed fits are unaffected.
+The tail can hold a substantial share of a peak: for r = 0.3 with
+&beta; = &sigma; it is about 14% of the volume, and for a long tail
+(&beta; = 10&sigma;/3) over 40%.</p>
+<p>The volume's uncertainty is propagated through the fit's full
+covariance matrix, including the <i>correlations</i> between amplitude,
+&sigma; and the tail parameters. That matters because amplitude and
+&sigma; are strongly anti-correlated in a peak fit -- a wider peak with
+a lower amplitude fits nearly as well -- so treating them as
+independent overstates the uncertainty.</p>
+<p>Hover over a row for the full breakdown: that same peak's <b>full</b>
 volume --</p>
 <p style="text-align:center"><code>full_area = area + (background_slope &middot; position + background_intercept) &middot; FWHM</code></p>
 <p>-- net volume plus the background level at the peak's own center
 (the straight line fixed by the two background regions, Figure 1),
-times its FWHM. That background line is a fixed two-point line rather
-than a separately-fit quantity, so it carries no uncertainty of its
-own: <code>full_area_err</code> equals <code>area_err</code> exactly.
-Region-level full/net totals for the whole fit work the same way -- the
-region's full total is the sum of the raw, observed counts across the
-whole fit region (not the fitted model curve), and its net total sums
-just the peaks' own net volumes, with their uncertainties combined in
-quadrature. Net volume is almost always the number you actually want
+times its FWHM. The background line carries its own uncertainty, since
+both ends are averages of real counts, and
+<code>full_area_err</code> combines the two in quadrature. See "How
+certain is the background?" below.</p>
+<p>Region-level full/net totals for the whole fit work the same way --
+the region's full total is the sum of the raw, observed counts across
+the whole fit region (not the fitted model curve), and its net total
+sums just the peaks' own net volumes, with their uncertainties combined
+in quadrature. Net volume is almost always the number you actually want
 (for example, when computing activity or a branching ratio).</p>
+
+<h2>How certain is the background?</h2>
+<p>The background under a fit is the straight line through the mean
+level of each of the two marked background regions. Those means are
+averages of real counts, so each has a counting uncertainty of its own,
+and the line inherits it. Writing <code>t</code> for how far along you
+are between the two regions' centres:</p>
+<p style="text-align:center"><code>background(x) = (1&minus;t) &middot; level&#8321; + t &middot; level&#8322;</code></p>
+<p style="text-align:center"><code>background_err(x) = &radic;[ (1&minus;t)&sup2; &middot; var(level&#8321;) + t&sup2; &middot; var(level&#8322;) ]</code></p>
+<p>where <code>var(level)</code> is the variance of that region's mean
+-- the summed counts divided by the channel count squared. The two
+regions are separate stretches of spectrum, so there is no cross term
+between them.</p>
+<p>This is drawn as a faint shaded band around the dashed background
+line. The band is at its narrowest at the two background regions and
+widens as you move away from them, which is worth watching: it shows
+directly that a background <i>interpolated</i> between two nearby
+regions is far better determined than one <i>extrapolated</i> well
+beyond them. If the band is wide where your peak sits, moving the
+background regions closer to the peak will tighten it.</p>
+<p>Widening a background region also tightens the band, since averaging
+more channels measures the level more precisely -- but only while the
+region stays on genuine background. A region stretched over the
+shoulder of a neighbouring peak measures something that is not
+background at all, and no amount of averaging fixes that.</p>
 
 <h2>When an uncertainty reads "n/a"</h2>
 <p>Occasionally a fit succeeds but one of its numbers is shown as
