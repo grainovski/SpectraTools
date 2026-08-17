@@ -370,6 +370,29 @@ def _integration_tooltip(main_window, result):
     return "\n".join(lines)
 
 
+def _export_writer_for(path, chosen_filter):
+    """Which writer an Export should use.
+
+    The file's own EXTENSION decides, and the chosen filter only breaks a
+    tie when the name has no recognised one -- the same rule
+    _open_save_spectrum_dialog already applies to spectra, so a user who
+    types "results.csv" while the Text filter happens to be selected gets
+    the CSV they asked for rather than a text file wearing a .csv name.
+    """
+    lower = path.lower()
+    if lower.endswith(".csv"):
+        return fit_export.write_csv
+    if lower.endswith(".tex"):
+        return fit_export.write_latex
+    if lower.endswith(".txt"):
+        return fit_export.write_text_report
+    if chosen_filter.startswith("CSV"):
+        return fit_export.write_csv
+    if chosen_filter.startswith("LaTeX"):
+        return fit_export.write_latex
+    return fit_export.write_text_report
+
+
 def _peak_component(x_dense, peak, result):
     """One peak's own shape (Gaussian or hypermet-tail, matching
     result.tail_fraction), evaluated over x_dense -- shared by the
@@ -1233,6 +1256,10 @@ class FitModeController(QObject):
             return
         self._export_fits(active, list(range(len(active.fits))))
 
+    @staticmethod
+    def _pick_export_writer(path, chosen_filter):
+        return _export_writer_for(path, chosen_filter)
+
     def _export_fits(self, active, fit_indices):
         """Opens a save-file dialog and writes a plain-text report
         covering the given 0-based indices into active.fits -- used by
@@ -1244,16 +1271,18 @@ class FitModeController(QObject):
         else:
             default_name = f"{stem}_fits_report.txt"
         directory = os.path.dirname(active.path)
-        path, _ = QFileDialog.getSaveFileName(
+        path, chosen_filter = QFileDialog.getSaveFileName(
             self.main_window, "Export Fit Report", os.path.join(directory, default_name),
-            "Text files (*.txt);;All files (*)",
+            "Text files (*.txt);;CSV files (*.csv);;LaTeX table (*.tex);;All files (*)",
         )
         if not path:
             return
         results = [(i + 1, active.fits[i]) for i in fit_indices]
         calibration = self.main_window._calibration if self.main_window._calibration_active else None
         try:
-            fit_export.write_text_report(path, results, active.path, calibration)
+            _export_writer_for(path, chosen_filter)(
+                path, results, active.path, calibration
+            )
         except OSError as exc:
             self._show_status_message(f"Could not write export: {exc}", 5000)
 

@@ -401,6 +401,15 @@ class MainWindow(QMainWindow):
         self.open_root_action.triggered.connect(self._open_root_dialog)
         self.file_menu.addAction(self.open_root_action)
 
+        self.reload_spectrum_action = QAction("Reload Spectrum", self)
+        self.reload_spectrum_action.setShortcut("F5")
+        self.reload_spectrum_action.setEnabled(False)
+        self.reload_spectrum_action.setToolTip(
+            "Re-read the active spectrum's file, keeping its fits and marks"
+        )
+        self.reload_spectrum_action.triggered.connect(self._reload_active_spectrum)
+        self.file_menu.addAction(self.reload_spectrum_action)
+
         self.save_spectrum_action = QAction("Save Spectrum...", self)
         self.save_spectrum_action.setShortcut("Ctrl+S")
         self.save_spectrum_action.setEnabled(False)
@@ -940,6 +949,80 @@ class MainWindow(QMainWindow):
                 return
             self._open_matrix_panel(path, matrix=matrix)
             self.settings.set_last_folder(os.path.dirname(path))
+
+    def _reload_active_spectrum(self):
+        """Re-read the active spectrum's file in place, keeping its
+        calibration, fits and marks.
+
+        For watching an acquisition that is still counting: the file on
+        disk grows, and this picks up the new counts without losing the
+        analysis set up around them. Manual rather than polled -- a timer
+        would redraw under the user's hands mid-measurement, and
+        file-watching behaves differently on Windows and Linux.
+        """
+        active = active_spectrum(self.spectra)
+        if active is None:
+            return
+
+        path = active.path
+        object_path = None
+        if "::" in path:
+            # A ROOT spectrum is one object inside a file; both halves are
+            # needed to find it again.
+            path, object_path = path.split("::", 1)
+
+        if not os.path.exists(path):
+            QMessageBox.warning(
+                self, "Could not reload",
+                f"{os.path.basename(path)} is no longer on disk.",
+            )
+            return
+
+        previous_length = len(active.data)
+        try:
+            if object_path is not None:
+                from root_io import RootError, list_objects, load_spectrum
+                try:
+                    # The cycle suffix is not in the displayed path, so the
+                    # object is matched on its stem.
+                    key = next(
+                        k for k, _cls, kind in list_objects(path)
+                        if kind == "spectrum" and k.split(";")[0] == object_path
+                    )
+                except StopIteration:
+                    raise RootError(f"{object_path!r} is no longer in the file")
+                data, _calibration = load_spectrum(path, key)
+            else:
+                spectrum, error, _calibration = self._try_load_spectrum(path)
+                if error:
+                    QMessageBox.warning(self, "Could not reload", error)
+                    return
+                data = spectrum.data
+                # _try_load_spectrum allocates a colour for the throwaway
+                # spectrum it builds; hand it back so reloading repeatedly
+                # does not walk the palette.
+                self._next_color_index -= 1
+        except Exception as exc:
+            QMessageBox.warning(self, "Could not reload", f"{os.path.basename(path)}: {exc}")
+            return
+
+        active.data = data
+        # A spectrum that changed length invalidates anything anchored to a
+        # channel number: the marks and fits describe positions that may no
+        # longer mean the same thing. Dropping them silently would be worse
+        # than saying so -- the user would keep reading fits that no longer
+        # match the data under them.
+        if len(data) != previous_length:
+            active.fits.clear()
+            self.fit_controller.reset_marks()
+            self.fit_controller.update_results_list()
+            self.fit_controller._show_status_message(
+                f"Reloaded: channel count changed {previous_length} -> {len(data)}, "
+                "so fits and marks were cleared.", 8000,
+            )
+        else:
+            self.fit_controller._show_status_message("Reloaded from disk.", 4000)
+        self._plot_data(preserve_view=True)
 
     def _open_root_dialog(self):
         """Open a ROOT file: pick the file, then pick what to take out of
@@ -1628,6 +1711,12 @@ class MainWindow(QMainWindow):
         self.rebin_action.setEnabled(active is not None)
         self.save_spectrum_action.setEnabled(active is not None)
         self.close_spectrum_action.setEnabled(active is not None)
+        # A spectrum computed in memory -- an Add/Subtract result, or a
+        # matrix cut -- has no file behind it to re-read, so offering
+        # Reload for it would be an action that can only fail.
+        self.reload_spectrum_action.setEnabled(
+            active is not None and os.path.exists(active.path.split("::", 1)[0])
+        )
         visible_count = sum(1 for s in self.spectra if s.visible)
         self.normalize_action.setEnabled(visible_count >= 2)
         self.add_action.setEnabled(len(self.spectra) >= 2)

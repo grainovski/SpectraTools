@@ -1,3 +1,4 @@
+import csv
 import json
 import math
 import os
@@ -280,3 +281,147 @@ def write_text_report(path, results, spectrum_path, calibration=None):
     ]
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n\n".join(blocks) + "\n")
+
+
+# --- tabular exports (X8) ----------------------------------------------
+#
+# One row per PEAK rather than per fit: a fit with three peaks is three
+# lines of a table, which is what goes into a paper or a spreadsheet.
+# Integration results have no peaks and are skipped by both writers --
+# their gross/background/net breakdown is a different shape entirely and
+# forcing it into these columns would produce rows whose numbers mean
+# something other than the header says.
+
+_TABLE_COLUMNS = (
+    "fit", "peak", "position", "position_err", "fwhm", "fwhm_err",
+    "area", "area_err", "full_area", "full_area_err", "reduced_chi2",
+)
+
+
+def _table_rows(results, calibration=None):
+    """(header, rows) for the tabular writers, values already converted to
+    keV where a calibration is active.
+
+    Position and FWHM are converted through the SAME helpers the on-screen
+    panel uses, so an exported table and the numbers the user was looking
+    at cannot disagree. Area is never converted -- it is a count, and
+    counts have no energy equivalent."""
+    header = list(_TABLE_COLUMNS)
+    if calibration is not None:
+        header = [
+            f"{name}_keV" if name.startswith(("position", "fwhm")) else name
+            for name in header
+        ]
+
+    rows = []
+    for fit_number, result in results:
+        if not getattr(result, "peaks", None):
+            continue
+        for index, peak in enumerate(result.peaks, start=1):
+            position = peak.position
+            position_err = peak.position_err
+            fwhm = peak.fwhm
+            fwhm_err = peak.fwhm_err
+            if calibration is not None:
+                position = calibration.apply(peak.position)
+                position_err = abs(calibration.derivative(peak.position)) * peak.position_err
+                # A width has no position of its own on the calibration
+                # curve, so it is scaled at its PEAK's position -- the same
+                # rule fit_mode._to_energy follows.
+                scale = abs(calibration.derivative(peak.position))
+                fwhm = scale * peak.fwhm
+                fwhm_err = scale * peak.fwhm_err
+            rows.append([
+                fit_number, index, position, position_err, fwhm, fwhm_err,
+                peak.area, peak.area_err, peak.full_area, peak.full_area_err,
+                result.reduced_chi2,
+            ])
+    return header, rows
+
+
+def _number(value, digits=4):
+    if value is None:
+        return ""
+    try:
+        if math.isnan(value):
+            return ""
+    except TypeError:
+        return str(value)
+    return f"{value:.{digits}g}"
+
+
+def write_csv(path, results, spectrum_path, calibration=None):
+    """One row per fitted peak, for a spreadsheet.
+
+    An undetermined uncertainty is written as an EMPTY cell rather than
+    "nan" or "n/a": a spreadsheet reads an empty cell as missing and a text
+    cell as text, which would silently turn the whole column into strings
+    and break any average taken over it.
+    """
+    header, rows = _table_rows(results, calibration)
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([f"# spectrum: {spectrum_path}"])
+        writer.writerow(header)
+        for row in rows:
+            # Eight significant digits, not the four the human-readable
+            # writers use: this file is meant to be computed with, and
+            # rounding an area of 1234.5 to "1234" on the way out would
+            # lose real precision the fit actually determined.
+            writer.writerow([
+                value if isinstance(value, int) else _number(value, digits=8)
+                for value in row
+            ])
+
+
+def _latex_escape(text):
+    """LaTeX has five characters that are syntax rather than text, and a
+    spectrum path is very likely to contain underscores."""
+    for character, replacement in (
+        ("\\", r"\textbackslash{}"), ("&", r"\&"), ("%", r"\%"),
+        ("$", r"\$"), ("#", r"\#"), ("_", r"\_"), ("{", r"\{"), ("}", r"\}"),
+    ):
+        text = text.replace(character, replacement)
+    return text
+
+
+def _latex_cell(value, err, digits=4):
+    """A value with its uncertainty, or just the value when the
+    uncertainty is undetermined -- writing "$\\pm$ nan" into a paper would
+    be worse than writing nothing."""
+    text = _number(value, digits)
+    if not text:
+        return "--"
+    err_text = _number(err, 2)
+    return f"${text} \\pm {err_text}$" if err_text else f"${text}$"
+
+
+def write_latex(path, results, spectrum_path, calibration=None):
+    """A LaTeX `tabular` of one row per fitted peak, ready to paste into a
+    paper -- which is what these numbers are usually for, and where
+    retyping them by hand is exactly where transcription errors enter.
+
+    Emitted as a bare table environment rather than a whole document, so
+    it drops into an existing paper without stripping a preamble.
+    """
+    _, rows = _table_rows(results, calibration)
+    unit = " (keV)" if calibration is not None else " (ch)"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("% Generated by SpectraTools from "
+                f"{_latex_escape(str(spectrum_path))}\n")
+        f.write("\\begin{table}[htbp]\n  \\centering\n")
+        f.write("  \\begin{tabular}{rrccrr}\n    \\hline\n")
+        f.write(f"    Fit & Peak & Position{unit} & FWHM{unit} & "
+                "Net area & Full area \\\\\n    \\hline\n")
+        for row in rows:
+            (fit_number, index, position, position_err, fwhm, fwhm_err,
+             area, area_err, full_area, full_area_err, _chi2) = row
+            f.write(
+                f"    {fit_number} & {index} & "
+                f"{_latex_cell(position, position_err)} & "
+                f"{_latex_cell(fwhm, fwhm_err)} & "
+                f"{_latex_cell(area, area_err, digits=6)} & "
+                f"{_latex_cell(full_area, full_area_err, digits=6)} \\\\\n"
+            )
+        f.write("    \\hline\n  \\end{tabular}\n")
+        f.write("  \\caption{Fit results.}\n  \\label{tab:fits}\n\\end{table}\n")
