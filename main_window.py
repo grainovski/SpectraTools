@@ -44,6 +44,7 @@ from help_content import (
 )
 from histogram_io import ParseError, load_histogram, save_histogram
 from matrix_panel import MatrixPanel
+import matrix_cache
 from mtx_io import load_mtx
 from n42_io import load_n42
 from settings import Settings
@@ -258,6 +259,17 @@ class _MatrixLoadWorker(QThread):
         self._path = path
 
     def run(self):
+        # A cache hit skips the decode entirely, which is the whole cost
+        # of opening a matrix -- about 4.9 s for the reference file. Read
+        # on the worker thread, not before starting it, so a slow or
+        # stalled disk cannot freeze the GUI where the decode no longer
+        # does. No progress is reported for a hit: it is a single array
+        # read, and a bar that jumps straight to done says less than no
+        # bar at all.
+        cached = matrix_cache.load(self._path)
+        if cached is not None:
+            self.loaded.emit(cached)
+            return
         try:
             matrix = load_mtx(self._path, progress=self.progressed.emit)
         except ParseError as exc:
@@ -268,6 +280,11 @@ class _MatrixLoadWorker(QThread):
             # down the thread with no way for the GUI to report it.
             self.failed.emit(str(exc))
             return
+        # Stored after a successful decode only, so a matrix that failed
+        # to parse is never cached as if it had worked. store() reports
+        # failure rather than raising -- a cache that cannot be written is
+        # not something to interrupt the user for.
+        matrix_cache.store(self._path, matrix)
         self.loaded.emit(matrix)
 
 
@@ -377,6 +394,12 @@ class MainWindow(QMainWindow):
         self.open_matrix_action.setShortcut("Ctrl+Shift+O")
         self.open_matrix_action.triggered.connect(self._open_matrix_dialog)
         self.file_menu.addAction(self.open_matrix_action)
+
+        # Separate from "Open..." because a ROOT file needs a second
+        # question -- which of its objects -- that no other format does.
+        self.open_root_action = QAction("Open ROOT File...", self)
+        self.open_root_action.triggered.connect(self._open_root_dialog)
+        self.file_menu.addAction(self.open_root_action)
 
         self.save_spectrum_action = QAction("Save Spectrum...", self)
         self.save_spectrum_action.setShortcut("Ctrl+S")
@@ -917,6 +940,105 @@ class MainWindow(QMainWindow):
                 return
             self._open_matrix_panel(path, matrix=matrix)
             self.settings.set_last_folder(os.path.dirname(path))
+
+    def _open_root_dialog(self):
+        """Open a ROOT file: pick the file, then pick what to take out of
+        it. Spectra join the spectrum list; a matrix opens its own panel."""
+        from root_dialog import RootObjectDialog
+        from root_io import RootError, list_objects
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open ROOT File", self.settings.last_folder(),
+            "ROOT files (*.root);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            objects = list_objects(path)
+        except RootError as exc:
+            QMessageBox.warning(self, "Could not open ROOT file", str(exc))
+            return
+        if not objects:
+            QMessageBox.warning(
+                self, "Could not open ROOT file",
+                f"{os.path.basename(path)} contains no 1D or 2D histograms.",
+            )
+            return
+
+        dialog = RootObjectDialog(self, path, objects)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self.settings.set_last_folder(os.path.dirname(path))
+        if dialog.result_matrix is not None:
+            self._open_root_matrix(path, dialog.result_matrix)
+        elif dialog.result_spectra:
+            self._load_root_spectra(path, dialog.result_spectra)
+
+    def _load_root_spectra(self, path, object_paths):
+        """Loads the chosen 1D histograms as spectra.
+
+        Deliberately mirrors _load_files' sequencing rather than reusing
+        it: _load_files is keyed on a file path per spectrum, and here one
+        file yields several. The parts that matter are kept -- the first
+        embedded calibration wins and is applied ONCE after every spectrum
+        is in the list, not per file, which is the v3.1.0 M18 fix.
+        """
+        from root_io import RootError, load_spectrum
+
+        failures = []
+        added = []
+        pending_calibration = None
+        for object_path in object_paths:
+            display = f"{path}::{object_path.split(';')[0]}"
+            if any(s.path == display for s in self.spectra):
+                continue
+            try:
+                data, calibration = load_spectrum(path, object_path)
+            except RootError as exc:
+                failures.append(f"{object_path}: {exc}")
+                continue
+            color_index = self._next_color_index
+            self._next_color_index += 1
+            spectrum = LoadedSpectrum(display, data, next_color(color_index, self._theme))
+            spectrum.color_index = color_index
+            if not self.spectra:
+                spectrum.active = True
+            self.spectra.append(spectrum)
+            added.append(spectrum)
+            if calibration is not None and pending_calibration is None:
+                pending_calibration = calibration
+
+        if added:
+            self.settings.add_recent_file(path)
+            self._update_recent_menu()
+            for spectrum in added:
+                self._append_spectrum_row(spectrum)
+            self._sync_active_radios()
+            if pending_calibration is not None and not self._calibration_active:
+                # Redraws by itself, so it replaces the _plot_data() below
+                # rather than adding to it -- same reasoning as _load_files.
+                self._apply_calibration_change(pending_calibration, True)
+            else:
+                self._plot_data()
+        if failures:
+            QMessageBox.warning(
+                self, "Could not open ROOT file", "\n".join(failures)
+            )
+
+    def _open_root_matrix(self, path, object_path):
+        from root_io import RootError, load_matrix
+
+        try:
+            matrix, _x_cal, _y_cal = load_matrix(path, object_path)
+        except RootError as exc:
+            QMessageBox.warning(self, "Could not open matrix", str(exc))
+            return
+        # No progress dialog: a ROOT TH2 is already decoded by uproot into
+        # a numpy array in one step, so there is no row-by-row pass to
+        # report on the way .mtx has. The axis calibrations are read but
+        # not yet applied -- the matrix panel works in channels, and
+        # wiring a per-axis calibration into it is its own change.
+        self._open_matrix_panel(f"{path}::{object_path.split(';')[0]}", matrix=matrix)
 
     def _load_matrix_with_progress(self, path):
         """Decodes `path` in a worker thread behind a progress dialog.
