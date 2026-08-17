@@ -4,6 +4,34 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [3.1.4] - unreleased
+
+A refinement to the matrix cut, plus documentation of how its background
+subtraction actually works.
+
+### Changed
+
+- **A background region marked entirely outside the matrix is now
+  ignored** when activating a cut, contributing neither counts nor
+  width. Previously such a region still counted toward the background
+  width, which quietly weakened the subtraction even though the region
+  had no data under it. If every background region is outside the
+  matrix, no subtraction is performed.
+- A background region that merely *overlaps* the edge of the matrix is
+  unaffected and still counts its full marked width — that is the
+  behaviour corrected in 3.1.3 and it remains in place.
+
+### Documentation
+
+- The Knowledge Database now explains the cut's **gate-width weighting**
+  in full: the formula used, a worked example, the fact that widths are
+  counted inclusively, and why adding more background regions improves
+  the statistics rather than weakening the subtraction.
+- It also spells out the **matrix-edge caveat**: region widths come from
+  where you marked, while counts can only come from data that exists, so
+  a background band left hanging over the edge removes less background
+  than intended. Mark background bands well inside the data.
+
 ## [3.1.3] - 2026-08-17
 
 Corrects two faults in the matrix cut that removed too much background,
