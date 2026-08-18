@@ -475,27 +475,88 @@ def _make_model(names, free_names, fixed_params, n_peaks, link_widths, enable_le
     is inverting a small matrix per fit where we are stepping a Marquardt
     iteration.
     """
-    def model(x, *free_values):
-        values_by_name = dict(fixed_params)
-        values_by_name.update(zip(free_names, free_values))
+    def evaluate(x, values_by_name, peak_indices=None, include_background=True):
+        """The model, optionally restricted to a subset of its terms.
+
+        `peak_indices=None` means every peak, which is the model proper.
+        Naming a subset is what lets the numeric Jacobian avoid recomputing
+        peaks that a perturbed parameter cannot possibly have moved -- see
+        _parameter_influence.
+        """
         amplitudes, positions, sigmas, tail_fraction, tail_beta = _unpack_named(
             values_by_name, n_peaks, link_widths, enable_left_tail
         )
+        chosen = range(n_peaks) if peak_indices is None else peak_indices
         result = np.zeros_like(x, dtype=float)
-        for amplitude, position, sigma in zip(amplitudes, positions, sigmas):
+        for i in chosen:
+            amplitude, position, sigma = amplitudes[i], positions[i], sigmas[i]
             if enable_left_tail:
                 result = result + amplitude * hypermet_left_tail(
                     x, position, sigma, tail_fraction, tail_beta
                 )
             else:
                 result = result + amplitude * np.exp(-((x - position) ** 2) / (2 * sigma ** 2))
-        if background_reference is not None:
+        if include_background and background_reference is not None:
             result = result + (
                 values_by_name["bg_c0"]
                 + values_by_name["bg_c1"] * (x - background_reference)
             )
         return result
+
+    def model(x, *free_values):
+        values_by_name = dict(fixed_params)
+        values_by_name.update(zip(free_names, free_values))
+        return evaluate(x, values_by_name)
+
+    # Attached rather than returned as a pair so every existing caller --
+    # and every test that builds a model by hand -- keeps working unchanged.
+    model.evaluate = evaluate
     return model
+
+
+def _parameter_influence(free_names, n_peaks, link_widths):
+    """Which terms of the model each free parameter can move, as a list
+    parallel to `free_names`.
+
+    Each entry is either None ("everything -- recompute the whole model")
+    or a `(peak_indices, include_background)` pair naming the only terms
+    that can have changed.
+
+    This is what turns the numeric Jacobian from O(peaks**2) into O(peaks).
+    A central difference of the FULL model when only one peak moved
+    computes every other peak twice and then subtracts it from itself --
+    work that is not merely wasted but actively lossy, since the unchanged
+    terms are large and cancel, eating precision out of the small
+    difference that is actually wanted.
+
+    The dispatch is on the same name prefixes _parameter_names() already
+    establishes as the single source of truth, and mirrors
+    _build_param_damping's structure deliberately: an unrecognised name
+    raises rather than being guessed at, because a wrong answer here would
+    silently zero out part of a Jacobian column.
+
+    Note which parameters are genuinely global. A LINKED sigma is shared by
+    every peak, and both tail parameters are, so those still cost a full
+    evaluation -- there is no shortcut to take. With linked widths that is
+    one parameter in 2n+1; the other 2n become single-peak.
+    """
+    influence = []
+    for name in free_names:
+        if name.startswith(("amp_", "pos_")):
+            influence.append(([int(name.split("_", 1)[1])], False))
+        elif name.startswith("sigma_"):
+            influence.append(([int(name.split("_", 1)[1])], False))
+        elif name == "sigma":
+            # Shared by every peak when widths are linked.
+            influence.append(None)
+        elif name in ("tail_fraction", "tail_beta"):
+            influence.append(None)
+        elif name in ("bg_c0", "bg_c1"):
+            influence.append(([], True))
+        else:
+            raise FitError(f"No influence rule for parameter {name!r}")
+    assert len(influence) == len(free_names), "influence list must be parallel to free_names"
+    return influence
 
 
 def _integral_sigma(x_fit, y_sub, peak_positions):
@@ -815,9 +876,26 @@ def fit_peaks(
         model = lambda xx, pp: model_named(xx, *pp)
         damping = _build_param_damping(free_names, fixed_params, link_widths)
 
+        # One evaluator per free parameter, each computing only the model
+        # terms that parameter can move. See _parameter_influence.
+        def _restrict(peak_indices, include_background):
+            def evaluate(xx, pp):
+                values = dict(fixed_params)
+                values.update(zip(free_names, pp))
+                return model_named.evaluate(
+                    xx, values, peak_indices, include_background
+                )
+            return evaluate
+
+        restricted = [
+            None if scope is None else _restrict(*scope)
+            for scope in _parameter_influence(free_names, n_peaks, link_widths)
+        ]
+
         try:
             popt, pcov = _marquardt_fit(
                 model, x_fit, target, y_err, p0, damping, fit_region_bounds=fit_region,
+                restricted=restricted,
             )
         except np.linalg.LinAlgError as exc:
             raise FitError(f"Fit did not converge: {exc}") from exc
@@ -1448,17 +1526,30 @@ def _measure_width(x_fit, y_sub, peak_positions, fallback):
     return max(fwhm / FWHM_FACTOR, 1e-6)
 
 
-def _numeric_jacobian(model, x, p):
+def _numeric_jacobian(model, x, p, restricted=None):
     """Central-difference Jacobian -- matches TV's own fallback
     (CurNumericDerivation) for fit-function modules without an analytic
-    derivative; avoids hand-deriving hypermet's erfc-based partials."""
+    derivative; avoids hand-deriving hypermet's erfc-based partials.
+
+    `restricted` is an optional list parallel to `p`, holding either None
+    or a callable `f(x, p)` that evaluates ONLY the model terms the
+    corresponding parameter can move (see _parameter_influence). The
+    difference of two such restricted evaluations equals the difference of
+    two full ones, because every omitted term is identical in both and
+    cancels exactly -- so this is the same derivative, reached without
+    recomputing peaks that did not move.
+
+    Omitted entirely (the default) it evaluates the whole model per
+    column, which is what every caller that builds a model by hand does.
+    """
     n = len(p)
     J = np.zeros((len(x), n))
     for i in range(n):
         h = max(abs(p[i]), 1e-6) * 1e-6
         p_hi = p.copy(); p_hi[i] += h
         p_lo = p.copy(); p_lo[i] -= h
-        J[:, i] = (model(x, p_hi) - model(x, p_lo)) / (2 * h)
+        evaluate = model if restricted is None or restricted[i] is None else restricted[i]
+        J[:, i] = (evaluate(x, p_hi) - evaluate(x, p_lo)) / (2 * h)
     return J
 
 
@@ -1521,14 +1612,17 @@ def _clamp_trial(p_try, damping):
     return p_try
 
 
-def _marquardt_fit(model, x, y, y_err, p0, damping, fit_region_bounds=None):
+def _marquardt_fit(model, x, y, y_err, p0, damping, fit_region_bounds=None,
+                   restricted=None):
     """Damped Levenberg-Marquardt solver replicating TV's fit procedure
     (tv-1.9.13/lib/tv/vsCurFit.c's CurFit + VsFitFct.c's CHANGE_TRY).
     `model(x, p)` takes the full parameter array (not *args, unlike
     scipy's curve_fit convention) and returns the model y-values.
     `damping` is a list of _ParamDamping, one per entry in p0, telling
-    the solver how to limit each parameter's per-iteration step. Returns
-    (popt, pcov) with the same meaning as
+    the solver how to limit each parameter's per-iteration step.
+    `restricted` is passed straight through to _numeric_jacobian and is
+    purely an optimisation -- omitting it changes nothing but the cost.
+    Returns (popt, pcov) with the same meaning as
     scipy.optimize.curve_fit(..., absolute_sigma=True)."""
     p = np.array(p0, dtype=float)
     n = len(p)
@@ -1547,7 +1641,7 @@ def _marquardt_fit(model, x, y, y_err, p0, damping, fit_region_bounds=None):
         return measure, r
 
     def jac_only(pt):
-        return _numeric_jacobian(model, x, pt) * weights[:, None]
+        return _numeric_jacobian(model, x, pt, restricted) * weights[:, None]
 
     def measure_and_jac(pt):
         measure, r = measure_only(pt)
