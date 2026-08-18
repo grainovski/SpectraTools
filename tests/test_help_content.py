@@ -62,7 +62,7 @@ def test_howto_html_contains_every_shortcut():
         "Ctrl+=", "Ctrl+-", "Ctrl+0",
         "Ctrl+F", "Ctrl+B", "Ctrl+C", "Ctrl+Shift+C", "Ctrl+E", "Ctrl+I",
         "Ctrl+Alt+C",
-        "B", "R", "P", "F1",
+        "B", "R", "P", "F1", "F5",
     ]:
         assert f"<kbd>{shortcut}</kbd>" in html, f"missing shortcut {shortcut!r}"
 
@@ -81,6 +81,8 @@ def test_howto_html_covers_every_operation():
         "Performing a fit",
         "Integration",
         "Saving and exporting",
+        "Saving and reloading fits",
+        "Calibrating from fitted peaks",
         "View options",
         "Knowledge Database",
     ]:
@@ -514,7 +516,7 @@ def test_howto_saving_section_notes_n42_is_read_only():
 
 def test_howto_html_documents_matrix_analysis():
     html = build_howto_html()
-    assert "<h3>11. Matrix analysis</h3>" in html
+    assert "<h3>13. Matrix analysis</h3>" in html
     assert "Open Matrix" in html
     assert "Ctrl+Shift+O" in html.replace("&#43;", "+")
 
@@ -722,3 +724,60 @@ def test_knowledge_database_documents_calibrating_from_fitted_peaks():
     assert "assigned to the wrong line" in text
     # And that the bare minimum is an interpolation, not a fit.
     assert "interpolation rather than a fit" in text
+
+
+def test_howto_shortcut_table_lists_every_shortcut_the_app_registers():
+    """The hand-maintained list above cannot catch a NEW shortcut going
+    undocumented -- it only checks what somebody remembered to add. F5
+    (Reload Spectrum) shipped in v4.0.0 and was missing from the HowTo
+    entirely until this test was written.
+
+    Compares the page against what main_window/matrix_panel/fit_mode
+    actually call setShortcut() with, so a future shortcut cannot be
+    added to the app and silently left out of the docs.
+    """
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    registered = set()
+    for name in ("main_window.py", "matrix_panel.py", "fit_mode.py"):
+        registered |= set(re.findall(
+            r'setShortcut\("([^"]+)"\)', (root / name).read_text(encoding="utf-8")
+        ))
+    assert registered, "found no shortcuts at all -- the pattern must have gone stale"
+
+    html = build_howto_html()
+    documented = set(re.findall(r"<kbd>([^<]+)</kbd>", html))
+    missing = sorted(registered - documented)
+    assert not missing, f"shortcuts registered but not documented in the HowTo: {missing}"
+
+
+def test_howto_documents_the_v400_features():
+    # The HowTo was never updated for v4.0.0 -- every one of these was
+    # absent while the Knowledge Database covered them all, so a user
+    # looking for "how do I open a ROOT file" found nothing.
+    text = _rendered_text(build_howto_html())
+    for term in ("Open ROOT File", "Reload Spectrum", "Save Fits",
+                 "Load Fits", "Calibrate from Fitted Peaks", "Fit background"):
+        assert term in text, f"HowTo does not mention {term!r}"
+    # The export formats, and the two details that catch people out.
+    assert ".csv" in text and ".tex" in text
+    assert "empty cell" in text
+    assert "worst residual" in text
+
+
+def test_help_pages_document_multi_gate_cuts():
+    """This shipped half-finished: compute_cut summed several gates but the
+    panel could only ever mark one, so the CHANGELOG claimed a feature the
+    user could not reach. Now that it works, both pages must say so -- the
+    HowTo for how to mark them, the KB for what summing gates means."""
+    howto = _rendered_text(build_howto_html())
+    kb = _rendered_text(build_knowledge_database_html())
+
+    assert "any number of regions allowed" in howto
+    assert "as many gates as you want" in howto
+    assert "Gating on more than one peak" in kb
+    assert "totals across all of them" in kb
+    # The caveat that decides whether it is a good idea.
+    assert "contaminant" in kb
+    assert "counted once" in kb

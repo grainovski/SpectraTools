@@ -32,9 +32,9 @@ ZOOM_FACTOR = 1.5
 
 class MatrixCutState:
     """Tracks in-progress cut-region/background-region marks on a
-    matrix's working projection -- exactly one cut region, any number
-    of background regions (unlike fit_mode.py's FitModeState, which
-    caps background regions at 2; TV's own philosophy is "the more
+    matrix's working projection -- any number of cut (gate) regions and
+    any number of background regions (unlike fit_mode.py's FitModeState,
+    which caps background regions at 2; TV's own philosophy is "the more
     background you mark, the better"). Two-click pairing, modeled on
     FitModeState (fit_mode.py:29-159)."""
 
@@ -42,7 +42,11 @@ class MatrixCutState:
         self.reset()
 
     def reset(self):
-        self.cut_region = None
+        # A LIST, like bg_regions -- a cut may be gated on several regions
+        # at once, which is how a cascade is gated on more than one of its
+        # members. compute_cut sums them with the cut-line count
+        # accumulating across them.
+        self.cut_regions = []
         self._pending_cut_click = None
         self.bg_regions = []
         self._pending_bg_click = None
@@ -52,7 +56,10 @@ class MatrixCutState:
             self._pending_cut_click = x
             return False
         lo, hi = sorted((self._pending_cut_click, x))
-        self.cut_region = (lo, hi)
+        # Appends rather than replaces. This used to assign, so marking a
+        # second gate silently discarded the first -- compute_cut had
+        # accepted several all along.
+        self.cut_regions.append((lo, hi))
         self._pending_cut_click = None
         return True
 
@@ -66,7 +73,7 @@ class MatrixCutState:
         return True
 
     def clear_cut(self):
-        self.cut_region = None
+        self.cut_regions = []
         self._pending_cut_click = None
 
     def clear_bg(self):
@@ -149,8 +156,7 @@ class MatrixCutController(QObject):
                     color=CUT_REGION_COLOR, linestyle="--", linewidth=1,
                 )
             )
-        if state.cut_region is not None:
-            lo, hi = state.cut_region
+        for lo, hi in state.cut_regions:
             self._artists.append(
                 axes.axvspan(
                     to_display(lo), to_display(hi), color=CUT_REGION_COLOR, alpha=CUT_REGION_ALPHA
@@ -638,7 +644,7 @@ class MatrixPanel(QMainWindow):
         self.fit_controller.clear()
 
     def _update_activate_button(self):
-        self.activate_cut_button.setEnabled(self.cut_controller.state.cut_region is not None)
+        self.activate_cut_button.setEnabled(bool(self.cut_controller.state.cut_regions))
 
     def _activate_cut(self):
         from matrix_cut import compute_cut_with_variance
@@ -648,7 +654,7 @@ class MatrixPanel(QMainWindow):
         # the real uncertainty rather than sqrt(counts) -- see
         # compute_cut_with_variance for why the two differ.
         result, variance = compute_cut_with_variance(
-            self.matrix, self.working_axis, state.cut_region, state.bg_regions
+            self.matrix, self.working_axis, state.cut_regions, state.bg_regions
         )
         # Path-shaped, not a free-form label -- same rationale and same
         # fix shape as _rebuild_spectra's own path construction above.
@@ -672,9 +678,17 @@ class MatrixPanel(QMainWindow):
         # splitext parses it correctly no matter what self.path's own
         # stem contains.
         root, ext = os.path.splitext(self.path)
+        # Named for the SPAN the gates cover, plus how many there are when
+        # it is more than one. Two different gate sets can share a span --
+        # one wide gate against two narrow ones at its ends -- so the count
+        # is what stops their auto-log files colliding. Still no decimal
+        # point anywhere in the constructed stem, which is the constraint
+        # the comment above exists for.
+        gates = state.cut_regions
+        suffix = f"_x{len(gates)}" if len(gates) > 1 else ""
         path = (
             f"{root}_{self.working_axis}_cut_"
-            f"{round(state.cut_region[0])}_{round(state.cut_region[1])}{ext}"
+            f"{round(gates[0][0])}_{round(gates[-1][1])}{suffix}{ext}"
         )
         self.main_window._add_combined_spectrum(path, result, variance=variance)
 

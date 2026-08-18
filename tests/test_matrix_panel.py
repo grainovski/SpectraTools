@@ -94,7 +94,7 @@ def test_matrix_panel_marking_cut_region_with_two_clicks(qapp):
     # tolerant-comparison convention test_fit_mode_ui.py already uses for
     # every click-derived region assertion (e.g.
     # "fit_region == pytest.approx((85.0, 115.0))").
-    assert panel.cut_controller.state.cut_region == pytest.approx((100.0, 200.0))
+    assert panel.cut_controller.state.cut_regions == [pytest.approx((100.0, 200.0))]
 
 
 def test_matrix_panel_marking_background_region_with_two_clicks(qapp):
@@ -378,7 +378,7 @@ def test_matrix_panel_cut_marks_stored_in_channel_space(qapp):
     # Clicked at display (keV) positions 200/400 with b=2.0 -- channel
     # space is display / 2, so the stored region should be (100, 200),
     # not the raw display values (200, 400).
-    assert panel.cut_controller.state.cut_region == pytest.approx((100.0, 200.0))
+    assert panel.cut_controller.state.cut_regions == [pytest.approx((100.0, 200.0))]
 
 
 def test_matrix_panel_pending_cut_click_shows_dashed_preview_line(qapp):
@@ -837,7 +837,7 @@ def test_activate_cut_auto_log_filename_is_not_truncated_by_embedded_dots(qapp, 
     main_window = MainWindow()
     panel = MatrixPanel(main_window, str(tmp_path / "gpff.mtx"))
 
-    panel.cut_controller.state.cut_region = (3004.4, 3859.9)
+    panel.cut_controller.state.cut_regions = [(3004.4, 3859.9)]
     panel._activate_cut()
     first = main_window.spectra[-1]
     first_log = fit_mode.fit_export.auto_log_path(first.path)
@@ -851,7 +851,7 @@ def test_activate_cut_auto_log_filename_is_not_truncated_by_embedded_dots(qapp, 
 
     # A second, differently-bounded cut on the same matrix must resolve
     # to a DIFFERENT auto-log file, not collide onto the same one.
-    panel.cut_controller.state.cut_region = (100.0, 200.0)
+    panel.cut_controller.state.cut_regions = [(100.0, 200.0)]
     panel._activate_cut()
     second = main_window.spectra[-1]
     second_log = fit_mode.fit_export.auto_log_path(second.path)
@@ -1081,12 +1081,12 @@ def test_ctrl_c_clears_cut_marks_exactly_like_the_clear_marks_button(qapp):
     cut.state.add_bg_click(500)
     cut.state.add_bg_click(600)
     cut._held_key = None
-    assert cut.state.cut_region is not None
+    assert cut.state.cut_regions
     assert cut.state.bg_regions
 
     panel._clear_everything()
 
-    assert cut.state.cut_region is None
+    assert cut.state.cut_regions == []
     assert cut.state.bg_regions == []
     assert cut.state._pending_cut_click is None
     assert cut.state._pending_bg_click is None
@@ -1115,7 +1115,7 @@ def test_ctrl_c_leaves_the_panel_in_the_same_cut_state_as_clear_marks(qapp):
     via_ctrl_c = marked_panel()
     via_ctrl_c._clear_everything()
 
-    for attr in ("cut_region", "bg_regions", "_pending_cut_click", "_pending_bg_click"):
+    for attr in ("cut_regions", "bg_regions", "_pending_cut_click", "_pending_bg_click"):
         assert getattr(via_ctrl_c.cut_controller.state, attr) == \
                getattr(via_button.cut_controller.state, attr), f"{attr} differs"
 
@@ -1164,3 +1164,94 @@ def test_left_button_does_not_pan(qapp):
     panel._pan_to(MouseEvent("motion_notify_event", panel.canvas, x - 80, ymid))
 
     assert panel.axes.get_xlim() == before
+
+
+# --- C4 completed: several gates per cut (v4.0.0) ----------------------
+
+
+def test_marking_a_second_gate_adds_it_rather_than_replacing_the_first(qapp):
+    """The defect this fixes. compute_cut had accepted several gates since
+    v4.0.0's Phase 1 -- summed, with the cut-line count accumulating
+    across them -- but the panel's state ASSIGNED where the background
+    equivalent appended, so marking a second gate silently discarded the
+    first and the feature was unreachable from the UI.
+    """
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    _held_key_click(panel, "cut", 100.0)
+    _held_key_click(panel, "cut", 200.0)
+    _held_key_click(panel, "cut", 400.0)
+    _held_key_click(panel, "cut", 500.0)
+
+    regions = panel.cut_controller.state.cut_regions
+    assert len(regions) == 2, "the second gate must not replace the first"
+    assert regions[0] == pytest.approx((100.0, 200.0))
+    assert regions[1] == pytest.approx((400.0, 500.0))
+
+
+def test_every_marked_gate_is_drawn(qapp):
+    """A gate the user marked but cannot see is worse than one that does
+    not exist -- they would have no way to tell it registered."""
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    for x in (100.0, 200.0, 400.0, 500.0, 700.0, 800.0):
+        _held_key_click(panel, "cut", x)
+
+    spans = [a for a in panel.cut_controller._artists
+             if type(a).__name__ in ("Polygon", "Rectangle")]
+    assert len(spans) >= 3, "each of the three gates needs its own shaded span"
+
+
+def test_activating_a_multi_gate_cut_sums_every_gate(qapp, tmp_path):
+    """End to end: what the panel hands to compute_cut is the whole list,
+    so the resulting spectrum is the sum of all gates minus the weighted
+    background -- not just the last one marked."""
+    import numpy as np
+    from matrix_cut import compute_cut
+
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    panel.path = str(tmp_path / "m.mtx")
+
+    state = panel.cut_controller.state
+    state.cut_regions = [(10.0, 19.0), (40.0, 49.0)]
+    state.bg_regions = [(80.0, 99.0)]
+    panel._update_activate_button()
+    assert panel.activate_cut_button.isEnabled()
+
+    before = len(main_window.spectra)
+    panel._activate_cut()
+    assert len(main_window.spectra) == before + 1
+
+    expected = compute_cut(panel.matrix, panel.working_axis,
+                           state.cut_regions, state.bg_regions)
+    assert main_window.spectra[-1].data == pytest.approx(expected)
+    # And it genuinely differs from gating on the last region alone.
+    only_last = compute_cut(panel.matrix, panel.working_axis,
+                            [(40.0, 49.0)], state.bg_regions)
+    assert not np.allclose(expected, only_last)
+
+
+def test_the_auto_log_name_distinguishes_gate_sets_that_share_a_span(qapp, tmp_path):
+    """One wide gate and two narrow ones at its ends cover the same span,
+    so the span alone cannot name them apart -- their fit logs would
+    collide into one file."""
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    panel.path = str(tmp_path / "run.mtx")
+
+    panel.cut_controller.state.cut_regions = [(10.0, 90.0)]
+    panel._activate_cut()
+    wide = main_window.spectra[-1].path
+
+    panel.cut_controller.state.cut_regions = [(10.0, 20.0), (80.0, 90.0)]
+    panel._activate_cut()
+    split = main_window.spectra[-1].path
+
+    assert wide != split
+    assert "_x2" in split and "_x2" not in wide
+    # The constraint the surrounding comment exists for: no decimal point
+    # anywhere in the stem, or splitext truncates the descriptor.
+    assert "." not in os.path.basename(split)[:-len(".mtx")]

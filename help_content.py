@@ -95,6 +95,7 @@ program supports.</p>
 <tr><th>Shortcut</th><th>Action</th></tr>
 <tr><td><kbd>Ctrl+O</kbd></td><td>Open a spectrum file</td></tr>
 <tr><td><kbd>Ctrl+Shift+O</kbd></td><td>Open Matrix...</td></tr>
+<tr><td><kbd>F5</kbd></td><td>Reload Spectrum (re-read the active spectrum from disk)</td></tr>
 <tr><td><kbd>Ctrl+S</kbd></td><td>Save Spectrum...</td></tr>
 <tr><td><kbd>Ctrl+W</kbd></td><td>Close Spectrum (remove the active spectrum from the program)</td></tr>
 <tr><td><kbd>Ctrl+Q</kbd></td><td>Exit</td></tr>
@@ -154,7 +155,7 @@ fit marks.</p>
 <h3>Matrix panel</h3>
 <table>
 <tr><th>Shortcut</th><th>Action</th></tr>
-<tr><td><kbd>C</kbd></td><td>Hold and click twice to mark the cut (signal) region</td></tr>
+<tr><td><kbd>C</kbd></td><td>Hold and click twice per region to mark a cut (signal) region -- any number of regions allowed</td></tr>
 <tr><td><kbd>G</kbd></td><td>Hold and click twice per region to mark a background region for the cut -- any number of regions allowed</td></tr>
 <tr><td><kbd>Ctrl+Alt+C</kbd></td><td>Activate Cut (same as clicking the button; needs a cut region marked first)</td></tr>
 <tr><td><kbd>B</kbd></td><td>Hold and click twice per region (two regions needed, four clicks total) to mark the two background regions for fitting the working projection</td></tr>
@@ -196,6 +197,23 @@ appear under <b>File &gt; Recent Files</b> for one-click reopening.
 Every spectrum you open stays loaded until you close it -- opening a
 new one adds it alongside the others rather than replacing what's
 already there.</p>
+<p><b>ROOT files</b> (<b>.root</b>) are opened separately, via
+<b>File &gt; Open ROOT File...</b>, because one ROOT file is not one
+spectrum -- it is a directory tree that can hold dozens of named
+objects. Picking the file opens a second dialog listing every 1D and 2D
+histogram in it; select one or more 1D histograms to load them as
+spectra, or a single 2D histogram to open it as a matrix. The two
+cannot be mixed in one go, since a matrix opens its own window while
+spectra join the list. If the histogram's axis is calibrated, that
+calibration is read and applied automatically, the same way an N42
+file's is. See the Knowledge Database page for which histograms are
+refused and why.</p>
+<p><b>File &gt; Reload Spectrum</b> (<kbd>F5</kbd>) re-reads the active
+spectrum's file from disk while keeping its calibration, fits and
+marks -- useful for watching a measurement that is still counting. If
+the file has changed length, the fits and marks are cleared and the
+status bar says so: they are anchored to channel numbers, which after a
+length change may no longer point at the same thing.</p>
 
 <h3>2. Working with multiple spectra</h3>
 <p>Loaded spectra appear in the Spectra panel, one row each. Exactly one
@@ -270,6 +288,14 @@ from the new number. Check a row's "Fix" box to hold that parameter
 at its current Value for the next fit instead of letting the
 optimizer adjust it. Leave a row unchecked and its Value is used only
 as that parameter's starting guess -- the fit can still move it.</p>
+<p>The panel also carries three checkboxes. <b>Independent widths</b>
+fits each peak its own width instead of one shared FWHM. <b>Left tail</b>
+adds a low-channel tail to the peak shape. <b>Fit background</b> fits the
+background line together with the peaks rather than subtracting it
+first -- peak uncertainties grow when it is on, because they then
+include how well the background itself is known, and two extra rows
+(Background level and Background slope) appear in the panel. See the
+Knowledge Database page for when each is worth using.</p>
 <p>Once both background regions are marked, <kbd>Ctrl+B</kbd> previews
 just the background line -- no fit region or peaks needed -- useful
 for sanity-checking the background before marking the rest. It's a
@@ -315,14 +341,53 @@ to the filename with <code>_fit</code> and its number appended, e.g.
 parameter with its uncertainty in plain text -- see the Knowledge
 Database page for what each one means.</p>
 
-<h3>10. View options</h3>
+<p>Two other formats are available from the same dialog, chosen by the
+extension you type (the filter only decides when the name has none):
+<code>.csv</code> writes one row per fitted peak for a spreadsheet, and
+<code>.tex</code> writes a LaTeX <code>tabular</code>, one row per peak,
+ready to paste into a paper. When a calibration is active, positions and
+widths are exported in keV and the column headers say so; areas are
+never converted, since they are counts. An uncertainty the fit could not
+determine is left as an empty cell in CSV rather than the text "n/a", so
+the column stays numeric.</p>
+
+<h3>10. Saving and reloading fits</h3>
+<p><b>File &gt; Save Fits...</b> writes every fit on the active spectrum
+to a <code>.json</code> file, and <b>Load Fits...</b> brings them back,
+so an analysis survives closing the program. Integration results are not
+saved -- they report a region's totals rather than fitted peaks, and the
+status bar says how many were left out.</p>
+<p>Loading asks how you want them back. <b>Yes</b> restores the saved
+numbers exactly as they were reported when the file was written.
+<b>No</b> re-runs each fit from its saved marks using the current
+version of the program -- use this to bring an older analysis up to
+date, since v4.0.0 changed how peak areas and their uncertainties are
+computed. Fits saved against a different spectrum can be loaded too, and
+you are told when that is what is happening.</p>
+
+<h3>11. Calibrating from fitted peaks</h3>
+<p><b>Operations &gt; Calibrate from Fitted Peaks...</b> lists every peak
+you have already fitted. Type the known energy beside the ones you can
+identify, leave the rest blank, and press OK: the calibration is fitted
+by least squares through those points. Because the channel positions
+come from fitted centroids rather than from where you clicked, this is
+more accurate than entering coefficients by hand.</p>
+<p>The status bar reports the <b>worst residual</b> afterwards. That is
+the number to look at: a mistyped energy, or a peak matched to the wrong
+line, shifts the whole calibration while leaving the coefficients
+looking perfectly reasonable. A residual much larger than your peaks'
+own position uncertainties means one of the assignments is wrong. Two
+assignments determine a line and three a quadratic; assign more than the
+minimum whenever you can.</p>
+
+<h3>12. View options</h3>
 <p><kbd>Ctrl+G</kbd> toggles a logarithmic Y axis. <kbd>Ctrl+D</kbd>
 toggles dark theme. <kbd>Ctrl+1</kbd>/<kbd>Ctrl+2</kbd>/<kbd>Ctrl+3</kbd>
 show or hide the Spectra, Fit Results, and Fit Parameters panels.
 <kbd>Ctrl+=</kbd>/<kbd>Ctrl+-</kbd> zoom the X axis in/out around the
 current view, and <kbd>Ctrl+0</kbd> resets to the full spectrum.</p>
 
-<h3>11. Matrix analysis</h3>
+<h3>13. Matrix analysis</h3>
 <p><b>File &gt; Open Matrix...</b> (<kbd>Ctrl+Shift+O</kbd>) opens a
 2D coincidence matrix (<b>.mtx</b>) in its own window. Only the raw
 histogram is read -- there's no way to save a matrix back out.
@@ -334,7 +399,8 @@ a matrix across a network share, or from a Windows drive inside WSL, is
 noticeably slower.
 The matrix panel computes both its X and Y projections up front; pick
 which one to work on from the dropdown. Hold <kbd>C</kbd> and click
-twice to mark the cut (signal) region, and hold <kbd>G</kbd> and click
+twice to mark a cut (signal) region -- repeat for as many gates as
+you want, and they are summed together -- and hold <kbd>G</kbd> and click
 twice for each background region -- any number of background regions
 are allowed, and more background generally means better statistics.
 <b>Clear Marks</b> resets the cut region and every
@@ -854,6 +920,20 @@ background, and net" above). Zero background regions means no
 subtraction happens at all, and the result can legitimately go negative
 where the scaled background outweighs the gated counts -- expected, not
 an error.</p>
+
+<h2>Gating on more than one peak</h2>
+<p>You can mark more than one cut region. Every marked gate is summed
+into the one cut spectrum, and the channel count used to weight the
+background (<code>N<sub>cut</sub></code> above) totals across all of
+them, so the subtraction stays correct however many you use.</p>
+<p>This is what you want when a cascade has several members you trust:
+gating on two or three of them at once collects the coincidences from
+all of them, which builds statistics faster than gating on one. It is
+only worthwhile while every gate really is the same cascade -- a gate
+placed on a contaminant adds that contaminant's coincidences to the
+result along with everything else.</p>
+<p>Overlapping gates are counted once, not twice, so a channel covered
+by two of them contributes what it actually holds.</p>
 
 <h2>How the cut's background is weighted</h2>
 <p>Written out, activating a cut computes, for every channel of the
