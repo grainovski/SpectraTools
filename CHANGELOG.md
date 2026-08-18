@@ -69,7 +69,9 @@ those fits rather than assuming they still agree.
   uncertainties grow when it is on, because they then include how well the
   background itself is known.
 - **Several gates per matrix cut**, for gating on more than one member of
-  a cascade at once.
+  a cascade at once. Hold <kbd>C</kbd> and mark as many as you want; they
+  are summed, overlapping gates count their shared channels once, and the
+  background weighting totals across all of them.
 - **A shaded uncertainty band** around the background line, narrow between
   the background regions and wider outside them.
 
