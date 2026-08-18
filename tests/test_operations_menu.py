@@ -1730,9 +1730,18 @@ def test_pan_stops_at_the_edge_of_the_data(qapp):
     assert abs((hi - lo) - span) < 1e-6, "span must survive clamping at the edge"
 
 
-def test_left_drag_does_not_pan_the_main_window(qapp):
+def _drag(main_window, from_x, to_x, button=1):
     from matplotlib.backend_bases import MouseEvent
 
+    ymid = float(main_window.axes.bbox.y0 + main_window.axes.bbox.height / 2)
+    px = lambda v: float(main_window.axes.transData.transform((v, 0))[0])
+    main_window._on_pan_press(
+        MouseEvent("button_press_event", main_window.canvas, px(from_x), ymid, button=button))
+    main_window._on_mouse_move(
+        MouseEvent("motion_notify_event", main_window.canvas, px(to_x), ymid))
+
+
+def _ready_window(qapp):
     main_window = MainWindow()
     main_window.resize(900, 600)
     main_window.show()
@@ -1740,11 +1749,61 @@ def test_left_drag_does_not_pan_the_main_window(qapp):
     _make_active_spectrum(main_window)
     main_window._plot_data()
     main_window.axes.set_xlim(20, 70)
+    return main_window
+
+
+def test_left_drag_pans_the_main_window(qapp):
+    """v4.0.1: a bare left drag pans, the same gesture the right button
+    already had. It was free to take -- fit_mode.on_click returns early
+    without a held key, so a plain left press did nothing at all."""
+    main_window = _ready_window(qapp)
     before = main_window.axes.get_xlim()
 
-    x = float(main_window.axes.transData.transform((40, 0))[0])
-    ymid = float(main_window.axes.bbox.y0 + main_window.axes.bbox.height / 2)
-    main_window._on_pan_press(MouseEvent("button_press_event", main_window.canvas, x, ymid, button=1))
-    main_window._on_mouse_move(MouseEvent("motion_notify_event", main_window.canvas, x - 100, ymid))
+    _drag(main_window, 40, 30)
+
+    after = main_window.axes.get_xlim()
+    assert after != before, "a bare left drag must pan"
+    # X span preserved exactly -- panning walks along, it does not zoom.
+    assert (after[1] - after[0]) == pytest.approx(before[1] - before[0])
+    # Dragging left moves the view right: the content follows the cursor.
+    assert after[0] > before[0]
+
+
+def test_a_held_marking_key_suppresses_left_drag_panning(qapp):
+    """Marking always wins. Marking is precise work and must not depend on
+    how steady the hand is, so a drag with B held places background marks
+    and never nudges the view."""
+    main_window = _ready_window(qapp)
+    before = main_window.axes.get_xlim()
+
+    main_window.fit_controller._held_key = "b"
+    _drag(main_window, 40, 30)
 
     assert main_window.axes.get_xlim() == before
+
+
+def test_left_drag_stands_down_while_the_toolbar_owns_the_button(qapp):
+    """The matplotlib toolbar's own Pan and Zoom tools drive the left
+    button themselves; both acting on one drag would fight."""
+    main_window = _ready_window(qapp)
+    before = main_window.axes.get_xlim()
+
+    main_window.nav_toolbar.mode = "pan/zoom"
+    _drag(main_window, 40, 30)
+
+    assert main_window.axes.get_xlim() == before
+
+
+def test_right_drag_still_pans(qapp):
+    """The v3.1.3 gesture is unchanged -- removing it would break the
+    habit of anyone already using it, and it works with a marking key
+    held, where the left button deliberately does not."""
+    main_window = _ready_window(qapp)
+    before = main_window.axes.get_xlim()
+    _drag(main_window, 40, 30, button=3)
+    assert main_window.axes.get_xlim() != before
+
+    main_window.axes.set_xlim(*before)
+    main_window.fit_controller._held_key = "b"
+    _drag(main_window, 40, 30, button=3)
+    assert main_window.axes.get_xlim() != before

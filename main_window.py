@@ -1494,11 +1494,39 @@ class MainWindow(QMainWindow):
         self._update_operations_availability()
         self.fit_controller.update_results_list()
 
+    def _pan_button_is_active(self, event):
+        """True when this press should start a drag-pan.
+
+        The RIGHT button always pans -- that is the v3.1.3 gesture and
+        removing it would break the habit of anyone already using it.
+
+        The LEFT button pans only when nothing else wants it:
+
+          * A held marking key (B/R/P) takes precedence absolutely. With
+            one down, a left drag places marks exactly as before and never
+            moves the view -- marking is precise work and must not depend
+            on how steady the hand is.
+          * The matplotlib toolbar's own Pan and Zoom tools drive the left
+            button themselves. While either is armed, `nav_toolbar.mode`
+            is non-empty and this stands down, or both would act on the
+            same drag at once.
+
+        Outside those, a bare left press previously did nothing at all --
+        fit_mode.on_click returns early without a held key -- so the
+        gesture was free to take.
+        """
+        if event.inaxes != self.axes or event.x is None:
+            return False
+        if event.button == 3:
+            return True
+        if event.button != 1:
+            return False
+        if self.fit_controller._held_key is not None:
+            return False
+        return not str(self.nav_toolbar.mode)
+
     def _on_pan_press(self, event):
-        """Starts a right-button drag-pan. Button 1 is left alone: it is
-        how fit marks are placed (fit_mode.on_click ignores anything
-        else), so the right button is free for navigation."""
-        if event.button != 3 or event.inaxes != self.axes or event.x is None:
+        if not self._pan_button_is_active(event):
             return
         self._pan_last_px = event.x
 

@@ -50,14 +50,25 @@ QStatusBar {{
     background-color: {DARK_PANEL};
     color: {DARK_TEXT};
 }}
-QTableWidget, QListWidget {{
+QTableWidget, QListWidget, QTreeWidget {{
     background-color: {DARK_PANEL};
     color: {DARK_TEXT};
     gridline-color: {DARK_BORDER};
     alternate-background-color: {DARK_BG};
 }}
-QTableWidget::item:selected, QListWidget::item:selected {{
+QTableWidget::item:selected, QListWidget::item:selected, QTreeWidget::item:selected {{
     background-color: {DARK_HIGHLIGHT};
+}}
+/* Qt draws a selection in its INACTIVE palette when the widget does not
+   hold focus, which is a pale grey that all but disappears against a dark
+   panel -- the ROOT object list opens with its first row selected and it
+   read as nothing being selected at all. Same highlight either way; the
+   selection is real whether or not the widget happens to have focus. */
+QTableWidget::item:selected:!active,
+QListWidget::item:selected:!active,
+QTreeWidget::item:selected:!active {{
+    background-color: {DARK_HIGHLIGHT};
+    color: {DARK_TEXT};
 }}
 QHeaderView::section {{
     background-color: {DARK_PANEL};

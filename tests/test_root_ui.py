@@ -167,3 +167,49 @@ def test_a_failed_object_is_reported_not_silently_skipped(qapp, root_file, monke
     main_window._load_root_spectra(str(root_file), ["Energy/absent;1"])
     assert len(main_window.spectra) == 0
     assert warned and "absent" in warned[0]
+
+
+# --- v4.0.1: the selected row is actually visible -----------------------
+
+
+def test_the_first_row_is_selected_and_the_list_holds_focus(qapp, root_file):
+    """The row was always selected -- OK would have loaded it -- but Qt
+    draws a selection in its INACTIVE palette when the widget has no
+    focus, a pale grey that reads as nothing being selected at all."""
+    dialog = RootObjectDialog(None, str(root_file), _objects(root_file))
+
+    first = dialog.tree.topLevelItem(0)
+    assert dialog.tree.currentItem() is first
+    assert first.isSelected()
+    # focusWidget() rather than hasFocus(): a dialog that has not been
+    # shown holds no real focus offscreen, but it still records which
+    # widget WILL take it. Shown, hasFocus() is True too -- asserted below
+    # so this cannot pass on intent alone.
+    assert dialog.focusWidget() is dialog.tree
+    dialog.show()
+    qapp.processEvents()
+    assert dialog.tree.hasFocus(), "an unfocused list greys out its own selection"
+
+
+def test_the_dark_theme_styles_tree_widgets_at_all(qapp):
+    """The ROOT picker is the app's only QTreeWidget, and the dark
+    stylesheet covered QTableWidget and QListWidget but not QTreeWidget --
+    so the picker fell back to unstyled defaults and its highlight was not
+    the theme's highlight colour.
+    """
+    from theme import qt_stylesheet
+
+    dark = qt_stylesheet("dark")
+    assert "QTreeWidget {" in dark or "QTreeWidget," in dark or ", QTreeWidget" in dark, \
+        "QTreeWidget is not styled at all in the dark theme"
+    assert "QTreeWidget::item:selected" in dark
+    # And the inactive state, for when the list does not hold focus.
+    assert ":selected:!active" in dark
+
+
+def test_light_theme_is_still_qt_default(qapp):
+    """The light theme deliberately ships no stylesheet -- Qt's own
+    defaults. The tree fix must not have introduced one."""
+    from theme import qt_stylesheet
+
+    assert qt_stylesheet("light") == ""

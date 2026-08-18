@@ -608,13 +608,17 @@ def test_howto_documents_the_matrix_loading_progress_window():
     assert "responsive" in text
 
 
-def test_howto_documents_the_right_drag_pan():
-    # main_window._pan_to / matrix_panel._pan_to: right-button drag keeps
-    # the X span and rescales Y to what is visible.
+def test_howto_documents_drag_panning():
+    # main_window._pan_to / matrix_panel._pan_to: a drag keeps the X span
+    # and rescales Y to what is visible. Since v4.0.1 either button does
+    # it, so the page no longer says "right mouse button" in the passage
+    # that describes the gesture -- it says so only where the right
+    # button's extra behaviour (panning even with a marking key held)
+    # differs from the left's.
     text = _rendered_text(build_howto_html())
-    assert "right mouse button" in text
     assert "keeps its width" in text
     assert "rescales" in text
+    assert "The right button pans regardless" in text
 
 
 def test_howto_says_ctrl_c_clears_cut_marks_in_the_matrix_panel():
@@ -781,3 +785,19 @@ def test_help_pages_document_multi_gate_cuts():
     # The caveat that decides whether it is a good idea.
     assert "contaminant" in kb
     assert "counted once" in kb
+
+
+def test_howto_documents_left_drag_panning():
+    """v4.0.1. The page previously said outright that "the left button is
+    unaffected -- it is what places fit marks", which is now false in the
+    common case. Both the main-window and matrix-panel passages have to
+    move, or one of them keeps telling the user the old story."""
+    text = _rendered_text(build_howto_html())
+
+    assert "either mouse button" in text
+    assert "left button is unaffected" not in text
+    # The precedence rule, which is what stops it feeling unpredictable.
+    assert "Marking always takes precedence" in text
+    assert "stands aside while the plot toolbar" in text
+    # And the matrix panel passage, not just the main-window one.
+    assert text.count("either mouse button") >= 2

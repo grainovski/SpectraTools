@@ -1146,23 +1146,64 @@ def test_right_drag_pans_the_projection_keeping_span_and_refitting_y(qapp):
     assert abs((after[1] - after[0]) - (before[1] - before[0])) < 1e-6, "X span must be preserved"
 
 
-def test_left_button_does_not_pan(qapp):
-    # Button 1 places cut/background marks; panning must not steal it.
-    from matplotlib.backend_bases import MouseEvent
+def _panel_drag(panel, from_x, to_x, button=1):
+    ymid = float(panel.axes.bbox.y0 + panel.axes.bbox.height / 2)
+    px = lambda v: float(panel.axes.transData.transform((v, 0))[0])
+    panel._on_pan_press(
+        MouseEvent("button_press_event", panel.canvas, px(from_x), ymid, button=button))
+    panel._pan_to(MouseEvent("motion_notify_event", panel.canvas, px(to_x), ymid))
 
+
+def _ready_panel(qapp):
     main_window = MainWindow()
     panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
     panel.resize(900, 600)
     panel.show()
     qapp.processEvents()
     panel.axes.set_xlim(1000, 1500)
+    return panel
+
+
+def test_left_drag_pans_the_projection(qapp):
+    """v4.0.1: the projection view is a spectrum view and gets the same
+    bare-left-drag pan as the main window -- behaving differently would
+    read as a bug."""
+    panel = _ready_panel(qapp)
     before = panel.axes.get_xlim()
 
-    x = float(panel.axes.transData.transform((1200, 0))[0])
-    ymid = float(panel.axes.bbox.y0 + panel.axes.bbox.height / 2)
-    panel._on_pan_press(MouseEvent("button_press_event", panel.canvas, x, ymid, button=1))
-    panel._pan_to(MouseEvent("motion_notify_event", panel.canvas, x - 80, ymid))
+    _panel_drag(panel, 1200, 1100)
 
+    after = panel.axes.get_xlim()
+    assert after != before
+    assert (after[1] - after[0]) == pytest.approx(before[1] - before[0])
+    assert after[0] > before[0]
+
+
+def test_a_held_cut_or_bg_key_suppresses_left_drag_panning(qapp):
+    """C and G here are what B/R/P are in the main window: marking wins."""
+    for key in ("cut", "gate_bg"):
+        panel = _ready_panel(qapp)
+        before = panel.axes.get_xlim()
+        panel.cut_controller._held_key = key
+        _panel_drag(panel, 1200, 1100)
+        assert panel.axes.get_xlim() == before, f"panned while {key!r} was held"
+
+
+def test_a_held_fit_key_also_suppresses_left_drag_panning(qapp):
+    """The panel carries the main window's fit marking too (B/R/P on the
+    projection), so those must suppress panning just as C/G do."""
+    panel = _ready_panel(qapp)
+    before = panel.axes.get_xlim()
+    panel.fit_controller._held_key = "r"
+    _panel_drag(panel, 1200, 1100)
+    assert panel.axes.get_xlim() == before
+
+
+def test_panel_left_drag_stands_down_for_the_toolbar(qapp):
+    panel = _ready_panel(qapp)
+    before = panel.axes.get_xlim()
+    panel.nav_toolbar.mode = "zoom rect"
+    _panel_drag(panel, 1200, 1100)
     assert panel.axes.get_xlim() == before
 
 

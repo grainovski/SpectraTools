@@ -512,10 +512,29 @@ class MatrixPanel(QMainWindow):
         self.canvas.draw_idle()
         self.nav_toolbar.push_current()
 
+    def _pan_button_is_active(self, event):
+        """True when this press should start a drag-pan. Mirrors
+        main_window._pan_button_is_active exactly -- the projection view
+        is a spectrum view and must not behave differently.
+
+        Right button always pans. Left button pans only when no marking
+        key is held (C or G here, where the main window has B/R/P) and the
+        matplotlib toolbar's own Pan/Zoom is not armed.
+        """
+        if event.inaxes != self.axes or event.x is None:
+            return False
+        if event.button == 3:
+            return True
+        if event.button != 1:
+            return False
+        if self.cut_controller._held_key is not None:
+            return False
+        if self.fit_controller._held_key is not None:
+            return False
+        return not str(self.nav_toolbar.mode)
+
     def _on_pan_press(self, event):
-        """Right-button drag-pan, mirroring main_window's. Button 1 is
-        left alone -- it places cut/background marks."""
-        if event.button != 3 or event.inaxes != self.axes or event.x is None:
+        if not self._pan_button_is_active(event):
             return
         self._pan_last_px = event.x
 

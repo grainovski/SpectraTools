@@ -129,12 +129,18 @@ program supports.</p>
 <tr><td><kbd>Ctrl+0</kbd></td><td>Show full spectrum</td></tr>
 </table>
 <p>The mouse wheel zooms the X axis about the cursor. <b>Dragging with
-the right mouse button held</b> slides the spectrum left and right at
-the current zoom: the X axis keeps its width, and the Y axis rescales as
-you go to fit whatever is now on screen, so a small peak is not left
+either mouse button held</b> slides the spectrum left and right at the
+current zoom: the X axis keeps its width, and the Y axis rescales as you
+go to fit whatever is now on screen, so a small peak is not left
 flattened by a tall one that has scrolled out of view. The view stops at
-the ends of the data. The left button is unaffected -- it is what places
-fit marks.</p>
+the ends of the data.</p>
+<p>Marking always takes precedence over panning. While you hold a marking
+key -- <kbd>B</kbd>, <kbd>R</kbd> or <kbd>P</kbd> -- the left button
+places marks and does not pan, so a slightly unsteady hand cannot nudge
+the view mid-mark. The right button pans regardless, which is useful for
+scrolling along while keeping a marking key held. Left-drag also stands
+aside while the plot toolbar's own Pan or Zoom tool is switched on, since
+that tool drives the left button itself.</p>
 
 <h3>Fitting</h3>
 <table>
@@ -436,9 +442,12 @@ main window's plot (and any other open matrix panel) immediately, and
 calibrating from the main window updates every open matrix panel the
 same way. <kbd>Ctrl+=</kbd>/<kbd>Ctrl+-</kbd>/<kbd>Ctrl+0</kbd> (or the
 scroll wheel) zoom the projection's X axis, matching the main window's
-own zoom, and dragging with the right mouse button held slides the
+own zoom, and dragging with either mouse button held slides the
 projection along at the current zoom with the Y axis rescaling to suit,
-exactly as it does in the main window.</p>
+exactly as it does in the main window -- including that a held marking
+key (<kbd>C</kbd> or <kbd>G</kbd> for cut marks, <kbd>B</kbd>/<kbd>R</kbd>/
+<kbd>P</kbd> for fit marks) keeps the left button on marking rather than
+panning.</p>
 <p><kbd>Ctrl+C</kbd> here clears everything you have marked on the
 projection: the cut and background marks (the same thing the
 <b>Clear Marks</b> button does), any in-progress fit marks, and it hides

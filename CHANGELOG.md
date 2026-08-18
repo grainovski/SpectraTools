@@ -4,6 +4,34 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [4.0.1] - unreleased
+
+Two interaction fixes.
+
+### Fixed
+
+- **The selected entry in the ROOT object list is now visible.** Opening a
+  ROOT file preselects the first histogram, and pressing OK always loaded
+  it -- but nothing looked selected. Two causes: the dark theme styled
+  tables and lists but never tree views, which is what that dialog uses,
+  so it fell back to unstyled defaults; and the list did not hold focus,
+  and an unfocused list draws its selection in a pale grey in either
+  theme.
+
+### Changed
+
+- **Dragging with the left mouse button now slides the spectrum
+  sideways**, the same gesture the right button already had: the X axis
+  keeps its width and the Y axis rescales to fit what is on screen. Works
+  in the main window and in a matrix panel's projection.
+
+  Holding a marking key still marks and never pans -- <kbd>B</kbd>,
+  <kbd>R</kbd> or <kbd>P</kbd> in the main window, <kbd>C</kbd> or
+  <kbd>G</kbd> in a matrix panel -- so marking is unaffected. Left-drag
+  also stands aside while the plot toolbar's own Pan or Zoom tool is
+  active. Right-drag is unchanged and still pans even with a marking key
+  held.
+
 ## [4.0.0] - 2026-08-18
 
 ROOT file support, and a set of corrections to how peak areas and

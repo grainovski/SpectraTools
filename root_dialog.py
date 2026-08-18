@@ -73,6 +73,14 @@ class RootObjectDialog(QDialog):
 
         if self.tree.topLevelItemCount():
             self.tree.setCurrentItem(self.tree.topLevelItem(0))
+            # Focus so Qt draws that selection in its ACTIVE palette. An
+            # unfocused list renders a selection in a pale inactive grey,
+            # which reads as nothing being selected -- the row genuinely
+            # was selected and OK would have loaded it, but there was no
+            # way to tell by looking. The stylesheet now also colours the
+            # inactive state, so this is belt and braces rather than the
+            # only defence.
+            self.tree.setFocus()
 
     def _selected(self):
         chosen = []
