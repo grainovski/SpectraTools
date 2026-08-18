@@ -52,7 +52,9 @@ from n42_io import load_n42
 from peak_fit import FitError, channel_indices
 from settings import Settings
 from spe_io import load_spe, save_spe
-from spectrum import LoadedSpectrum, active_spectrum, next_color, panned_xlim
+from spectrum import (
+    LoadedSpectrum, active_spectrum, next_color, pan_button_is_active, panned_xlim,
+)
 from spectrum_operations import (
     add, combined_variance, multiply, normalize_factors, rebin, rebinned_variance,
     reference_value, scaled_variance, subtract,
@@ -994,8 +996,13 @@ class MainWindow(QMainWindow):
             self.settings.set_last_folder(os.path.dirname(path))
 
     def fitted_peak_choices(self):
-        """(label, channel) for every committed peak on the active
-        spectrum, in Fit Results order.
+        """(label, channel, channel_err) for every committed peak on the
+        active spectrum, in Fit Results order.
+
+        The uncertainty travels with the channel so the calibration can be
+        weighted by it -- an unweighted fit lets a barely-visible line pull
+        exactly as hard as the strongest peak in the spectrum, and the two
+        routinely differ in precision by an order of magnitude.
 
         Always in CHANNELS, even when a calibration is already active: the
         user is assigning energies in order to determine the calibration,
@@ -1014,7 +1021,8 @@ class MainWindow(QMainWindow):
             # the Fit Results panel shows.
             for peak_index, peak in enumerate(getattr(result, "peaks", []) or [], start=1):
                 choices.append(
-                    (f"Fit {fit_index}, peak {peak_index}", peak.position)
+                    (f"Fit {fit_index}, peak {peak_index}", peak.position,
+                     peak.position_err)
                 )
         return choices
 
@@ -1039,6 +1047,13 @@ class MainWindow(QMainWindow):
             # The residual is the number that says whether to believe it;
             # the coefficients alone look equally plausible either way.
             message += f", worst residual {worst:.3g} keV"
+        if calibration.coefficient_errors:
+            # Only present when the fit had more points than it needed --
+            # at exactly the minimum it interpolates and has nothing to
+            # say about itself. The slope is the coefficient that matters
+            # for anything read far from the assigned lines.
+            slope_err = calibration.coefficient_errors[1]
+            message += f", slope {calibration.b:.6g} ± {slope_err:.3g} keV/ch"
         self.fit_controller._show_status_message(message, 8000)
 
     def _save_fits_dialog(self):
@@ -1481,7 +1496,10 @@ class MainWindow(QMainWindow):
             else:
                 view_xlim = (self.channel_to_display(0), self.channel_to_display(max_channel))
         for spectrum in visible:
-            channels = np.arange(len(spectrum.data))
+            # channel_indices rather than a fresh np.arange: this runs
+            # for every visible spectrum on every replot, and the cached
+            # read-only axis exists for exactly this.
+            channels = channel_indices(len(spectrum.data))
             x = self.channel_to_display(channels)
             self.axes.plot(x, spectrum.data, drawstyle="steps-mid", color=spectrum.color)
             self.fit_controller.draw_committed_fits(spectrum, view_xlim=view_xlim)
@@ -1510,35 +1528,11 @@ class MainWindow(QMainWindow):
         self.fit_controller.update_results_list()
 
     def _pan_button_is_active(self, event):
-        """True when this press should start a drag-pan.
-
-        The RIGHT button always pans -- that is the v3.1.3 gesture and
-        removing it would break the habit of anyone already using it.
-
-        The LEFT button pans only when nothing else wants it:
-
-          * A held marking key (B/R/P) takes precedence absolutely. With
-            one down, a left drag places marks exactly as before and never
-            moves the view -- marking is precise work and must not depend
-            on how steady the hand is.
-          * The matplotlib toolbar's own Pan and Zoom tools drive the left
-            button themselves. While either is armed, `nav_toolbar.mode`
-            is non-empty and this stands down, or both would act on the
-            same drag at once.
-
-        Outside those, a bare left press previously did nothing at all --
-        fit_mode.on_click returns early without a held key -- so the
-        gesture was free to take.
-        """
-        if event.inaxes != self.axes or event.x is None:
-            return False
-        if event.button == 3:
-            return True
-        if event.button != 1:
-            return False
-        if self.fit_controller._held_key is not None:
-            return False
-        return not str(self.nav_toolbar.mode)
+        """Whether this press starts a drag-pan -- see
+        spectrum.pan_button_is_active, which the matrix panel shares."""
+        return pan_button_is_active(
+            event, self.axes, self.nav_toolbar, (self.fit_controller,)
+        )
 
     def _on_pan_press(self, event):
         if not self._pan_button_is_active(event):

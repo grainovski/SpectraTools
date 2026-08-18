@@ -2474,3 +2474,103 @@ def test_gross_area_err_stays_poisson_without_a_supplied_variance():
     )
     mask = (x >= 150.0) & (x <= 260.0)
     assert result.gross_area_err == pytest.approx(math.sqrt(np.sum(y[mask])))
+
+
+# ---------------------------------------------------------------------------
+# v4.1.0 audit S5: Integration must be able to use a propagated variance.
+# ---------------------------------------------------------------------------
+
+
+def _flat_integration_inputs(counts=100.0, channels=300):
+    x = np.arange(channels, dtype=float)
+    y = np.full(channels, counts)
+    return x, y
+
+
+def test_integrate_region_uses_supplied_variance_for_the_gross_error():
+    from peak_fit import integrate_region
+
+    x, y = _flat_integration_inputs()
+    variance = y * 4.0
+    plain = integrate_region(x, y, (10.0, 40.0), (250.0, 280.0), (100.0, 160.0))
+    weighted = integrate_region(
+        x, y, (10.0, 40.0), (250.0, 280.0), (100.0, 160.0), variance=variance
+    )
+    # Same counts, so the areas themselves are identical...
+    assert weighted.gross_area == pytest.approx(plain.gross_area)
+    assert weighted.net_area == pytest.approx(plain.net_area)
+    # ...but the uncertainty doubles, because the variance is 4x the counts.
+    assert weighted.gross_area_err == pytest.approx(2.0 * plain.gross_area_err)
+
+
+def test_integrate_region_uses_supplied_variance_for_the_background_error():
+    from peak_fit import integrate_region
+
+    x, y = _flat_integration_inputs()
+    variance = y * 4.0
+    plain = integrate_region(x, y, (10.0, 40.0), (250.0, 280.0), (100.0, 160.0))
+    weighted = integrate_region(
+        x, y, (10.0, 40.0), (250.0, 280.0), (100.0, 160.0), variance=variance
+    )
+    assert weighted.background_area == pytest.approx(plain.background_area)
+    assert weighted.background_area_err == pytest.approx(
+        2.0 * plain.background_area_err
+    )
+    assert weighted.net_area_err > plain.net_area_err
+
+
+def test_integrate_region_without_variance_is_byte_for_byte_unchanged():
+    """The Poisson path is a line-by-line TV port and must not move."""
+    from peak_fit import integrate_region
+
+    x, y = _make_spectrum(
+        channels=300, peaks=[(2000.0, 150.0, 5.0)], slope=0.05, intercept=30.0,
+        noise_seed=17,
+    )
+    result = integrate_region(x, y, (10.0, 40.0), (250.0, 280.0), (120.0, 180.0))
+    mask = (x >= 120.0) & (x <= 180.0)
+    assert result.gross_area == pytest.approx(np.sum(y[mask]))
+    assert result.gross_area_err == pytest.approx(math.sqrt(np.sum(y[mask])))
+
+
+def test_integrate_region_accepts_negative_counts_when_given_a_variance():
+    """The negative-count refusal exists because the Poisson path reads a
+    variance off the counts. Supplying a real variance removes the reason
+    for it -- and a background-subtracted cut, which is exactly what
+    carries a variance, legitimately goes negative."""
+    from peak_fit import integrate_region
+
+    x = np.arange(300, dtype=float)
+    y = np.full(300, 100.0)
+    y[130] = -5.0
+    variance = np.full(300, 400.0)
+
+    with pytest.raises(FitError):
+        integrate_region(x, y, (10.0, 40.0), (250.0, 280.0), (100.0, 160.0))
+
+    result = integrate_region(
+        x, y, (10.0, 40.0), (250.0, 280.0), (100.0, 160.0), variance=variance
+    )
+    assert math.isfinite(result.net_area)
+    assert math.isfinite(result.net_area_err)
+
+
+def test_integrate_region_still_refuses_negative_counts_without_a_variance():
+    from peak_fit import integrate_region
+
+    x = np.arange(300, dtype=float)
+    y = np.full(300, 100.0)
+    y[130] = -5.0
+    with pytest.raises(FitError, match="negative counts"):
+        integrate_region(x, y, (10.0, 40.0), (250.0, 280.0), (100.0, 160.0))
+
+
+def test_integrate_region_rejects_a_wrong_length_variance():
+    from peak_fit import integrate_region
+
+    x, y = _flat_integration_inputs()
+    with pytest.raises(FitError, match="variance has length"):
+        integrate_region(
+            x, y, (10.0, 40.0), (250.0, 280.0), (100.0, 160.0),
+            variance=np.full(17, 1.0),
+        )

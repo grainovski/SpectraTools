@@ -1296,3 +1296,34 @@ def test_the_auto_log_name_distinguishes_gate_sets_that_share_a_span(qapp, tmp_p
     # The constraint the surrounding comment exists for: no decimal point
     # anywhere in the stem, or splitext truncates the descriptor.
     assert "." not in os.path.basename(split)[:-len(".mtx")]
+
+
+def test_matrix_panel_passes_both_of_its_controllers_to_the_pan_predicate(qapp):
+    """v4.1.0 audit C1: the pan rule is now shared with the main window
+    (spectrum.pan_button_is_active). This panel carries cut marking as
+    well as fit marking, so it must hand over BOTH controllers -- passing
+    only the fit one would let a drag nudge the view while a cut mark was
+    being placed, which is invisible in a diff of either file alone.
+    """
+    class _Event:
+        inaxes = None
+        button = 1
+        x = 10.0
+
+    seen = {}
+    original = matrix_panel.pan_button_is_active
+
+    def spy(event, axes, nav_toolbar, controllers):
+        seen["controllers"] = tuple(controllers)
+        return original(event, axes, nav_toolbar, controllers)
+
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    monkey = matrix_panel.pan_button_is_active
+    matrix_panel.pan_button_is_active = spy
+    try:
+        panel._pan_button_is_active(_Event())
+    finally:
+        matrix_panel.pan_button_is_active = monkey
+
+    assert set(seen["controllers"]) == {panel.cut_controller, panel.fit_controller}

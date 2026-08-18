@@ -1,5 +1,6 @@
 import pytest
 
+import calibration as calibration_module
 from calibration import Calibration, CalibrationError, CalibrationFileError
 
 
@@ -340,3 +341,86 @@ def test_residuals_are_essentially_zero_for_consistent_assignments():
     energies = [10.0 + 0.5 * ch for ch in channels]
     cal = calibration_module.from_points(channels, energies)
     assert max(abs(r) for r in calibration_module.residuals(cal, channels, energies)) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# v4.1.0 audit S6: calibrating from fitted peaks must use the fit's own
+# precision, and report how well the coefficients came out.
+# ---------------------------------------------------------------------------
+
+
+def test_from_points_weights_by_the_centroid_uncertainties():
+    """A badly-determined centroid must not pull as hard as a precise one.
+
+    Four points on a true E = 10 + 0.5*ch, with one deliberately displaced
+    and carrying a large uncertainty that says so.
+    """
+    channels = [100.0, 200.0, 300.0, 400.0]
+    truth = [10.0 + 0.5 * ch for ch in channels]
+    energies = list(truth)
+    energies[2] += 20.0                       # a badly-placed peak
+    errors = [0.05, 0.05, 10.0, 0.05]         # and the fit knew it was bad
+
+    unweighted = calibration_module.from_points(channels, energies)
+    weighted = calibration_module.from_points(
+        channels, energies, channel_errors=errors
+    )
+
+    assert abs(weighted.b - 0.5) < abs(unweighted.b - 0.5)
+    assert weighted.b == pytest.approx(0.5, abs=0.01)
+
+
+def test_from_points_without_errors_is_unchanged():
+    channels = [100.0, 300.0, 500.0]
+    energies = [60.0, 160.0, 260.0]
+    assert calibration_module.from_points(channels, energies) == \
+        calibration_module.from_points(channels, energies, channel_errors=None)
+
+
+def test_from_points_falls_back_when_an_error_is_unusable():
+    """A fixed or undetermined position has no usable weight. Weighting
+    the others around it would be worse than weighting none of them."""
+    channels = [100.0, 300.0, 500.0]
+    energies = [60.0, 160.0, 260.0]
+    plain = calibration_module.from_points(channels, energies)
+    for unusable in ([0.1, 0.0, 0.2], [0.1, float("nan"), 0.2], [0.1, -1.0, 0.2]):
+        result = calibration_module.from_points(
+            channels, energies, channel_errors=unusable
+        )
+        assert result == plain
+
+
+def test_from_points_rejects_a_mismatched_error_count():
+    with pytest.raises(CalibrationError, match="exactly one uncertainty"):
+        calibration_module.from_points(
+            [1.0, 2.0, 3.0], [10.0, 20.0, 30.0], channel_errors=[0.1, 0.2]
+        )
+
+
+def test_from_points_reports_coefficient_uncertainties():
+    channels = [100.0, 200.0, 300.0, 400.0, 500.0]
+    energies = [10.0 + 0.5 * ch for ch in channels]
+    energies[1] += 0.4                        # a little real scatter
+    cal = calibration_module.from_points(channels, energies)
+    assert len(cal.coefficient_errors) == 2   # (a_err, b_err), lowest first
+    assert all(e > 0.0 for e in cal.coefficient_errors)
+    # b is far better determined than a over a long lever arm.
+    assert cal.coefficient_errors[1] < cal.coefficient_errors[0]
+
+
+def test_from_points_reports_no_uncertainty_at_the_minimum_points():
+    """Two points define a line exactly. There is no scatter to estimate
+    from, and a fabricated zero would read as a perfect calibration."""
+    cal = calibration_module.from_points([100.0, 500.0], [60.0, 260.0])
+    assert cal.coefficient_errors == ()
+
+
+def test_coefficient_errors_do_not_affect_calibration_equality():
+    """Provenance, not identity: the same coefficients transform channels
+    the same way however they were arrived at."""
+    fitted = calibration_module.from_points(
+        [100.0, 200.0, 300.0, 400.0],
+        [10.0 + 0.5 * ch for ch in [100.0, 200.0, 300.0, 400.0]],
+    )
+    typed = Calibration(kind="linear", a=fitted.a, b=fitted.b)
+    assert fitted == typed

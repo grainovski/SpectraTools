@@ -84,7 +84,7 @@ def test_blank_rows_are_skipped_but_unparseable_ones_are_reported(qapp):
     dialog.table.item(0, EnergyAssignDialog.ENERGY_COLUMN).setText("60")
     dialog.table.item(1, EnergyAssignDialog.ENERGY_COLUMN).setText("   ")
     dialog.table.item(2, EnergyAssignDialog.ENERGY_COLUMN).setText("260")
-    channels, energies = dialog.assignments()
+    channels, energies, _errors = dialog.assignments()
     assert channels == [100.0, 500.0]
     assert energies == [60.0, 260.0]
 
@@ -138,3 +138,65 @@ def test_calibrating_from_peaks_applies_the_result(qapp, tmp_path, monkeypatch):
     assert main_window._calibration_active is True
     assert main_window._calibration.a == pytest.approx(20.0, abs=1e-6)
     assert main_window._calibration.b == pytest.approx(1.5, abs=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# v4.1.0 audit S6: the fit's own centroid precision must reach the
+# calibration, and be visible while assigning energies.
+# ---------------------------------------------------------------------------
+
+
+def test_fitted_peak_choices_carry_the_centroid_uncertainty(qapp, tmp_path):
+    main_window, active = _window_with_two_fits(tmp_path)
+    choices = main_window.fitted_peak_choices()
+    assert all(len(choice) == 3 for choice in choices)
+    for _label, _channel, error in choices:
+        assert error is not None
+        assert error > 0.0
+
+
+def test_the_dialog_shows_and_uses_the_uncertainties(qapp):
+    """Weighted against unweighted on the same three points, one of which
+    is displaced and carries an uncertainty that says so."""
+    peaks = [("a", 100.0, 0.05), ("b", 300.0, 8.0), ("c", 500.0, 0.05)]
+    dialog = EnergyAssignDialog(None, peaks)
+
+    # The uncertainty is on screen, not merely used behind the scenes.
+    assert dialog.table.item(1, 2).text() == "8.000"
+
+    for row, energy in enumerate(("60", "185", "260")):  # 185 should be 160
+        dialog.table.item(row, EnergyAssignDialog.ENERGY_COLUMN).setText(energy)
+    dialog._on_accept()
+
+    weighted = dialog.result_calibration
+    assert weighted is not None
+    # The badly-known middle point barely moves the line, so the slope
+    # stays near the 0.5 the two precise points imply.
+    assert weighted.b == pytest.approx(0.5, abs=0.02)
+
+
+def test_a_peak_without_a_usable_uncertainty_still_calibrates(qapp):
+    """A fixed position reports 0.0 and an undetermined one NaN. Neither
+    may break the dialog; both fall back to an unweighted fit."""
+    for unusable in (0.0, float("nan"), None):
+        dialog = EnergyAssignDialog(
+            None, [("a", 100.0, 0.05), ("b", 300.0, unusable), ("c", 500.0, 0.05)]
+        )
+        assert dialog.table.item(1, 2).text() == "\u2014"
+        for row, energy in enumerate(("60", "160", "260")):
+            dialog.table.item(row, EnergyAssignDialog.ENERGY_COLUMN).setText(energy)
+        dialog._on_accept()
+        assert dialog.result_calibration is not None
+        assert dialog.result_calibration.b == pytest.approx(0.5, abs=1e-6)
+
+
+def test_two_tuple_choices_are_still_accepted(qapp):
+    """The uncertainty is optional information about a peak, so a caller
+    with none should not have to invent one."""
+    dialog = EnergyAssignDialog(None, [("a", 100.0), ("b", 500.0)])
+    assert dialog.table.item(0, 2).text() == "\u2014"
+    for row, energy in enumerate(("60", "260")):
+        dialog.table.item(row, EnergyAssignDialog.ENERGY_COLUMN).setText(energy)
+    dialog._on_accept()
+    assert dialog.result_calibration is not None
+    assert dialog.result_calibration.b == pytest.approx(0.5)

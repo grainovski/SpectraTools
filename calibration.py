@@ -3,7 +3,7 @@ own position calibration (tv-1.9.13/lib/tv/vsCal.c). Pure Python, no Qt
 dependency -- calibration_dialog.py is the thin Qt layer on top of this."""
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -28,6 +28,17 @@ class Calibration:
     a: float
     b: float
     c: float = 0.0  # unused for "linear"
+    #: (a_err, b_err, c_err) when this calibration was FITTED from assigned
+    #: peaks and had enough points to estimate them; empty otherwise -- a
+    #: calibration typed in by hand or read from a file has no uncertainty
+    #: to report, and one fitted through exactly the minimum number of
+    #: points passes through them exactly and so says nothing about itself.
+    #:
+    #: compare=False deliberately: this is provenance, not identity. Two
+    #: calibrations with the same coefficients transform channels
+    #: identically and must compare equal whether or not one of them
+    #: happens to remember how well its points were known.
+    coefficient_errors: tuple = field(default=(), compare=False)
 
     def __post_init__(self):
         # TV's own inversion (CalC, vsCal.c:1047-1082) divides by b for
@@ -132,7 +143,7 @@ class Calibration:
         )
 
 
-def from_points(channels, energies, quadratic=False):
+def from_points(channels, energies, quadratic=False, channel_errors=None):
     """Least-squares Calibration through (channel, energy) pairs.
 
     This is what turns calibration from a clerical job into a physics one:
@@ -144,11 +155,39 @@ def from_points(channels, energies, quadratic=False):
     fewer would pass exactly through them and describe nothing. Exactly
     the minimum is allowed but is an interpolation, not a fit: it cannot
     disagree with the data, so it says nothing about how good it is.
+
+    `channel_errors` are the fitted centroids' own uncertainties, and
+    passing them is what makes the sentence above true rather than merely
+    aspirational: unweighted, a barely-visible line pulls the calibration
+    exactly as hard as the strongest peak in the spectrum, and those two
+    centroids routinely differ in precision by an order of magnitude.
+
+    Note the errors are on the CHANNEL while the fit is of energy against
+    channel, so they are errors in x, not y. Converting one to the other
+    scales by dE/dch, which for a near-linear calibration is the same
+    factor at every point -- and a weighted least-squares solution is
+    invariant under scaling every weight by one constant. So 1/sigma_ch is
+    the correct relative weighting without needing to know the slope
+    first, which is fortunate, because the slope is what is being fitted.
+
+    Weighting is all-or-nothing: an error that is zero, negative or
+    non-finite (a peak whose position was held fixed, or one the fit could
+    not determine) has no usable weight, and inventing one for it would be
+    worse than weighting none of them. Those cases fall back to the plain
+    unweighted fit, which is what this function always did.
     """
     channels = np.asarray(channels, dtype=float)
     energies = np.asarray(energies, dtype=float)
     if channels.size != energies.size:
         raise CalibrationError("Each channel needs exactly one energy")
+
+    weights = None
+    if channel_errors is not None:
+        errors = np.asarray(channel_errors, dtype=float)
+        if errors.size != channels.size:
+            raise CalibrationError("Each channel needs exactly one uncertainty")
+        if np.all(np.isfinite(errors)) and np.all(errors > 0.0):
+            weights = 1.0 / errors
 
     degree = 2 if quadratic else 1
     needed = degree + 1
@@ -164,15 +203,42 @@ def from_points(channels, energies, quadratic=False):
             "Assigned peaks must be at different channels to determine a calibration"
         )
 
-    coefficients = np.polyfit(channels, energies, degree)
+    coefficients = np.polyfit(channels, energies, degree, w=weights)
     if not np.all(np.isfinite(coefficients)):
         raise CalibrationError("Could not determine a calibration from those points")
+
+    # Coefficient uncertainties, when the points can support them. numpy
+    # needs strictly more points than the polynomial's order to scale a
+    # covariance at all, and at exactly the minimum the fit interpolates --
+    # there is no scatter to estimate from. Both cases report nothing rather
+    # than a fabricated zero.
+    errors = ()
+    if channels.size > degree + 1:
+        try:
+            _, covariance = np.polyfit(
+                channels, energies, degree, w=weights, cov=True
+            )
+            diagonal = np.diag(np.asarray(covariance, dtype=float))
+            if np.all(np.isfinite(diagonal)) and np.all(diagonal >= 0.0):
+                # polyfit orders highest power first, as with the
+                # coefficients; flip to this app's lowest-first order.
+                errors = tuple(float(v) for v in np.sqrt(diagonal)[::-1])
+        except (np.linalg.LinAlgError, ValueError):
+            # A covariance is a nicety; failing to get one must never cost
+            # the user the calibration itself.
+            errors = ()
+
     # polyfit returns highest power first; this app stores lowest first.
     if quadratic:
         c, b, a = coefficients
-        return Calibration(kind="quadratic", a=float(a), b=float(b), c=float(c))
+        return Calibration(
+            kind="quadratic", a=float(a), b=float(b), c=float(c),
+            coefficient_errors=errors,
+        )
     b, a = coefficients
-    return Calibration(kind="linear", a=float(a), b=float(b))
+    return Calibration(
+        kind="linear", a=float(a), b=float(b), coefficient_errors=errors,
+    )
 
 
 def residuals(calibration, channels, energies):

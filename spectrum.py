@@ -68,6 +68,46 @@ def active_spectrum(spectra):
     return next((s for s in spectra if s.active), None)
 
 
+def pan_button_is_active(event, axes, nav_toolbar, controllers):
+    """True when this mouse press should start a drag-pan.
+
+    Shared by the main window and the matrix panel, which offer the same
+    gesture on the same kind of view. It lived in both files, and the
+    copies had already drifted in the one way that matters: the panel
+    carries BOTH cut and fit marking and so has two controllers to
+    consult, where the main window has one. A copy that consulted only the
+    first would let a drag nudge the view in the middle of placing a mark,
+    and nothing in a diff of either file alone would show it. Passing the
+    controllers in makes "which controllers can veto a pan" the caller's
+    single visible decision.
+
+    The RIGHT button always pans -- that is the v3.1.3 gesture, and it
+    keeps working with a marking key held, which is useful for scrolling
+    along while keeping a key down.
+
+    The LEFT button pans only when nothing else wants it:
+
+      * A held marking key takes precedence absolutely. Marking is precise
+        work and must not depend on how steady the hand is.
+      * The matplotlib toolbar's own Pan and Zoom tools drive the left
+        button themselves. While either is armed, `nav_toolbar.mode` is
+        non-empty and this stands down, or both would act on one drag.
+
+    Outside those, a bare left press does nothing at all -- fit_mode's
+    on_click returns early without a held key -- which is what made the
+    gesture free to take in v4.0.1.
+    """
+    if event.inaxes != axes or event.x is None:
+        return False
+    if event.button == 3:
+        return True
+    if event.button != 1:
+        return False
+    if any(controller._held_key is not None for controller in controllers):
+        return False
+    return not str(nav_toolbar.mode)
+
+
 def panned_xlim(xlim, delta, bound_a, bound_b):
     """`xlim` shifted by `delta`, keeping its span, clamped so the view
     never leaves the data.

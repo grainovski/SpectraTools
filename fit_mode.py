@@ -1422,7 +1422,14 @@ class FitModeController(QObject):
         x = channel_indices(len(active.data))
         y = active.data
         try:
-            result = integrate_region(x, y, left, right, self.state.fit_region)
+            result = integrate_region(
+                x, y, left, right, self.state.fit_region,
+                # Same propagated variance the fit path already uses, so
+                # Integration and Fit stop disagreeing about how well one
+                # spectrum is known. None for anything read from a file,
+                # which keeps TV's Poisson behaviour exactly.
+                variance=getattr(active, "variance", None),
+            )
         except FitError as exc:
             self._show_status_message(f"Integration failed: {exc}", 5000)
             return

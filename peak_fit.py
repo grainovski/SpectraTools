@@ -1115,7 +1115,8 @@ def fit_result_values_by_name(result):
     return values
 
 
-def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
+def integrate_region(x, y, left_bg_region, right_bg_region, fit_region,
+                     variance=None):
     """TV-style direct background-subtracted region sum, ported
     line-by-line from FIIntegrateRegion's no-fitted-background branch
     (tv-1.9.13/lib/tv/vsFitInt.c:19-51,194-309) plus the sigma/FWHM
@@ -1130,9 +1131,36 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
     per the design spec. Independently validated (hand-computed moments,
     flat-background/analytic-peak sanity checks, and a dedicated
     cross-check proving the moment-reuse quirk is real) before this
-    function was written -- see the design spec's Testing section."""
+    function was written -- see the design spec's Testing section.
+
+    `variance` is this port's one addition to TV, and it is opt-in: pass a
+    per-channel variance and it is used everywhere TV reads a variance off
+    the counts, leaving every other line of the algorithm untouched.
+    Without it the behaviour is exactly TV's, including the refusal below.
+
+    The reason it exists is that Fit and Integration were disagreeing about
+    the same data. A matrix cut carries a propagated variance -- `pos +
+    factor**2 * bg`, which exceeds its own counts -- and fit_peaks has
+    weighted by it since v4.0.0, while integrating the same spectrum
+    silently assumed raw Poisson counts and reported an uncertainty too
+    small. Two numbers from one spectrum should not imply different things
+    about how well it is known.
+
+    Supplying a variance also lifts the negative-count refusal, because
+    that refusal exists only to stop a variance being read off counts that
+    cannot support one. With a real variance in hand there is nothing to
+    read off, and a background-subtracted cut -- precisely the thing that
+    carries a variance -- legitimately goes negative.
+    """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
+    if variance is not None:
+        variance = np.asarray(variance, dtype=float)
+        if variance.shape != y.shape:
+            raise FitError(
+                f"variance has length {variance.size}, expected {y.size} to "
+                "match the spectrum"
+            )
 
     lo, hi = fit_region
     mask = (x >= lo) & (x <= hi)
@@ -1141,14 +1169,16 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
     n = idx.size
     if n == 0:
         raise FitError(f"Fit region {fit_region} contains no data")
-    if np.any(s < 0.0):
+    if variance is None and np.any(s < 0.0):
         raise FitError(
             "Cannot integrate a region containing negative counts (e.g. "
             "from a Subtract Spectra result) -- the uncertainty "
             "calculation used here assumes non-negative Poisson counts, "
             "matching TV's own convention."
         )
-    ds = s.copy()  # Poisson variance per channel = the count itself
+    # Poisson variance per channel = the count itself, unless the caller
+    # knows better.
+    ds = s.copy() if variance is None else variance[mask]
 
     # ---- gross sum & variance (vsFitInt.c:41-43) ----
     gross_sum = float(np.sum(s))
@@ -1192,7 +1222,7 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
             bmask = (x >= blo) & (x <= bhi)
             bg_chn += int(np.sum(bmask))
             bg_y = y[bmask]
-            if np.any(bg_y < 0.0):
+            if variance is None and np.any(bg_y < 0.0):
                 raise FitError(
                     "Cannot integrate a region containing negative counts "
                     "(e.g. from a Subtract Spectra result) -- the "
@@ -1201,7 +1231,12 @@ def integrate_region(x, y, left_bg_region, right_bg_region, fit_region):
                     "convention."
                 )
             bg_count += float(np.sum(bg_y))
-            bg_dcount += float(np.sum(bg_y))
+            # TV's two accumulators read the same numbers because its
+            # variance IS the count; they part company once a real variance
+            # is supplied, and only the second one is a variance.
+            bg_dcount += float(
+                np.sum(bg_y) if variance is None else np.sum(variance[bmask])
+            )
 
     if bg_chn > 0:
         bg_density = bg_count / bg_chn

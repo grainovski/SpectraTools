@@ -20,7 +20,10 @@ from calibration_dialog import CalibrationDialog
 from fit_mode import FitModeController
 from matrix_cut import compute_projection
 from mtx_io import load_mtx
-from spectrum import LIGHT_COLOR_CYCLE, LoadedSpectrum, panned_xlim
+from peak_fit import channel_indices
+from spectrum import (
+    LIGHT_COLOR_CYCLE, LoadedSpectrum, pan_button_is_active, panned_xlim,
+)
 from theme import refresh_builtin_toolbar_icons, style_axes, style_nav_toolbar_palette
 
 CUT_REGION_COLOR = "tab:red"
@@ -513,25 +516,18 @@ class MatrixPanel(QMainWindow):
         self.nav_toolbar.push_current()
 
     def _pan_button_is_active(self, event):
-        """True when this press should start a drag-pan. Mirrors
-        main_window._pan_button_is_active exactly -- the projection view
-        is a spectrum view and must not behave differently.
+        """Whether this press starts a drag-pan.
 
-        Right button always pans. Left button pans only when no marking
-        key is held (C or G here, where the main window has B/R/P) and the
-        matplotlib toolbar's own Pan/Zoom is not armed.
+        Shares the main window's rule (spectrum.pan_button_is_active) --
+        the projection view is a spectrum view and must not behave
+        differently. BOTH controllers are passed: this panel carries cut
+        marking (C/G) as well as fit marking, and either one holding a key
+        must stop a drag from moving the view mid-mark.
         """
-        if event.inaxes != self.axes or event.x is None:
-            return False
-        if event.button == 3:
-            return True
-        if event.button != 1:
-            return False
-        if self.cut_controller._held_key is not None:
-            return False
-        if self.fit_controller._held_key is not None:
-            return False
-        return not str(self.nav_toolbar.mode)
+        return pan_button_is_active(
+            event, self.axes, self.nav_toolbar,
+            (self.cut_controller, self.fit_controller),
+        )
 
     def _on_pan_press(self, event):
         if not self._pan_button_is_active(event):
@@ -607,7 +603,8 @@ class MatrixPanel(QMainWindow):
         self.axes.clear()
         style_axes(self.axes, self.main_window._theme)
         spectrum = self.spectra[0]
-        channels = np.arange(len(spectrum.data))
+        # Cached read-only channel axis, as in main_window._plot_data.
+        channels = channel_indices(len(spectrum.data))
         x = self.channel_to_display(channels)
         self.axes.plot(x, spectrum.data, drawstyle="steps-mid", linewidth=0.8, color=spectrum.color)
         # Resolved before drawing so off-view fits can be skipped, then

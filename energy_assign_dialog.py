@@ -23,8 +23,30 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+import math
+
 import calibration as calibration_module
 from calibration import CalibrationError
+
+
+def _format_uncertainty(value):
+    """A centroid uncertainty for display, or an em dash where there is
+    none to show.
+
+    A position held fixed reports exactly 0.0 and one the fit could not
+    determine reports NaN. Neither is a measurement, and printing "0.000"
+    for the first would read as a perfectly known channel -- the most
+    misleading thing this column could say.
+    """
+    if value is None:
+        return "—"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(number) or number <= 0.0:
+        return "—"
+    return f"{number:.3f}"
 
 
 class EnergyAssignDialog(QDialog):
@@ -34,13 +56,23 @@ class EnergyAssignDialog(QDialog):
     active spectrum, in the order the Fit Results panel shows them.
     """
 
-    ENERGY_COLUMN = 2
+    # Shifted right by one when the centroid-uncertainty column was added.
+    # Every caller reads the constant rather than the literal, which is why
+    # that column could be inserted at all.
+    ENERGY_COLUMN = 3
 
     def __init__(self, parent, peaks, quadratic=False):
         super().__init__(parent)
         self.setWindowTitle("Calibrate from Fitted Peaks")
         self.result_calibration = None
-        self._peaks = list(peaks)
+        # Entries are (label, channel) or (label, channel, channel_err).
+        # Both accepted: the uncertainty is extra information about a peak,
+        # not part of what identifies it, and a caller that has none should
+        # not have to invent one.
+        self._peaks = [
+            (entry[0], entry[1], entry[2] if len(entry) > 2 else None)
+            for entry in peaks
+        ]
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
@@ -48,12 +80,14 @@ class EnergyAssignDialog(QDialog):
             "the rest blank."
         ))
 
-        self.table = QTableWidget(len(self._peaks), 3)
-        self.table.setHorizontalHeaderLabels(["Peak", "Channel", "Energy (keV)"])
+        self.table = QTableWidget(len(self._peaks), 4)
+        self.table.setHorizontalHeaderLabels(
+            ["Peak", "Channel", "± ch", "Energy (keV)"]
+        )
         self.table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
         )
-        for row, (label, channel) in enumerate(self._peaks):
+        for row, (label, channel, channel_err) in enumerate(self._peaks):
             name = QTableWidgetItem(label)
             name.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.table.setItem(row, 0, name)
@@ -61,6 +95,13 @@ class EnergyAssignDialog(QDialog):
             position = QTableWidgetItem(f"{channel:.3f}")
             position.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.table.setItem(row, 1, position)
+
+            # Shown, not just used: it is the reason one row deserves more
+            # weight than another, and seeing a peak with a large
+            # uncertainty explains a calibration that leans away from it.
+            uncertainty = QTableWidgetItem(_format_uncertainty(channel_err))
+            uncertainty.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            self.table.setItem(row, 2, uncertainty)
 
             self.table.setItem(row, self.ENERGY_COLUMN, QTableWidgetItem(""))
         layout.addWidget(self.table)
@@ -81,14 +122,15 @@ class EnergyAssignDialog(QDialog):
         layout.addWidget(buttons)
 
     def assignments(self):
-        """(channels, energies) for the rows that carry an energy.
+        """(channels, energies, channel_errors) for the rows that carry an
+        energy.
 
         Raises ValueError naming the row for anything unparseable, rather
         than skipping it: a typo silently dropped would produce a
         calibration quietly fitted to fewer points than the user thinks.
         """
-        channels, energies = [], []
-        for row, (label, channel) in enumerate(self._peaks):
+        channels, energies, errors = [], [], []
+        for row, (label, channel, channel_err) in enumerate(self._peaks):
             item = self.table.item(row, self.ENERGY_COLUMN)
             text = (item.text() if item else "").strip()
             if not text:
@@ -98,17 +140,22 @@ class EnergyAssignDialog(QDialog):
             except ValueError:
                 raise ValueError(f"{label}: {text!r} is not a number") from None
             channels.append(channel)
-        return channels, energies
+            errors.append(channel_err)
+        return channels, energies, errors
 
     def _on_accept(self):
         try:
-            channels, energies = self.assignments()
+            channels, energies, errors = self.assignments()
         except ValueError as exc:
             self.status.setText(str(exc))
             return
         try:
             self.result_calibration = calibration_module.from_points(
-                channels, energies, self.quadratic_checkbox.isChecked()
+                channels, energies, self.quadratic_checkbox.isChecked(),
+                # from_points falls back to an unweighted fit if any of
+                # these is missing or unusable, so passing them
+                # unconditionally is safe.
+                channel_errors=errors,
             )
         except CalibrationError as exc:
             self.status.setText(str(exc))

@@ -1911,3 +1911,83 @@ def test_normalize_scales_the_propagated_variance_too(qapp):
     # gone up by 9.
     assert np.allclose(small.data, 120)
     assert np.allclose(small.variance, 160.0 * 9.0)
+
+
+# ---------------------------------------------------------------------------
+# v4.1.0 audit C1: the pan predicate is shared between the main window and
+# the matrix panel, so the panel's second controller cannot drift away.
+# ---------------------------------------------------------------------------
+
+
+class _StubController:
+    def __init__(self, held_key=None):
+        self._held_key = held_key
+
+
+class _StubToolbar:
+    def __init__(self, mode=""):
+        self.mode = mode
+
+
+class _StubEvent:
+    def __init__(self, axes, button=1, x=10.0):
+        self.inaxes = axes
+        self.button = button
+        self.x = x
+
+
+def test_pan_predicate_right_button_pans_even_while_marking():
+    from spectrum import pan_button_is_active
+
+    axes = object()
+    assert pan_button_is_active(
+        _StubEvent(axes, button=3), axes, _StubToolbar(),
+        (_StubController("B"),),
+    ) is True
+
+
+def test_pan_predicate_left_button_stands_down_for_any_held_key():
+    """The whole reason this is shared: the matrix panel has TWO
+    controllers, and either one holding a key must veto the pan. A copy
+    that consulted only the first would let a drag nudge the view in the
+    middle of placing a fit mark."""
+    from spectrum import pan_button_is_active
+
+    axes = object()
+    cut = _StubController()
+    fit = _StubController()
+    assert pan_button_is_active(
+        _StubEvent(axes), axes, _StubToolbar(), (cut, fit)) is True
+
+    cut._held_key = "C"
+    assert pan_button_is_active(
+        _StubEvent(axes), axes, _StubToolbar(), (cut, fit)) is False
+
+    cut._held_key = None
+    fit._held_key = "B"
+    assert pan_button_is_active(
+        _StubEvent(axes), axes, _StubToolbar(), (cut, fit)) is False
+
+
+def test_pan_predicate_stands_down_while_the_toolbar_tool_is_armed():
+    from spectrum import pan_button_is_active
+
+    axes = object()
+    assert pan_button_is_active(
+        _StubEvent(axes), axes, _StubToolbar("pan/zoom"), (_StubController(),)
+    ) is False
+
+
+def test_pan_predicate_ignores_presses_outside_the_axes_and_other_buttons():
+    from spectrum import pan_button_is_active
+
+    axes = object()
+    assert pan_button_is_active(
+        _StubEvent(object()), axes, _StubToolbar(), (_StubController(),)) is False
+    assert pan_button_is_active(
+        _StubEvent(axes, button=2), axes, _StubToolbar(), (_StubController(),)
+    ) is False
+    event = _StubEvent(axes)
+    event.x = None
+    assert pan_button_is_active(
+        event, axes, _StubToolbar(), (_StubController(),)) is False
