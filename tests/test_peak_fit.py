@@ -222,6 +222,7 @@ def test_compute_background_rejects_identical_mean_x():
 
 
 from peak_fit import fit_peaks
+from peak_fit import hypermet_area as _hypermet_area
 
 
 def _make_spectrum(channels, peaks, slope, intercept, noise_seed=None):
@@ -2708,3 +2709,105 @@ def test_model_evaluate_subset_sums_only_the_named_peaks():
     second = model_named.evaluate(x, values, [1], False)
     assert np.allclose(both, first + second)
     assert np.allclose(model_named.evaluate(x, values, [], False), 0.0)
+
+
+# ---------------------------------------------------------------------------
+# v4.1.0 S7: tail_beta must be bounded ABOVE as well as below.
+#
+# Found while measuring P1, not by the audit's own reading. With no upper
+# bound, a fit on data with no real tail drives tail_fraction to ~0, at
+# which point d(model)/d(tail_beta) vanishes and beta wanders freely -- to
+# 1e18 in the worst observed case. The model SHAPE stays fine (reduced
+# chi-square 0.88-1.12 throughout), so nothing looks wrong; but
+# hypermet_area's tail term is 2*r*beta/erfcx(y), which tends to 2*r*beta
+# as beta grows, and the product is enormous even for a negligible r. The
+# reported area came out 6e18 counts for a peak of amplitude 3800.
+# ---------------------------------------------------------------------------
+
+
+def test_clamp_trial_bounds_tail_beta_above_by_the_peak_width():
+    from peak_fit import TAIL_BETA_MAX_SIGMA, _ParamDamping, _clamp_trial
+
+    damping = [
+        _ParamDamping("amp"),
+        _ParamDamping("sigma"),
+        _ParamDamping("tail_beta", sigma_indices=(1,)),
+    ]
+    p = np.array([1000.0, 4.0, 1e18])
+    clamped = _clamp_trial(p, damping)
+    assert clamped[2] == pytest.approx(TAIL_BETA_MAX_SIGMA * 4.0)
+    # The lower bound is untouched.
+    assert _clamp_trial(np.array([1000.0, 4.0, 1e-9]), damping)[2] == \
+        pytest.approx(0.1)
+
+
+def test_clamp_trial_uses_the_widest_sigma_when_widths_are_unlinked():
+    """tail_beta is shared by every peak, so the permissive choice is the
+    widest peak's sigma -- capping against the narrowest would bind on a
+    genuine tail belonging to a broad one."""
+    from peak_fit import TAIL_BETA_MAX_SIGMA, _ParamDamping, _clamp_trial
+
+    damping = [
+        _ParamDamping("sigma"), _ParamDamping("sigma"),
+        _ParamDamping("tail_beta", sigma_indices=(0, 1)),
+    ]
+    p = np.array([2.0, 9.0, 1e12])
+    assert _clamp_trial(p, damping)[2] == pytest.approx(TAIL_BETA_MAX_SIGMA * 9.0)
+
+
+def test_clamp_trial_can_bound_tail_beta_against_a_fixed_sigma():
+    """A held-fixed width is not in the parameter vector at all, so the
+    bound has to travel on the damping metadata instead."""
+    from peak_fit import TAIL_BETA_MAX_SIGMA, _ParamDamping, _clamp_trial
+
+    damping = [_ParamDamping("amp"),
+               _ParamDamping("tail_beta", sigma_values=(5.0,))]
+    p = np.array([1000.0, 1e15])
+    assert _clamp_trial(p, damping)[1] == pytest.approx(TAIL_BETA_MAX_SIGMA * 5.0)
+
+
+def test_a_tailless_doublet_no_longer_reports_an_absurd_area():
+    """The regression this bound exists for. Two clean Gaussians, no tail
+    in the data, fitted WITH the tail enabled -- an entirely ordinary thing
+    to do when you are not sure whether a peak tails."""
+    rng = np.random.default_rng(39)
+    x = np.arange(400, dtype=float)
+    truth = (50.0
+             + 3000.0 * np.exp(-((x - 150.0) ** 2) / (2 * 4.0 ** 2))
+             + 2500.0 * np.exp(-((x - 190.0) ** 2) / (2 * 4.0 ** 2)))
+    y = rng.poisson(truth).astype(float)
+    result = fit_peaks(
+        x, y, left_bg_region=(20.0, 90.0), right_bg_region=(300.0, 380.0),
+        fit_region=(110.0, 230.0), peak_positions=[150.0, 190.0],
+        link_widths=False, enable_left_tail=True,
+    )
+    for peak in result.peaks:
+        core = peak.amplitude * peak.sigma * math.sqrt(2.0 * math.pi)
+        assert core > 0
+        # Before the bound this ratio reached 1.3e5 on exactly this seed.
+        assert peak.area / core < 3.0, (
+            f"area {peak.area:.4g} against a Gaussian core of {core:.4g}"
+        )
+    assert result.net_area < 3.0 * sum(
+        p.amplitude * p.sigma * math.sqrt(2.0 * math.pi) for p in result.peaks
+    )
+
+
+def test_the_bound_does_not_bind_on_a_genuinely_long_tail():
+    """Data generated FROM the hypermet shape, so the true beta is known.
+    The bound must leave a real tail alone -- it exists to stop an
+    unconstrained parameter running away, not to reshape the model."""
+    for true_beta in (4.0, 8.0, 16.0):
+        sigma = 4.0
+        rng = np.random.default_rng(5)
+        x = np.arange(600, dtype=float)
+        shape = hypermet_left_tail(x, 300.0, sigma, 0.25, true_beta)
+        y = rng.poisson(60.0 + 4000.0 * shape).astype(float)
+        true_area = float(_hypermet_area(4000.0, sigma, 0.25, true_beta))
+        result = fit_peaks(
+            x, y, left_bg_region=(20.0, 90.0), right_bg_region=(520.0, 580.0),
+            fit_region=(200.0, 420.0), peak_positions=[300.0],
+            enable_left_tail=True,
+        )
+        assert result.tail_beta == pytest.approx(true_beta, rel=0.35)
+        assert result.peaks[0].area == pytest.approx(true_area, rel=0.05)

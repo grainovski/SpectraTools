@@ -535,10 +535,26 @@ in the tail rather than the Gaussian core. r = 0 is a pure
 Gaussian.</td></tr>
 <tr><td>tail beta (&beta;)</td><td>How far the tail extends below the
 peak position -- a larger &beta; stretches the tail further to lower
-energy.</td></tr>
+energy. Bounded to at most 20&times;&sigma; -- see below.</td></tr>
 <tr><td>background slope / intercept</td><td>The straight line fixed by
 the two background regions (Figure 1).</td></tr>
 </table>
+<p><b>Why &beta; is capped.</b> If you enable the left tail on a peak that
+does not really have one, <i>r</i> settles at nearly zero -- and once it
+does, the tail contributes nothing to the shape, so the fit has no way to
+tell one &beta; from another. Left free, &beta; then drifts to whatever
+value it happens to reach, which can be astronomically large. That does no
+harm to the fitted curve, but the peak's <i>volume</i> includes the whole
+tail integrated out to infinity, so it would be reported as an absurd
+number -- billions of times the peak's real content -- while the fit
+itself still looked healthy. Capping &beta; at 20&times;&sigma; keeps that
+from happening. A real detector tail has &beta; of the order of &sigma;,
+so the cap is far away from anything physical and does not affect a
+genuine tail fit.</p>
+<p>If &beta; is reported at exactly 20&times;&sigma;, read it as "there is
+no tail here to measure" rather than as a measurement. Its uncertainty
+will usually read "n/a" in that case, for the same reason -- see "When an
+uncertainty reads n/a" below.</p>
 
 <h2>Sigma and FWHM</h2>
 <figure>

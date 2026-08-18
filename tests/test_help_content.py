@@ -856,3 +856,19 @@ def test_knowledge_database_documents_the_weighted_calibration():
     assert "&plusmn; ch" in text or "± ch" in text
     assert "shows a dash instead of a number" in text
     assert "slope and its uncertainty" in text
+
+
+def test_knowledge_database_explains_the_capped_tail_beta():
+    """v4.1.0 S7: beta is bounded above now, and a user who sees it sitting
+    exactly on the bound needs to know that means 'no tail here to measure'
+    rather than a measurement."""
+    text = _rendered_text(build_knowledge_database_html())
+    assert "Why &beta; is capped" in text or "Why \u03b2 is capped" in text
+    assert "no tail here to measure" in text
+    # And the cross-reference it makes must resolve.
+    import re
+    headings = {
+        re.sub(r"<[^>]+>", "", h).strip()
+        for h in re.findall(r"<h2>(.*?)</h2>", build_knowledge_database_html(), re.S)
+    }
+    assert any("uncertainty reads" in h for h in headings), headings

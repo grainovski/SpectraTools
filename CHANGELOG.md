@@ -36,6 +36,24 @@ except where noted under Changed.
 - **Rebin made a derived spectrum impossible to fit.** Its variance kept
   the pre-rebin channel count, which the fitter then rejected outright.
   The variance is now rebinned with the counts.
+- **A peak fitted with "Left tail" on could report an absurd area** -- 6e18
+  counts for a peak of amplitude 3800. The tail decay length was bounded
+  below but not above, so on data with no real tail the tail fraction went
+  to nearly zero, the tail stopped contributing to the model, and the decay
+  length was left unconstrained and wandered as far as 7e18. The fitted
+  curve stayed perfectly good, which is what made this easy to miss, but
+  the area formula's tail term grows with that length and the product is
+  enormous even for a negligible tail fraction. In a randomised sweep, 16
+  of about 150 tailed fits reported an area more than a hundred times their
+  own Gaussian core; now none do. The decay length is bounded at 20 times
+  the widest peak width, which is permissive enough not to touch a genuine
+  tail -- fitting data generated *from* the tailed shape recovers a true
+  decay length of 10 sigma as 10.1, with the area correct to better than
+  1%. The trade-off: the unbounded fit reached a marginally lower
+  chi-square in about 12% of tailed fits (worst case, 0.05 in reduced
+  chi-square), because a decay length of 1e18 acts as a flat pedestal that
+  absorbs background mismatch. That is the background's job, not the
+  tail's.
 
 ### Added
 

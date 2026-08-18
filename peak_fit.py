@@ -10,6 +10,36 @@ SQRT_2PI = 2.5066282746310002  # sqrt(2*pi)
 TAIL_FRACTION_MAX = 0.3
 TAIL_BETA_MIN = 0.1
 
+#: tail_beta is bounded ABOVE at this many sigma, as well as below at
+#: TAIL_BETA_MIN.
+#:
+#: Without an upper bound, a fit on data with no real tail drives
+#: tail_fraction to ~0, at which point the tail term stops contributing to
+#: the model at all and d(model)/d(tail_beta) vanishes -- so beta is
+#: unconstrained and wanders. Observed reaching 7e18. The fitted CURVE stays
+#: perfectly good (reduced chi-square 0.88-1.12 across the cases measured),
+#: which is what makes this so easy to miss, but hypermet_area's tail term
+#: is 2*r*beta/erfcx(y) and tends to 2*r*beta as beta grows. The product is
+#: enormous even when r is negligible: the reported area came out 6e18
+#: counts for a peak of amplitude 3800. In a randomised sweep, 16 of ~150
+#: tailed fits reported an area more than 100x their own Gaussian core.
+#:
+#: 20 sigma is chosen to be permissive rather than tight. A real detector
+#: tail has beta of order sigma; fitting data generated FROM the hypermet
+#: shape recovers a true beta of 1 sigma as 0.94, 2 sigma as 1.88 and
+#: 10 sigma as 10.1, all with areas correct to better than 0.7%, so the
+#: bound does not bind on genuine tails -- it only stops the runaway when
+#: there is no tail there to fit.
+#:
+#: This is not free, and the trade was made deliberately. The unbounded fit
+#: does reach a slightly lower chi-square in about 12% of tailed fits (worst
+#: observed increase in reduced chi-square: 0.05), because a beta of 1e18 is
+#: effectively a flat pedestal under the peak and absorbs background
+#: mismatch. Absorbing background mismatch is the background's job, not the
+#: tail's, and paying 0.05 in reduced chi-square to stop reporting areas
+#: wrong by fifteen orders of magnitude is the right way round.
+TAIL_BETA_MAX_SIGMA = 20.0
+
 _CUR_RATIO = 1e-12
 _CUR_LAMBDA_START = 1e-3
 _CUR_MIN_LAMBDA = 1e-20
@@ -735,7 +765,22 @@ def _build_param_damping(free_names, fixed_params, link_widths):
         elif name == "tail_fraction":
             damping.append(_ParamDamping("tail_fraction"))
         elif name == "tail_beta":
-            damping.append(_ParamDamping("tail_beta"))
+            # Every peak width, however it is held, so _clamp_trial can bound
+            # this against the widest of them. Collected here rather than in
+            # the clamp because this is where the free/fixed split is known.
+            width_names = (
+                ["sigma"] if link_widths
+                else [n for n in (free_names + list(fixed_params)) if n.startswith("sigma_")]
+            )
+            damping.append(_ParamDamping(
+                "tail_beta",
+                sigma_indices=tuple(
+                    free_index[n] for n in width_names if n in free_index
+                ),
+                sigma_values=tuple(
+                    fixed_params[n] for n in width_names if n in fixed_params
+                ),
+            ))
         elif name in ("bg_c0", "bg_c1"):
             damping.append(_ParamDamping("bg"))
         else:
@@ -1432,14 +1477,42 @@ class _ParamDamping:
     current sigma; needs sigma_index or sigma_value to know that sigma),
     "sigma" (step capped at 2x current value, floored away from zero),
     "tail_fraction"/"tail_beta" (nudged away from exactly zero, then
-    hard-clamped to this project's existing bounds)."""
+    hard-clamped to this project's existing bounds).
 
-    __slots__ = ("kind", "sigma_index", "sigma_value")
+    `sigma_indices`/`sigma_values` are for "tail_beta" alone, which is
+    bounded above at TAIL_BETA_MAX_SIGMA times a peak width and so needs to
+    know the widths. Both are sequences because tail_beta is shared by every
+    peak while the widths need not be (unlinked fits have one sigma each),
+    and because a width may be free (an index into the parameter vector) or
+    held fixed (a value, since it is not in the vector at all)."""
 
-    def __init__(self, kind, sigma_index=None, sigma_value=None):
+    __slots__ = ("kind", "sigma_index", "sigma_value", "sigma_indices",
+                 "sigma_values")
+
+    def __init__(self, kind, sigma_index=None, sigma_value=None,
+                 sigma_indices=(), sigma_values=()):
         self.kind = kind
         self.sigma_index = sigma_index
         self.sigma_value = sigma_value
+        self.sigma_indices = tuple(sigma_indices)
+        self.sigma_values = tuple(sigma_values)
+
+
+def _tail_beta_upper_bound(meta, p):
+    """The widest peak width this fit knows about, times
+    TAIL_BETA_MAX_SIGMA -- or None when no width is available at all.
+
+    The WIDEST rather than the narrowest, because one tail_beta is shared by
+    every peak: bounding against a narrow peak would bind on a broad peak's
+    genuine tail. None (no bound) rather than a guess when there is nothing
+    to scale by, which keeps this from inventing a limit out of nothing.
+    """
+    widths = [abs(p[index]) for index in meta.sigma_indices]
+    widths += [abs(value) for value in meta.sigma_values if value is not None]
+    widths = [w for w in widths if math.isfinite(w) and w > 0.0]
+    if not widths:
+        return None
+    return TAIL_BETA_MAX_SIGMA * max(widths)
 
 
 def _current_sigma_for(meta, p):
@@ -1609,6 +1682,12 @@ def _clamp_trial(p_try, damping):
             p_try[i] = min(max(p_try[i], 0.0), TAIL_FRACTION_MAX)
         elif meta.kind == "tail_beta":
             p_try[i] = max(p_try[i], TAIL_BETA_MIN)
+            # Bounded above as well as below -- see TAIL_BETA_MAX_SIGMA. The
+            # bound is recomputed every trial because it scales with the
+            # current width, which the fit is still moving.
+            upper = _tail_beta_upper_bound(meta, p_try)
+            if upper is not None and upper > TAIL_BETA_MIN:
+                p_try[i] = min(p_try[i], upper)
     return p_try
 
 
