@@ -54,7 +54,8 @@ from settings import Settings
 from spe_io import load_spe, save_spe
 from spectrum import LoadedSpectrum, active_spectrum, next_color, panned_xlim
 from spectrum_operations import (
-    add, combined_variance, multiply, normalize_factors, rebin, reference_value, subtract,
+    add, combined_variance, multiply, normalize_factors, rebin, rebinned_variance,
+    reference_value, scaled_variance, subtract,
 )
 from spk_io import load_spk, save_spk
 from theme import qt_stylesheet, refresh_builtin_toolbar_icons, style_axes, style_nav_toolbar_palette
@@ -689,6 +690,12 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             QMessageBox.warning(self, "Multiply by Factor", f"Could not multiply: {exc}")
             return
+        # After the counts, and only once they actually changed -- the
+        # overflow branch above returns without touching either, so the two
+        # can never end up describing different data. A spectrum carrying a
+        # propagated variance (a matrix cut, an Add/Subtract result) needs it
+        # scaled by factor**2; one without keeps None and stays Poisson.
+        spectrum.variance = scaled_variance(spectrum.variance, factor)
         self.fit_controller.reset_marks()
         spectrum.fits.clear()
         self._plot_data(preserve_view=True)
@@ -707,6 +714,11 @@ class MainWindow(QMainWindow):
 
     def _apply_rebin(self, spectrum, factor):
         spectrum.data = rebin(spectrum.data, factor)
+        # Grouped and summed exactly as the counts were. Without this the
+        # variance kept its pre-rebin length and fit_peaks' own length check
+        # then refused the spectrum outright, leaving a rebinned cut
+        # impossible to fit for the rest of the session.
+        spectrum.variance = rebinned_variance(spectrum.variance, factor)
         if self._calibration is not None:
             # Calibration is a single MainWindow-level object shared by
             # every loaded spectrum (see __init__), but rebinning changes
@@ -777,6 +789,9 @@ class MainWindow(QMainWindow):
             if factor == 1.0:
                 continue
             spectrum.data = multiply(spectrum.data, factor)
+            # Normalize scales through the same multiply(), so it carries the
+            # same obligation to scale the variance with it.
+            spectrum.variance = scaled_variance(spectrum.variance, factor)
             spectrum.fits.clear()
 
         self.fit_controller.reset_marks()

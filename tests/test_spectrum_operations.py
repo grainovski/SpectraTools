@@ -206,3 +206,56 @@ def test_subtract_raises_instead_of_silently_wrapping_on_overflow():
     b = np.array([100, 200], dtype=np.int64)
     with pytest.raises(ValueError):
         subtract(a, b, 1e20)
+
+
+# ---------------------------------------------------------------------------
+# v4.1.0 audit S3/S4: an operation must transform a spectrum's propagated
+# variance alongside its counts.
+# ---------------------------------------------------------------------------
+
+
+def test_scaled_variance_squares_the_factor():
+    from spectrum_operations import scaled_variance
+
+    variance = np.array([4.0, 9.0, 0.0, 25.0])
+    assert np.allclose(scaled_variance(variance, 3.0), variance * 9.0)
+
+
+def test_scaled_variance_passes_none_through():
+    """None means 'assume Poisson', and scaling a spectrum that never
+    carried a propagated variance must not invent one."""
+    from spectrum_operations import scaled_variance
+
+    assert scaled_variance(None, 3.0) is None
+
+
+def test_scaled_variance_of_a_fractional_factor_shrinks_it():
+    from spectrum_operations import scaled_variance
+
+    assert np.allclose(scaled_variance(np.array([100.0]), 0.5), [25.0])
+
+
+def test_rebinned_variance_adds_the_grouped_variances():
+    """Variances of summed channels add, so a rebinned variance is the
+    same grouping and the same sum as the counts."""
+    from spectrum_operations import rebinned_variance
+
+    variance = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    assert np.allclose(rebinned_variance(variance, 2), [3.0, 7.0, 11.0])
+    assert np.allclose(rebinned_variance(variance, 3), [6.0, 15.0])
+
+
+def test_rebinned_variance_matches_the_data_length_when_padding():
+    """rebin() zero-pads an uneven tail; the variance must land on the
+    same length or every later fit fails its own length check."""
+    from spectrum_operations import rebinned_variance
+
+    data = np.arange(7, dtype=np.int64)
+    variance = np.ones(7, dtype=float)
+    assert rebinned_variance(variance, 2).size == rebin(data, 2).size
+
+
+def test_rebinned_variance_passes_none_through():
+    from spectrum_operations import rebinned_variance
+
+    assert rebinned_variance(None, 2) is None

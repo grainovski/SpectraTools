@@ -1807,3 +1807,107 @@ def test_right_drag_still_pans(qapp):
     main_window.fit_controller._held_key = "b"
     _drag(main_window, 40, 30, button=3)
     assert main_window.axes.get_xlim() != before
+
+
+# ---------------------------------------------------------------------------
+# v4.1.0 audit S3/S4: Multiply, Rebin and Normalize must carry a derived
+# spectrum's propagated variance through with the counts.
+# ---------------------------------------------------------------------------
+
+
+def _derived_spectrum(main_window, length=200, path="cut.spk"):
+    """A spectrum standing in for a matrix cut: real counts plus a
+    propagated variance that deliberately exceeds them, which is what
+    makes it distinguishable from a Poisson assumption."""
+    data = np.full(length, 40, dtype=np.int64)
+    variance = np.full(length, 160.0)  # 4x the counts, as a cut's would be
+    spectrum = LoadedSpectrum(path, data, "#1f77b4", variance=variance)
+    for existing in main_window.spectra:
+        existing.active = False
+    spectrum.active = True
+    main_window.spectra.append(spectrum)
+    return spectrum
+
+
+def test_multiply_scales_the_propagated_variance_by_the_factor_squared(qapp):
+    main_window = MainWindow()
+    spectrum = _derived_spectrum(main_window)
+    main_window._apply_multiply(spectrum, 3.0)
+    assert np.allclose(spectrum.data, 120)
+    assert np.allclose(spectrum.variance, 160.0 * 9.0), (
+        "variance must scale as factor**2, or every later fit reports "
+        "uncertainties smaller than the data supports"
+    )
+
+
+def test_multiply_leaves_a_poisson_spectrum_without_a_variance(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    assert spectrum.variance is None
+    main_window._apply_multiply(spectrum, 2.0)
+    assert spectrum.variance is None
+
+
+def test_rebin_rebins_the_propagated_variance_to_match(qapp):
+    main_window = MainWindow()
+    spectrum = _derived_spectrum(main_window)
+    main_window._apply_rebin(spectrum, 2)
+    assert spectrum.variance is not None
+    assert spectrum.variance.size == spectrum.data.size, (
+        "a length mismatch here makes the spectrum permanently unfittable"
+    )
+    assert np.allclose(spectrum.variance, 320.0)  # two 160.0 channels added
+
+
+def test_rebinned_derived_spectrum_can_still_be_fitted(qapp):
+    """The user-visible symptom the length mismatch caused: fit_peaks
+    rejects a variance whose length does not match the spectrum, so a
+    rebinned cut could not be fitted at all."""
+    from peak_fit import channel_indices, fit_peaks
+
+    main_window = MainWindow()
+    data = np.full(400, 40, dtype=np.int64)
+    peak = (3000.0 * np.exp(
+        -((np.arange(400) - 200.0) ** 2) / (2 * 8.0 ** 2))).astype(np.int64)
+    data = data + peak
+    spectrum = LoadedSpectrum(
+        "cut.spk", data, "#1f77b4", variance=np.maximum(data, 0) * 2.0)
+    for existing in main_window.spectra:
+        existing.active = False
+    spectrum.active = True
+    main_window.spectra.append(spectrum)
+
+    main_window._apply_rebin(spectrum, 2)
+
+    x = channel_indices(len(spectrum.data))
+    result = fit_peaks(
+        x, spectrum.data.astype(float),
+        left_bg_region=(10.0, 40.0), right_bg_region=(160.0, 190.0),
+        fit_region=(80.0, 120.0), peak_positions=[100.0],
+        variance=spectrum.variance,
+    )
+    assert result.peaks[0].area > 0.0
+
+
+def test_rebin_leaves_a_poisson_spectrum_without_a_variance(qapp):
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    main_window._apply_rebin(spectrum, 2)
+    assert spectrum.variance is None
+
+
+def test_normalize_scales_the_propagated_variance_too(qapp):
+    """Normalize scales through the same multiply() call, so it carries
+    the same obligation."""
+    main_window = MainWindow()
+    small = _derived_spectrum(main_window, path="small.spk")
+    big = LoadedSpectrum("big.spk", np.full(200, 120, dtype=np.int64), "#ff7f0e")
+    main_window.spectra.append(big)
+    # Normalize needs a marked channel to read each spectrum's reference
+    # value from; channel 1 reads 40 and 120, so `small` is scaled by 3.
+    main_window.fit_controller.state.pending_fit_click = 1
+    main_window._normalize_spectra()
+    # `small` was scaled up by 3 to match `big`, so its variance must have
+    # gone up by 9.
+    assert np.allclose(small.data, 120)
+    assert np.allclose(small.variance, 160.0 * 9.0)

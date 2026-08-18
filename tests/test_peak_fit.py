@@ -448,9 +448,13 @@ def test_fit_multiplet_two_peaks_no_noise():
     assert positions[1] == pytest.approx(108.0, abs=1.0)
     # net_area sums across both peaks, not just the first.
     assert result.net_area == pytest.approx(sum(p.area for p in result.peaks))
-    assert result.net_area_err == pytest.approx(
-        np.sqrt(sum(p.area_err ** 2 for p in result.peaks))
-    )
+    # Its UNCERTAINTY is propagated through the covariance, not summed in
+    # quadrature (v4.1.0 audit S1). These two peaks overlap, so their
+    # amplitudes are anti-correlated and the total is better determined
+    # than the quadrature sum claims.
+    quadrature = np.sqrt(sum(p.area_err ** 2 for p in result.peaks))
+    assert math.isfinite(result.net_area_err)
+    assert 0.0 < result.net_area_err < quadrature
 
 
 def test_fit_single_peak_with_poisson_noise():
@@ -2327,3 +2331,146 @@ def test_background_error_accepts_an_array_of_positions():
     errs = background_error(x, y, (10.0, 29.0), (170.0, 189.0), at)
     assert errs.shape == at.shape
     assert np.all(errs > 0)
+
+
+# ---------------------------------------------------------------------------
+# v4.1.0 audit S1: a multiplet's total area uncertainty must be propagated
+# through the whole covariance matrix, not summed in quadrature.
+# ---------------------------------------------------------------------------
+
+
+def test_total_area_error_keeps_the_off_diagonal_covariance():
+    """Two peaks whose amplitudes are strongly ANTI-correlated have a
+    total area that is far better determined than either component.
+
+    Hand-checkable: with a common sigma held fixed, area_i is linear in
+    amp_i, so g = (k, k) with k = sigma*sqrt(2*pi), and
+    var = k**2 * (C00 + 2*C01 + C11). A quadrature sum would drop the
+    2*C01 term, which is exactly the one that matters here.
+    """
+    from peak_fit import _total_area_error
+
+    sigma = 4.0
+    values = {"amp_0": 1000.0, "pos_0": 50.0,
+              "amp_1": 800.0, "pos_1": 62.0, "sigma": sigma}
+    free_names = ["amp_0", "amp_1"]
+    C = np.array([[100.0, -90.0], [-90.0, 100.0]])
+
+    err = _total_area_error(
+        values, n_peaks=2, link_widths=True, enable_left_tail=False,
+        free_names=free_names, pcov=C,
+    )
+
+    k = sigma * math.sqrt(2.0 * math.pi)
+    expected = math.sqrt(k ** 2 * (100.0 - 180.0 + 100.0))
+    assert err == pytest.approx(expected, rel=1e-6)
+
+    quadrature = math.sqrt((k ** 2 * 100.0) + (k ** 2 * 100.0))
+    assert err < 0.5 * quadrature, (
+        "the anti-correlation must reduce the total's uncertainty well "
+        "below the quadrature sum"
+    )
+
+
+def test_total_area_error_matches_quadrature_when_uncorrelated():
+    """The old formula was not wrong, only incomplete: with a diagonal
+    covariance the two agree exactly."""
+    from peak_fit import _total_area_error
+
+    sigma = 3.0
+    values = {"amp_0": 500.0, "pos_0": 40.0,
+              "amp_1": 700.0, "pos_1": 55.0, "sigma": sigma}
+    C = np.diag([64.0, 36.0])
+    err = _total_area_error(
+        values, n_peaks=2, link_widths=True, enable_left_tail=False,
+        free_names=["amp_0", "amp_1"], pcov=C,
+    )
+    k = sigma * math.sqrt(2.0 * math.pi)
+    assert err == pytest.approx(math.sqrt(k ** 2 * 64.0 + k ** 2 * 36.0), rel=1e-6)
+
+
+def test_net_area_err_barely_moves_with_peak_separation():
+    """The physical property the quadrature sum violated.
+
+    A doublet's TOTAL area is well determined however the fit divides it
+    between the two peaks, so the reported uncertainty should be close to
+    the same number whether the peaks are 1 sigma or 3 sigma apart. Under
+    quadrature it exploded as they merged -- measured at 10x the true
+    spread (400-realisation Monte Carlo) at 1 sigma separation against
+    1.06x at 3 sigma.
+    """
+    sigma = 4.0
+    errors = {}
+    quadratures = {}
+    for separation in (1.0, 3.0):
+        positions = [200.0, 200.0 + separation * sigma]
+        x, y = _make_spectrum(
+            channels=400,
+            peaks=[(3000.0, positions[0], sigma), (2500.0, positions[1], sigma)],
+            slope=0.02, intercept=50.0, noise_seed=11,
+        )
+        result = fit_peaks(
+            x, y, left_bg_region=(20.0, 80.0), right_bg_region=(330.0, 390.0),
+            fit_region=(150.0, 260.0), peak_positions=positions,
+            link_widths=True,
+        )
+        errors[separation] = result.net_area_err
+        quadratures[separation] = math.sqrt(
+            sum(p.area_err ** 2 for p in result.peaks)
+        )
+
+    assert errors[1.0] == pytest.approx(errors[3.0], rel=0.25), (
+        f"total-area uncertainty should be nearly separation-independent, "
+        f"got {errors[1.0]:.1f} at 1 sigma vs {errors[3.0]:.1f} at 3 sigma"
+    )
+    # And the old formula genuinely did explode, so this test would have
+    # failed loudly before the fix rather than passing by luck.
+    assert quadratures[1.0] > 3.0 * quadratures[3.0]
+
+
+def test_net_area_err_still_equals_the_single_peak_error():
+    """One peak means one term, so nothing about the covariance change
+    should move a single-peak fit's reported total."""
+    x, y = _make_spectrum(
+        channels=200, peaks=[(2000.0, 100.0, 4.0)], slope=0.0, intercept=50.0,
+        noise_seed=42,
+    )
+    result = fit_peaks(
+        x, y, left_bg_region=(20.0, 40.0), right_bg_region=(160.0, 180.0),
+        fit_region=(70.0, 130.0), peak_positions=[100.0],
+    )
+    assert result.net_area_err == pytest.approx(result.peaks[0].area_err, rel=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# v4.1.0 audit S2: gross_area_err must honour a supplied variance.
+# ---------------------------------------------------------------------------
+
+
+def test_gross_area_err_uses_supplied_variance_not_sqrt_n():
+    x, y = _make_spectrum(
+        channels=400, peaks=[(3000.0, 200.0, 4.0)], slope=0.02, intercept=50.0,
+        noise_seed=3,
+    )
+    variance = np.maximum(y, 0.0) * 4.0
+    result = fit_peaks(
+        x, y, left_bg_region=(20.0, 80.0), right_bg_region=(330.0, 390.0),
+        fit_region=(150.0, 260.0), peak_positions=[200.0], variance=variance,
+    )
+    mask = (x >= 150.0) & (x <= 260.0)
+    assert result.gross_area_err == pytest.approx(math.sqrt(np.sum(variance[mask])))
+    # Emphatically NOT the Poisson figure, which is half of it here.
+    assert result.gross_area_err > 1.9 * math.sqrt(np.sum(y[mask]))
+
+
+def test_gross_area_err_stays_poisson_without_a_supplied_variance():
+    x, y = _make_spectrum(
+        channels=400, peaks=[(3000.0, 200.0, 4.0)], slope=0.02, intercept=50.0,
+        noise_seed=3,
+    )
+    result = fit_peaks(
+        x, y, left_bg_region=(20.0, 80.0), right_bg_region=(330.0, 390.0),
+        fit_region=(150.0, 260.0), peak_positions=[200.0],
+    )
+    mask = (x >= 150.0) & (x <= 260.0)
+    assert result.gross_area_err == pytest.approx(math.sqrt(np.sum(y[mask])))

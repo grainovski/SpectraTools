@@ -94,6 +94,41 @@ def subtract(data_a, data_b, factor):
     return _checked_int64(np.round(data_a - factor * data_b))
 
 
+def scaled_variance(variance, factor):
+    """Variance of multiply()'s result: var(f*X) = f**2 * var(X).
+
+    Multiply and Normalize used to replace a spectrum's counts and leave
+    its propagated variance untouched, which told every later fit the data
+    was far better known than it is -- measured on a real matrix cut scaled
+    by 3, the reported peak area uncertainty came out 668.93 against a
+    correct 2006.80, understated by exactly the factor and with no warning
+    of any kind.
+
+    None passes through unchanged: it means "this spectrum came from a file,
+    assume Poisson", and scaling must not invent a variance for a spectrum
+    that never carried one -- the counts themselves still describe it.
+    """
+    if variance is None:
+        return None
+    return np.asarray(variance, dtype=float) * float(factor) ** 2
+
+
+def rebinned_variance(variance, factor):
+    """Variance of rebin()'s result.
+
+    Rebinning SUMS adjacent channels, and variances of summed independent
+    channels add, so this is the identical grouping and the identical sum --
+    rebin() itself does the work, on floats rather than counts.
+
+    Getting this wrong was not merely inaccurate: leaving the variance at
+    its pre-rebin length made the spectrum permanently unfittable, because
+    fit_peaks checks the variance against the spectrum's length and raises.
+    """
+    if variance is None:
+        return None
+    return rebin(np.asarray(variance, dtype=float), factor)
+
+
 def poisson_variance(data):
     """Variance to assume for a spectrum that does not carry its own:
     the counts themselves, floored at zero.
