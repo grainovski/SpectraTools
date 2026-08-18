@@ -618,9 +618,23 @@ certain is the background?" below.</p>
 <p>Region-level full/net totals for the whole fit work the same way --
 the region's full total is the sum of the raw, observed counts across
 the whole fit region (not the fitted model curve), and its net total
-sums just the peaks' own net volumes, with their uncertainties combined
-in quadrature. Net volume is almost always the number you actually want
-(for example, when computing activity or a branching ratio).</p>
+sums just the peaks' own net volumes. Net volume is almost always the
+number you actually want (for example, when computing activity or a
+branching ratio).</p>
+<p>The net total's <i>uncertainty</i> is propagated through the fit's
+whole covariance matrix in one step, exactly as a single peak's volume
+is. It is deliberately not the peaks' individual uncertainties added in
+quadrature, because those are not independent of one another. In an
+overlapping multiplet the amplitudes are strongly <i>anti</i>-correlated:
+the data pins down how many counts the group holds far better than it
+pins down how they divide between the peaks. So the total is better
+determined than any one component, and adding in quadrature can overstate
+it by a wide margin -- for a doublet one &sigma; apart, by a factor of
+ten. Well-separated peaks and single-peak fits are unaffected.</p>
+<p>A practical consequence worth knowing: the net total's uncertainty
+barely changes as two peaks are moved closer together, even though each
+individual peak's uncertainty grows quickly. That is real, not a
+rounding artefact -- the blend is still the same number of counts.</p>
 
 <h2>How certain is the background?</h2>
 <p>The background under a fit is the straight line through the mean
@@ -726,6 +740,24 @@ uncertainties means one of the assignments is wrong.</p>
 exactly the minimum works but is an interpolation rather than a fit: it
 passes through the points exactly and so cannot tell you anything about
 how good it is. Assign more than the minimum whenever you can.</p>
+<p>The <b>&plusmn; ch</b> column shows each centroid's own uncertainty,
+straight from the fit that produced it, and the calibration is
+<i>weighted</i> by it -- a peak the fit pinned down to a hundredth of a
+channel counts for more than one it could only place to within a
+channel, which is often the difference between a strong line and a weak
+one in the same spectrum. Without that weighting the weakest peak you
+assign would pull on the answer exactly as hard as the strongest.</p>
+<p>A peak whose position was held fixed, or that the fit could not
+determine, shows a dash instead of a number. There is no usable weight
+for such a peak, and rather than invent one the calibration falls back to
+weighting every point equally.</p>
+<p>When you assign more than the minimum, the status bar also reports the
+fitted <b>slope and its uncertainty</b>. The slope is the coefficient
+that matters for anything read far from the lines you assigned, so its
+uncertainty is a direct statement of how far you can trust the
+calibration away from your reference points. At exactly the minimum
+number of points there is no scatter to estimate it from, and none is
+reported.</p>
 
 <h2>Saving and reloading your work</h2>
 <p><b>File &rarr; Save Fits...</b> writes every fit on the active
@@ -849,8 +881,17 @@ width all come from the same three statistical moments of that data:</p>
 &sigma; comes from the second moment -- the spread of counts around the
 centroid -- and converts to FWHM exactly as in "Sigma and FWHM" above.
 Skewness (a third moment) measures asymmetry the same way. Every one of
-these carries its own uncertainty, propagated from Poisson counting
-statistics on each individual channel's count.</p>
+these carries its own uncertainty, propagated from the counting
+statistics of each individual channel.</p>
+<p>For a spectrum read from a file those statistics are Poisson -- a
+channel holding <i>N</i> counts has variance <i>N</i>. A spectrum this
+program <i>derived</i> is different: a matrix cut, or an Add/Subtract
+result, has a variance larger than its own counts (see "Why a cut's
+uncertainty is not &radic;N" below), and Integration uses that real
+variance instead. This is also why such a spectrum can be integrated
+even where its counts have gone negative, while a file-backed one
+cannot -- there is no Poisson variance to read off a negative count, but
+a propagated one is perfectly well defined.</p>
 <p>This <b>gross</b> layer -- the raw, un-subtracted data -- is always
 computed, and is all <kbd>Ctrl+I</kbd> reports when no background
 regions are marked. When two background regions are marked instead, a
@@ -985,6 +1026,35 @@ so an overhanging band under-subtracts there; and TV counts overlapping
 channels twice. The rule used here comes from HDTV, TV's ROOT-based
 successor, which normalises by the channels actually summed and merges
 overlapping bands before using them.</p>
+
+<h2>Why a cut's uncertainty is not &radic;N</h2>
+<p>A spectrum read from a file is a set of Poisson counts: a channel
+holding <i>N</i> counts has variance <i>N</i>, and its uncertainty is
+&radic;<i>N</i>. A spectrum this program <i>derived</i> is not, and
+treating it as though it were would claim precision that was never
+measured.</p>
+<p>A background-subtracted cut is a difference of two measured sums, so
+its variance is the sum of theirs:</p>
+<p style="text-align:center"><code>var(net[ch]) = cut[ch] + (N<sub>cut</sub> / N<sub>bg</sub>)&sup2; &middot; &Sigma;bg[ch]</code></p>
+<p>Note what this says. The variance is <i>larger</i> than the net counts
+it accompanies -- subtracting a background removes counts but adds
+uncertainty -- and it stays positive where the counts cancel to zero or
+go negative, which is exactly where &radic;N has nothing to offer. Add and
+Subtract Spectra follow the same rule, <code>var(A &plusmn; f&middot;B) =
+var(A) + f&sup2;&middot;var(B)</code>: the factor is squared either way, so
+two spectra that subtract to nothing still produce a result with a real
+uncertainty attached.</p>
+<p>This propagated variance travels with the spectrum. Fitting weights
+each channel by it instead of by &radic;N, Integration uses it in place of
+Poisson statistics, and the operations that change a spectrum carry it
+along -- Multiply and Normalize scale it by the square of the factor,
+and Rebin adds together the variances of the channels it merges, just as
+it adds their counts.</p>
+<p>The practical effect is that fitted uncertainties on a cut are
+<i>larger</i> than a naive &radic;N treatment would report, and the
+reduced chi-square is more honest. If you compare a fit on a cut against
+one on a raw spectrum with similar counts, expect the cut's error bars to
+be wider. That is the correct answer, not a defect.</p>
 """
     return _page("SpectraTools -- Knowledge Database", body)
 

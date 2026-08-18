@@ -801,3 +801,58 @@ def test_howto_documents_left_drag_panning():
     assert "stands aside while the plot toolbar" in text
     # And the matrix panel passage, not just the main-window one.
     assert text.count("either mouse button") >= 2
+
+
+# ---------------------------------------------------------------------------
+# v4.1.0: the audit fixes changed what several reported numbers mean, so the
+# Knowledge Database has to say so. Rendered text only -- see _rendered_text.
+# ---------------------------------------------------------------------------
+
+
+def test_knowledge_database_no_longer_claims_the_net_total_is_quadrature():
+    """The net total's uncertainty is propagated through the covariance
+    now. The page used to state the old formula outright, and a stale
+    formula in the physics documentation is worse than none."""
+    text = _rendered_text(build_knowledge_database_html())
+    assert "with their uncertainties combined in quadrature" not in text
+    assert "whole covariance matrix in one step" in text
+    assert "anti" in text and "correlated" in text
+
+
+def test_knowledge_database_explains_why_a_derived_spectrum_is_not_sqrt_n():
+    text = _rendered_text(build_knowledge_database_html())
+    assert "var(net[ch])" in text
+    # The three operations that transform it, each named.
+    assert "scale it by the square of the factor" in text
+    assert "adds together the variances" in text
+    # And the counter-intuitive consequence, stated plainly.
+    assert "larger" in text
+
+
+def test_knowledge_database_cross_reference_resolves_to_a_real_section():
+    """The integration section points the reader at a named section. A
+    dangling pointer in help text is invisible until a user follows it."""
+    import re
+
+    html = build_knowledge_database_html()
+    headings = {
+        re.sub(r"<[^>]+>", "", h).strip()
+        for h in re.findall(r"<h2>(.*?)</h2>", html, re.S)
+    }
+    assert "Why a cut&#39;s uncertainty is not &radic;N" in headings or \
+           "Why a cut's uncertainty is not &radic;N" in headings, headings
+    text = _rendered_text(html)
+    assert "uncertainty is not" in text
+
+
+def test_knowledge_database_says_integration_can_use_a_propagated_variance():
+    text = _rendered_text(build_knowledge_database_html())
+    assert "uses that real variance instead" in text
+    assert "negative" in text
+
+
+def test_knowledge_database_documents_the_weighted_calibration():
+    text = _rendered_text(build_knowledge_database_html())
+    assert "&plusmn; ch" in text or "± ch" in text
+    assert "shows a dash instead of a number" in text
+    assert "slope and its uncertainty" in text

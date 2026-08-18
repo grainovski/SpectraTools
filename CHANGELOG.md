@@ -4,6 +4,81 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [4.1.0] - unreleased
+
+A full audit of the code for scientific correctness, stability and
+performance, and the fixes for everything it found. **Several reported
+uncertainties change**, and one of them changes by a large factor. None of
+the reported *values* change -- areas, positions and widths are unaffected
+except where noted under Changed.
+
+### Fixed
+
+- **A multiplet's total area uncertainty was overstated, by up to a factor
+  of ten.** The net total added each peak's uncertainty in quadrature,
+  which is only valid if the peaks are independent. Overlapping peaks are
+  strongly anti-correlated: the data pins down how many counts the group
+  holds far better than how they divide between the peaks. The total is
+  now propagated through the fit's whole covariance matrix in one step.
+  Validated against a 400-realisation Monte Carlo -- refitting the same
+  spectrum under fresh noise and measuring the actual spread of the
+  fitted total. For a doublet one sigma apart the old figure was 2324
+  against a true spread of 233; the new one is 238. Single-peak fits and
+  well-separated peaks are unaffected.
+- **A fit's region gross-area uncertainty ignored a supplied variance**,
+  reporting the Poisson square root even for a matrix cut, whose variance
+  exceeds its own counts. Measured a factor of two low, and it left two
+  numbers in the same results panel disagreeing about how well one
+  spectrum was known.
+- **Multiply and Normalize left a derived spectrum's variance untouched**,
+  so every later fit on it reported uncertainties too small by the scale
+  factor -- silently. Scaling counts by f scales their variance by f squared.
+- **Rebin made a derived spectrum impossible to fit.** Its variance kept
+  the pre-rebin channel count, which the fitter then rejected outright.
+  The variance is now rebinned with the counts.
+
+### Added
+
+- **Integration can use a derived spectrum's propagated variance**, as
+  fitting already did, so the two stop disagreeing about the same data. It
+  also means a cut can now be integrated where its counts have gone
+  negative -- there is no Poisson variance to read off a negative count,
+  but a propagated one is perfectly well defined. Spectra read from a file
+  are unaffected and keep TV's exact behaviour.
+- **Calibrating from fitted peaks is weighted by each centroid's own
+  uncertainty.** The feature's whole claim is that fitted centroids beat a
+  cursor position, and an unweighted fit threw that away -- the weakest
+  line you assigned pulled as hard as the strongest. The assign dialog
+  gained a "± ch" column showing each peak's uncertainty, and the status
+  bar now reports the fitted slope with its own uncertainty when more than
+  the minimum number of points is assigned.
+- Knowledge Database sections on why a derived spectrum's uncertainty is
+  not the square root of its counts, and on how the net total's
+  uncertainty is propagated.
+
+### Changed
+
+- **Fitting is 2 to 4 times faster on multi-peak fits.** The numeric
+  Jacobian recomputed every peak for every parameter; it now recomputes
+  only the peaks a given parameter can actually move. A 12-peak fit went
+  from 69 ms to 18 ms, and from 401 ms to 91 ms with the left tail
+  enabled. It is the same derivative, and where the two differ the new one
+  is the more accurate.
+  **Fitted values can shift very slightly as a result.** Measured over 717
+  peaks: the median change is 6e-9 channels, i.e. rounding, and 99% are
+  within 1% in area. The remainder are ill-conditioned fits where the
+  optimiser path decides the answer, and neither version is systematically
+  better there (52 reached a lower chi-square with the new one, 56 with the
+  old, 192 identical).
+
+### Internal
+
+- The drag-pan rule is shared between the main window and the matrix panel
+  rather than duplicated, so the panel's second marking controller cannot
+  be forgotten in one copy.
+- The two drawing hot paths use the cached channel axis that already
+  existed for them.
+
 ## [4.0.1] - 2026-08-18
 
 Two interaction fixes.
