@@ -606,7 +606,13 @@ class MatrixPanel(QMainWindow):
         # Cached read-only channel axis, as in main_window._plot_data.
         channels = channel_indices(len(spectrum.data))
         x = self.channel_to_display(channels)
-        self.axes.plot(x, spectrum.data, drawstyle="steps-mid", linewidth=0.8, color=spectrum.color)
+        # No linewidth override: a projection is a spectrum and must be drawn
+        # exactly as the main window draws one, which means matplotlib's own
+        # default (1.5). This used to pass 0.8, so the same data looked
+        # noticeably fainter here than in the main window -- a difference with
+        # no reason behind it, and one that made the two views hard to compare
+        # side by side.
+        self.axes.plot(x, spectrum.data, drawstyle="steps-mid", color=spectrum.color)
         # Resolved before drawing so off-view fits can be skipped, then
         # applied below in its original place -- see main_window's
         # _plot_data for why it cannot simply be read back from the axes

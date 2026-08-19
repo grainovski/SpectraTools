@@ -10,6 +10,7 @@ import fit_mode
 import matrix_panel
 from main_window import MainWindow
 from matrix_panel import MatrixPanel
+from spectrum import LoadedSpectrum
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -1327,3 +1328,36 @@ def test_matrix_panel_passes_both_of_its_controllers_to_the_pan_predicate(qapp):
         matrix_panel.pan_button_is_active = monkey
 
     assert set(seen["controllers"]) == {panel.cut_controller, panel.fit_controller}
+
+
+def test_projection_line_is_as_thick_as_the_main_window_spectrum(qapp):
+    """A projection is a spectrum and must be drawn like one. The panel
+    used to hard-code linewidth=0.8 against the main window's matplotlib
+    default of 1.5, so identical data looked fainter in one view than the
+    other for no reason.
+
+    Compared against the MAIN WINDOW's own line rather than a hard-coded
+    1.5, so the two cannot drift apart again if the default is ever
+    changed in one place.
+    """
+    main_window = MainWindow()
+    data = np.arange(64, dtype=np.int64) + 10
+    spectrum = LoadedSpectrum("s.spk", data, "#1f77b4")
+    spectrum.active = True
+    main_window.spectra.append(spectrum)
+    main_window._plot_data()
+    main_lines = [
+        line for line in main_window.axes.get_lines()
+        if len(line.get_xdata()) == len(data)
+    ]
+    assert main_lines, "no spectrum line drawn in the main window"
+    expected = main_lines[0].get_linewidth()
+
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    panel_spectrum = panel.spectra[0]
+    panel_lines = [
+        line for line in panel.axes.get_lines()
+        if len(line.get_xdata()) == len(panel_spectrum.data)
+    ]
+    assert panel_lines, "no projection line drawn in the matrix panel"
+    assert panel_lines[0].get_linewidth() == pytest.approx(expected)
