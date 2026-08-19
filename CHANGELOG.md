@@ -74,21 +74,6 @@ except where noted under Changed.
   not the square root of its counts, and on how the net total's
   uncertainty is propagated.
 
-### Changed
-
-- **Fitting is 2 to 4 times faster on multi-peak fits.** The numeric
-  Jacobian recomputed every peak for every parameter; it now recomputes
-  only the peaks a given parameter can actually move. A 12-peak fit went
-  from 69 ms to 18 ms, and from 401 ms to 91 ms with the left tail
-  enabled. It is the same derivative, and where the two differ the new one
-  is the more accurate.
-  **Fitted values can shift very slightly as a result.** Measured over 717
-  peaks: the median change is 6e-9 channels, i.e. rounding, and 99% are
-  within 1% in area. The remainder are ill-conditioned fits where the
-  optimiser path decides the answer, and neither version is systematically
-  better there (52 reached a lower chi-square with the new one, 56 with the
-  old, 192 identical).
-
 ### Internal
 
 - The drag-pan rule is shared between the main window and the matrix panel
