@@ -68,24 +68,41 @@ sudo dnf remove spectratools
 SpectraTools appears in your desktop's application menu (under Science), or
 run `spectratools` from a terminal.
 
-## Known issues on WSLg (Windows Subsystem for Linux)
+## Running under WSLg (Windows Subsystem for Linux)
 
-If you're running SpectraTools inside WSL rather than on a native Linux
-desktop, WSLg's compositor has a couple of cosmetic quirks that aren't bugs
-in SpectraTools itself:
+SpectraTools runs on Wayland directly when WSLg provides it, and falls back
+to X11 (xcb, via WSLg's XWayland) only on older WSLg builds that need it.
+That choice is made automatically at startup — see below if you want to
+override it.
 
-- **Main window doesn't appear after launch (only a taskbar icon).** This is
-  a known WSLg compositor issue, not specific to SpectraTools. Fix: from a
-  Windows terminal (not from inside WSL), run `wsl --shutdown`, wait a few
-  seconds, then relaunch.
-- **A secondary window (a dialog, e.g. Multiply by Factor or the file-open
-  dialog) briefly disappears right after opening, then reappears on its
-  own.** Same underlying WSLg compositor behavior as above, just triggered
-  by dialog creation instead of the main window. It's purely visual and
-  self-resolves within a moment — the dialog works normally once it
-  reappears. No action needed; if it becomes persistently annoying, the same
-  `wsl --shutdown` fix applies.
+**Dialogs that vanished and came back are fixed as of 4.1.0.** Up to 4.0.1
+the app always forced X11 under WSL, to work around an older WSLg bug that
+rendered the main window at zero size. Going through XWayland had a cost
+that was not understood at the time: a file dialog would appear, disappear
+after about a second, and return a few seconds later. The flicker happens
+in XWayland's surface presentation, below the X protocol itself — tracing a
+dialog's entire lifetime shows one map, one expose and one unmap, without
+any of the repeated expose events a repainting compositor would produce,
+which is why it looked for a long time like something with no fix. Running
+on Wayland removes that layer, and the flicker with it.
 
-Neither of these has been observed on a native Linux desktop (only through
-WSLg), and neither has an application-side fix — both are WSLg's own
-Wayland/XWayland compositor timing behavior.
+Earlier versions of this file described that flicker as cosmetic, unfixable
+and curable by `wsl --shutdown`. All three claims were wrong: it is fixed
+in the application, and `wsl --shutdown` does not affect it.
+
+**If the main window does not appear (only a taskbar icon).** Some older
+WSLg builds send a zero-size configure event that Qt applies literally, so
+the window exists but renders at 0x0. SpectraTools detects that at startup
+and automatically restarts itself on X11, where it renders correctly, so
+this should no longer be visible. If it ever is, launch with the platform
+forced by hand:
+
+```bash
+QT_QPA_PLATFORM=xcb spectratools
+```
+
+An explicitly set `QT_QPA_PLATFORM` always wins over the automatic choice,
+so the same variable can be used to force Wayland (`wayland`) for testing.
+
+Neither behaviour has been observed on a native Linux desktop — both are
+specific to WSLg's own compositor.

@@ -1,26 +1,67 @@
 import os
 import sys
 
-# WSLg's bundled Wayland compositor sends an xdg_toplevel.configure event
-# with size (0, 0) when a Qt window is created; Qt's Wayland platform
-# plugin applies that literally instead of falling back to our own
-# resize() call in MainWindow.__init__, so the window exists (visible in
-# the taskbar) but renders at zero size -- nothing is ever visible.
-# Forcing the X11 platform (xcb, via WSLg's built-in XWayland) sidesteps
-# this specific compositor bug -- confirmed via a direct window-geometry
-# query that xcb renders at the correct, intended 900x600 while Wayland
-# renders at 0x0. Scoped to WSL specifically (not all Linux) since this
-# hasn't been tested on a real native Wayland desktop, where forcing
-# xcb-via-XWayland would be a strictly worse experience if Wayland
-# already works fine there. Respects an existing QT_QPA_PLATFORM if one
-# is already set, so it can still be overridden manually.
-if sys.platform.startswith("linux") and "QT_QPA_PLATFORM" not in os.environ:
+#: Set on the re-exec below, so the fallback can only ever happen once.
+_FALLBACK_ENV = "SPECTRATOOLS_PLATFORM_FALLBACK"
+
+#: A window smaller than this in either direction is not a window the user
+#: can use -- it is the WSLg 0x0-configure bug described in
+#: needs_platform_fallback().
+_MIN_USABLE_WINDOW = 2
+
+
+def is_wsl():
+    """True when running under Windows Subsystem for Linux."""
     try:
-        is_wsl = "microsoft" in open("/proc/version").read().lower()
+        return "microsoft" in open("/proc/version").read().lower()
     except OSError:
-        is_wsl = False
-    if is_wsl:
-        os.environ["QT_QPA_PLATFORM"] = "xcb"
+        return False
+
+
+def needs_platform_fallback(width, height):
+    """Whether the just-shown main window came up unusably small, meaning
+    this WSLg build still has the 0x0 compositor bug.
+
+    Older WSLg sends an xdg_toplevel.configure event with size (0, 0) when
+    a Qt window is created, and Qt's Wayland plugin applies that literally
+    instead of falling back to MainWindow's own resize() -- the window
+    exists in the taskbar but renders at zero size, so nothing is ever
+    visible. This app used to force the X11 platform (xcb, via WSLg's
+    XWayland) unconditionally to sidestep it.
+
+    That workaround is no longer free. Going through XWayland is what
+    caused dialogs to appear, vanish for a second and reappear a few
+    seconds later on WSLg: the flicker happens in XWayland's surface
+    presentation, below the X protocol entirely -- a trace of a file
+    dialog's whole lifetime shows exactly one MAP, one EXPOSE and one
+    UNMAP, with no re-expose a repainting compositor would have produced.
+    Running on Wayland directly removes that layer and the flicker with
+    it, confirmed by the user on the build where it reproduced.
+
+    So Wayland is now preferred and xcb is kept only as an automatic
+    fallback, chosen by MEASURING the window rather than by trying to
+    detect a WSLg version -- the bug is a property of the compositor's
+    behaviour, and the measurement is exactly the symptom.
+    """
+    return width < _MIN_USABLE_WINDOW or height < _MIN_USABLE_WINDOW
+
+
+def fallback_command():
+    """(program, argv) to re-launch this process under xcb.
+
+    Frozen by PyInstaller, sys.executable IS the application and argv[0]
+    already points at it. Running from source it is the interpreter, which
+    has to be put in front of the script.
+    """
+    if getattr(sys, "frozen", False):
+        return sys.executable, list(sys.argv)
+    return sys.executable, [sys.executable] + list(sys.argv)
+
+
+# Deliberately NOT forcing a platform here any more. Qt picks Wayland when
+# WSLg offers it, which is what removes the dialog flicker; the fallback in
+# main() catches the older compositors that need xcb. An explicitly set
+# QT_QPA_PLATFORM still wins, so the choice can be overridden by hand.
 
 import matplotlib
 
@@ -35,6 +76,27 @@ def main():
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
+
+    # Let the compositor deliver its first configure before measuring: on
+    # Wayland the size is not known until then, so checking immediately
+    # after show() would read the pre-configure value and re-exec every
+    # single launch.
+    app.processEvents()
+    if (
+        is_wsl()
+        and "QT_QPA_PLATFORM" not in os.environ
+        and _FALLBACK_ENV not in os.environ
+        and needs_platform_fallback(window.width(), window.height())
+    ):
+        # This compositor still has the 0x0 bug. Restart on xcb, which
+        # renders correctly there, rather than leaving the user with an
+        # invisible window -- a flicker is a nuisance, nothing on screen
+        # at all is unusable.
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
+        os.environ[_FALLBACK_ENV] = "1"
+        program, argv = fallback_command()
+        os.execv(program, argv)
+
     sys.exit(app.exec())
 
 

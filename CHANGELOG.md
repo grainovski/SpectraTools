@@ -74,6 +74,21 @@ except where noted under Changed.
   not the square root of its counts, and on how the net total's
   uncertainty is propagated.
 
+- **Dialogs no longer vanish and reappear on WSL.** Opening a file or
+  matrix dialog made it appear, disappear after about a second, and come
+  back a few seconds later. The cause was this app's own workaround: it
+  forced the X11 platform under WSL to dodge an older WSLg bug that
+  rendered the main window at zero size, and going through XWayland is
+  where the flicker came from. It now runs on Wayland, which removes that
+  layer, and keeps X11 as an automatic fallback for compositors that still
+  need it — detected by measuring the window at startup rather than by
+  guessing at versions. The flicker leaves no trace in the X protocol (one
+  map, one expose, one unmap, no repeated exposes), which is why it was
+  previously documented as unfixable.
+- The matrix panel drew its projection with a thinner line (0.8) than the
+  main window draws a spectrum (1.5), so the same data looked fainter in
+  one view than the other.
+
 ### Internal
 
 - The drag-pan rule is shared between the main window and the matrix panel
