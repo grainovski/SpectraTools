@@ -4,7 +4,7 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
-## [4.1.0] - unreleased
+## [4.1.0] - 2026-08-19
 
 A full audit of the code for scientific correctness, stability and
 performance, and the fixes for everything it found. **Several reported
@@ -55,6 +55,21 @@ except where noted under Changed.
   absorbs background mismatch. That is the background's job, not the
   tail's.
 
+- **Dialogs no longer vanish and reappear on WSL.** Opening a file or
+  matrix dialog made it appear, disappear after about a second, and come
+  back a few seconds later. The cause was this app's own workaround: it
+  forced the X11 platform under WSL to dodge an older WSLg bug that
+  rendered the main window at zero size, and going through XWayland is
+  where the flicker came from. It now runs on Wayland, which removes that
+  layer, and keeps X11 as an automatic fallback for compositors that still
+  need it — detected by measuring the window at startup rather than by
+  guessing at versions. The flicker leaves no trace in the X protocol (one
+  map, one expose, one unmap, no repeated exposes), which is why it was
+  previously documented as unfixable.
+- The matrix panel drew its projection with a thinner line (0.8) than the
+  main window draws a spectrum (1.5), so the same data looked fainter in
+  one view than the other.
+
 ### Added
 
 - **Integration can use a derived spectrum's propagated variance**, as
@@ -73,21 +88,6 @@ except where noted under Changed.
 - Knowledge Database sections on why a derived spectrum's uncertainty is
   not the square root of its counts, and on how the net total's
   uncertainty is propagated.
-
-- **Dialogs no longer vanish and reappear on WSL.** Opening a file or
-  matrix dialog made it appear, disappear after about a second, and come
-  back a few seconds later. The cause was this app's own workaround: it
-  forced the X11 platform under WSL to dodge an older WSLg bug that
-  rendered the main window at zero size, and going through XWayland is
-  where the flicker came from. It now runs on Wayland, which removes that
-  layer, and keeps X11 as an automatic fallback for compositors that still
-  need it — detected by measuring the window at startup rather than by
-  guessing at versions. The flicker leaves no trace in the X protocol (one
-  map, one expose, one unmap, no repeated exposes), which is why it was
-  previously documented as unfixable.
-- The matrix panel drew its projection with a thinner line (0.8) than the
-  main window draws a spectrum (1.5), so the same data looked fainter in
-  one view than the other.
 
 ### Internal
 
