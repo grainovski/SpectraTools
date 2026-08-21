@@ -8,6 +8,13 @@ when individual pieces of work happened.
 
 ### Added
 
+- Knowledge Database sections on **how the background line is determined**,
+  what <kbd>Ctrl+B</kbd> previews (and that it is unaffected by the "Fit
+  background" checkbox — it always shows the same two-point line), and what
+  a committed fit draws: the dashed line, the shaded uncertainty band, the
+  total model curve and each peak's contribution. The band appears in both
+  fitting modes; what differs is whether its width comes from the two region
+  means or from the joint fit's own covariance.
 - **Go To** (<kbd>Ctrl+G</kbd>, or View &gt; Go To...) jumps the view to one
   place in the spectrum. Type an energy in keV when a calibration is active
   or a channel when one is not — the dialog asks for whichever the x-axis is
@@ -50,6 +57,11 @@ when individual pieces of work happened.
 - Two HowTo cross-references pointed at "11. Matrix analysis" when that
   section had drifted to 13. The section numbering and every numbered
   cross-reference are now checked by a test.
+- The Knowledge Database claimed the background's uncertainty band is
+  narrowest **at** the two background regions. It is narrowest *between*
+  them — averaging two independent measurements beats either alone, so for
+  regions known to ±2.1 and ±2.4 counts the band closes to about ±1.6
+  between them.
 
 ## [4.1.0] - 2026-08-19
 

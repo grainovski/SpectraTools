@@ -905,3 +905,64 @@ def test_howto_section_numbering_is_sound():
             f'reference says "{number}. {title.strip()}" but section {number} '
             f'is "{actual}"'
         )
+
+
+# ---------------------------------------------------------------------------
+# v4.1.1: how the background is determined, what Ctrl+B previews, and what a
+# committed fit draws. Rendered text only -- see _rendered_text.
+# ---------------------------------------------------------------------------
+
+
+def test_kb_explains_how_the_background_line_is_determined():
+    text = _rendered_text(build_knowledge_database_html())
+    assert "drawn through those two points" in text
+    # The distinction that makes its uncertainty exact rather than
+    # approximate, and which a reader could easily assume the other way.
+    assert "not a least-squares fit" in text
+
+
+def test_kb_says_ctrl_b_is_a_preview_and_needs_only_the_bg_regions():
+    text = _rendered_text(build_knowledge_database_html())
+    assert "needs both background regions marked and nothing else" in text
+    assert "nothing is fitted, computed or stored" in text
+
+
+def test_kb_says_ctrl_b_ignores_the_fit_background_checkbox():
+    """The user asked how Ctrl+B differs with "Fit background" on. It does
+    not: toggle_background_preview never reads the checkbox, and the
+    preview always draws the same two-point line. Documenting the
+    non-interaction is the point."""
+    text = _rendered_text(build_knowledge_database_html())
+    assert "is not affected by the" in text
+    assert "always shows this same two-point line" in text
+
+
+def test_kb_describes_what_a_committed_fit_draws():
+    text = _rendered_text(build_knowledge_database_html())
+    for element in ("dashed background line", "faint shaded band",
+                    "total model curve"):
+        assert element in text, element
+    # The band appears in BOTH modes -- only its source differs. Saying it
+    # only appears with the checkbox on would be wrong.
+    assert "band is drawn either way" in text
+
+
+def test_kb_band_is_narrowest_between_the_regions_not_at_them():
+    """Measured: for regions whose means are known to +-2.1 and +-2.4
+    counts, the band closes to +-1.6 BETWEEN them. The page (and a code
+    comment) previously claimed it was narrowest AT the two regions."""
+    text = _rendered_text(build_knowledge_database_html())
+    assert "narrowest at the two background regions" not in text
+    assert "narrowest point is between the regions" in text
+
+
+def test_kb_does_not_explain_the_fit_background_checkbox_twice():
+    """One control, one explanation. A second section covering the same
+    checkbox was written and dropped before commit -- two explanations of
+    one control drift apart."""
+    html = build_knowledge_database_html()
+    import re
+
+    headings = re.findall(r"<h2>(.*?)</h2>", html, re.S)
+    about_checkbox = [h for h in headings if "Fit background" in h or "fit background" in h]
+    assert len(about_checkbox) <= 1, f"more than one section on the checkbox: {about_checkbox}"

@@ -674,6 +674,26 @@ barely changes as two peaks are moved closer together, even though each
 individual peak's uncertainty grows quickly. That is real, not a
 rounding artefact -- the blend is still the same number of counts.</p>
 
+<h2>How the background is determined, and what <kbd>Ctrl+B</kbd> shows</h2>
+<p>The background under a fit is a straight line, and it is fixed by the
+two marked background regions alone. Each region's counts are averaged to
+give one level, and the line is drawn through those two points -- it is
+not a least-squares fit to the background channels, which is why its
+uncertainty can be written down exactly (see "How certain is the
+background?" above).</p>
+<p><kbd>Ctrl+B</kbd> draws that line before you commit to anything. It
+needs both background regions marked and nothing else -- no fit region, no
+peaks -- so it is the quickest way to check that your two regions actually
+sit on background before spending a fit on them. Press it again to hide
+the line. It is a preview only: nothing is fitted, computed or stored, and
+the line disappears the moment the marks change.</p>
+<p><b><kbd>Ctrl+B</kbd> is not affected by the "Fit background"
+checkbox.</b> The preview always shows this same two-point line, whether
+that box is ticked or not. The checkbox changes what happens when you
+<i>fit</i>, not what the preview draws -- so the preview tells you where
+the background regions put the line, and nothing about which fitting mode
+you are in.</p>
+
 <h2>How certain is the background?</h2>
 <p>The background under a fit is the straight line through the mean
 level of each of the two marked background regions. Those means are
@@ -687,12 +707,17 @@ are between the two regions' centres:</p>
 regions are separate stretches of spectrum, so there is no cross term
 between them.</p>
 <p>This is drawn as a faint shaded band around the dashed background
-line. The band is at its narrowest at the two background regions and
-widens as you move away from them, which is worth watching: it shows
-directly that a background <i>interpolated</i> between two nearby
-regions is far better determined than one <i>extrapolated</i> well
-beyond them. If the band is wide where your peak sits, moving the
-background regions closer to the peak will tighten it.</p>
+line. It is narrowest <i>between</i> the two background regions and
+widens outward from there, which is worth watching: it shows directly
+that a background <i>interpolated</i> between two regions is far better
+determined than one <i>extrapolated</i> beyond them. If the band is wide
+where your peak sits, moving the background regions closer to the peak
+will tighten it.</p>
+<p>Note that the narrowest point is between the regions rather than at
+either one. Averaging two independent measurements beats either on its
+own, so the line is best known somewhere in the middle: for two regions
+whose means are known to &plusmn;2.1 and &plusmn;2.4 counts, the band
+closes to about &plusmn;1.6 counts between them.</p>
 <p>Widening a background region also tightens the band, since averaging
 more channels measures the level more precisely -- but only while the
 region stays on genuine background. A region stretched over the
@@ -715,7 +740,9 @@ free parameters. The marked background regions then only provide the
 starting guess. Two things follow:</p>
 <ul>
 <li>Peak uncertainties <b>grow</b>. That is the correction, not a
-problem -- they now include how well the background itself is known.</li>
+problem -- they now include how well the background itself is known. The
+increase is modest on a well-defined peak, around 3%, and grows with how
+much the background contributes relative to the peak's own counts.</li>
 <li>The background gets its own fitted uncertainty, and the shaded band
 is computed from that instead of from the two regions.</li>
 </ul>
@@ -730,6 +757,30 @@ background, where it buys nothing.</p>
 the Fit Parameters panel while it is on, and can be fixed like any other
 parameter. "Level" is the height of the line at the middle of the fit
 region, not at channel zero.</p>
+
+<h2>What you see on the plot after fitting</h2>
+<p>A committed fit draws the same four things in both modes:</p>
+<ul>
+<li>The <b>dashed background line</b>, spanning from the start of the left
+background region to the end of the right one -- so it is drawn across the
+ground it was actually measured from, not just under the peak.</li>
+<li>A <b>faint shaded band</b> around that line, its half-width being the
+background's own uncertainty at each channel.</li>
+<li>The <b>total model curve</b> -- background plus every peak.</li>
+<li>Each <b>peak's own contribution</b>, and its position label.</li>
+</ul>
+<p>The band is drawn either way; what differs is where its width comes
+from. Unticked, it comes from the counting statistics of the two region
+means. Ticked, it comes from the fit's own covariance for the two
+background parameters -- so the band you see is what the fit concluded
+about the line, not what the two regions implied on their own.</p>
+<p>That makes the ticked band <b>noticeably wider away from the fit
+region</b>. On one worked example the unticked band ran from about
+&plusmn;1.6 counts in the middle to &plusmn;2.7 at the far edge, while the
+ticked one ran from &plusmn;1.9 to &plusmn;8.1 over the same span. Both
+are narrowest near the middle of the fit region and flare outward; the
+ticked one flares much harder, which is the fit being honest that it
+constrained the line where the data is and not beyond it.</p>
 
 <h2>ROOT files</h2>
 <p>A ROOT file (<code>.root</code>) is not one spectrum -- it is a
