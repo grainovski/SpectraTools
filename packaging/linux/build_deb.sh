@@ -55,7 +55,7 @@ Version: $VERSION
 Section: science
 Priority: optional
 Architecture: amd64
-Depends: libgl1, libegl1, fontconfig, libxcb-image0, libxcb-cursor0, libxkbcommon-x11-0, libxcb-icccm4, libxcb-keysyms1, libxcb-render-util0, libatomic1, libcrypt1, xdg-utils
+Depends: libgl1, libegl1, fontconfig, libxcb-image0, libxcb-cursor0, libxkbcommon-x11-0, libxcb-icccm4, libxcb-keysyms1, libxcb-render-util0, libatomic1, libcrypt1, xdg-utils, libwayland-client0, libwayland-cursor0, libwayland-egl1
 Maintainer: SpectraTools <grainovski@googlemail.com>
 Description: Spectrum viewer and peak-fitting tool
  A cross-platform desktop app for opening histogram files, plotting

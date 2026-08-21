@@ -184,6 +184,20 @@ Requires: xcb-util-renderutil
 Requires: libatomic
 Requires: libcrypt.so.1()(64bit)
 Requires: xdg-utils
+# Wayland client libraries. REQUIRED since v4.1.0, which stopped forcing the
+# X11 platform under WSL and lets Qt pick Wayland -- see main.py. Without
+# these, Qt finds its own wayland plugin but cannot load it
+# ("Could not load the Qt platform plugin \"wayland\" ... even though it was
+# found", with libwayland-cursor.so.0 and libwayland-egl.so.1 unresolved),
+# silently falls back to xcb, and the dialog flicker v4.1.0 fixed comes
+# straight back. AlmaLinux 10 ships neither by default, which is exactly how
+# this was found; Ubuntu happens to have both, which is why the .deb looked
+# fine. libwayland-client is already present there but is declared anyway so
+# the dependency set states what the app actually needs rather than what one
+# distro happens to preinstall.
+Requires: libwayland-client
+Requires: libwayland-cursor
+Requires: libwayland-egl
 
 %description
 A cross-platform desktop app for opening histogram files, plotting
