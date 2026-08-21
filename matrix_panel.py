@@ -17,10 +17,11 @@ from PySide6.QtWidgets import (
 )
 
 from calibration_dialog import CalibrationDialog
-from fit_mode import FitModeController
+from fit_mode import FitModeController, is_bare_key_event
 from matrix_cut import compute_projection
 from mtx_io import load_mtx
 from peak_fit import channel_indices
+from goto_view import GoToMixin
 from spectrum import (
     LIGHT_COLOR_CYCLE, LoadedSpectrum, pan_button_is_active, panned_xlim,
 )
@@ -106,7 +107,10 @@ class MatrixCutController(QObject):
 
     def eventFilter(self, obj, event):
         if obj is self.panel.canvas:
-            if event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat():
+            if (event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat()
+                    and is_bare_key_event(event)):
+                # Bare keys only -- Ctrl+C (Clear) and Ctrl+G (Go To) share
+                # these letters. See fit_mode.is_bare_key_event.
                 if event.key() == Qt.Key.Key_C:
                     self._held_key = "cut"
                 elif event.key() == Qt.Key.Key_G:
@@ -183,7 +187,7 @@ class MatrixCutController(QObject):
             self.panel.canvas.draw()
 
 
-class MatrixPanel(QMainWindow):
+class MatrixPanel(GoToMixin, QMainWindow):
     """A separate top-level window for TV-style matrix gate/cut
     analysis. Loads a matrix and computes both its X and Y
     projections up front (this app has the whole matrix in memory,
@@ -240,6 +244,13 @@ class MatrixPanel(QMainWindow):
         self.zoom_out_action.setShortcut("Ctrl+-")
         self.zoom_out_action.triggered.connect(lambda: self._zoom_x(ZOOM_FACTOR))
         self.nav_toolbar.addAction(self.zoom_out_action)
+
+        self.goto_action = QAction("Go To...", self)
+        # Same key as the main window's: a projection is a spectrum view and
+        # the gesture must not differ between the two.
+        self.goto_action.setShortcut("Ctrl+G")
+        self.goto_action.triggered.connect(self.open_goto_dialog)
+        self.nav_toolbar.addAction(self.goto_action)
 
         self.full_view_action = QAction("Full View", self)
         self.full_view_action.setShortcut("Ctrl+0")
@@ -625,6 +636,7 @@ class MatrixPanel(QMainWindow):
             xlim = (self.channel_to_display(0), self.channel_to_display(len(spectrum.data) - 1))
         self.fit_controller.draw_committed_fits(spectrum, view_xlim=xlim)
         self.fit_controller.update_results_list()
+        self.draw_goto_marker()
         self.axes.set_xlabel("Energy (keV)" if self._calibration_active else f"{self.working_axis.upper()} channel")
         self.axes.set_ylabel("Counts")
         self.axes.set_xlim(xlim)

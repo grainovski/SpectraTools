@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from calibration_dialog import CalibrationDialog
+from goto_view import GoToMixin
 from combine_dialog import CombineDialog
 from factor_dialog import FactorDialog
 from fit_mode import FitModeController
@@ -294,7 +295,7 @@ class _MatrixLoadWorker(QThread):
         self.loaded.emit(matrix)
 
 
-class MainWindow(QMainWindow):
+class MainWindow(GoToMixin, QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SpectraTools")
@@ -448,8 +449,16 @@ class MainWindow(QMainWindow):
         self.file_menu.addAction(self.exit_action)
 
         view_menu = self.menuBar().addMenu("&View")
+        self.goto_action = QAction("Go To...", self)
+        # Ctrl+G is what every editor and browser uses for "go to", and it
+        # was worth reclaiming: Log scale Y moved to Ctrl+Y, which is the
+        # better mnemonic for it anyway (it scales the Y axis).
+        self.goto_action.setShortcut("Ctrl+G")
+        self.goto_action.triggered.connect(self.open_goto_dialog)
+        view_menu.addAction(self.goto_action)
+
         self.log_scale_action = QAction("Log scale Y", self)
-        self.log_scale_action.setShortcut("Ctrl+G")
+        self.log_scale_action.setShortcut("Ctrl+Y")
         self.log_scale_action.setCheckable(True)
         self.log_scale_action.toggled.connect(self._on_log_scale_toggled)
         view_menu.addAction(self.log_scale_action)
@@ -1503,6 +1512,7 @@ class MainWindow(QMainWindow):
             x = self.channel_to_display(channels)
             self.axes.plot(x, spectrum.data, drawstyle="steps-mid", color=spectrum.color)
             self.fit_controller.draw_committed_fits(spectrum, view_xlim=view_xlim)
+        self.draw_goto_marker()
         self.axes.set_xlabel("Energy (keV)" if self._calibration_active else "Channel")
         self.axes.set_ylabel("Counts")
         self.axes.grid(True)

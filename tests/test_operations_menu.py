@@ -107,7 +107,8 @@ def test_view_menu_still_has_its_other_items(qapp):
     main_window = MainWindow()
     view_menu = _menu_named(main_window, "&View")
     view_texts = [a.text() for a in view_menu.actions() if not a.isSeparator()]
-    assert view_texts == ["Log scale Y", "Spectra", "Dark theme"]
+    # Go To leads the View menu as of v4.1.1.
+    assert view_texts == ["Go To...", "Log scale Y", "Spectra", "Dark theme"]
 
 
 def test_new_shortcuts_are_set(qapp):
@@ -116,7 +117,10 @@ def test_new_shortcuts_are_set(qapp):
     assert main_window.calibration_action.shortcut() == QKeySequence("Ctrl+L")
     assert main_window.calibration_active_menu_action.shortcut() == QKeySequence("Ctrl+T")
     assert main_window.dark_theme_action.shortcut() == QKeySequence("Ctrl+D")
-    assert main_window.log_scale_action.shortcut() == QKeySequence("Ctrl+G")
+    # v4.1.1: Go To took Ctrl+G, the key every editor uses for it, and
+    # Log scale Y moved to Ctrl+Y -- the better mnemonic for it anyway.
+    assert main_window.goto_action.shortcut() == QKeySequence("Ctrl+G")
+    assert main_window.log_scale_action.shortcut() == QKeySequence("Ctrl+Y")
     assert main_window.toggle_spectrum_panel_action.shortcut() == QKeySequence("Ctrl+1")
     assert main_window.zoom_in_action.shortcut() == QKeySequence("Ctrl+=")
     assert main_window.zoom_out_action.shortcut() == QKeySequence("Ctrl+-")

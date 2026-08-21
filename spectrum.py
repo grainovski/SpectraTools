@@ -68,6 +68,52 @@ def active_spectrum(spectra):
     return next((s for s in spectra if s.active), None)
 
 
+#: The Go To mark. Distinct from every existing mark colour on purpose --
+#: background regions are green, fit regions blue, matrix cuts red -- so a
+#: jump target is never mistaken for something the fit will act on. Dotted
+#: and thin for the same reason: it is a bookmark, not a region.
+GOTO_MARKER_COLOR = "tab:purple"
+
+#: How wide a view Go To leaves behind, in CHANNELS. Deliberately a
+#: channel count rather than a keV span: it means the same thing whether or
+#: not a calibration is active, and it stays sensible across coarse and fine
+#: binning, where a fixed keV span would be far too wide on one and far too
+#: narrow on the other. Ctrl+= / Ctrl+- adjust from there.
+GOTO_WINDOW_CHANNELS = 100
+
+
+def goto_channel_window(channel, max_channel, width=GOTO_WINDOW_CHANNELS):
+    """(lo, hi) channel bounds centred on `channel`, clamped to
+    [0, max_channel], keeping the full `width` wherever the data allows.
+
+    Works in CHANNELS rather than display units on purpose. With a
+    quadratic calibration a fixed keV span is not a fixed channel span, and
+    centring in keV would put the target off-centre in the data; converting
+    the two ends afterwards keeps the window exactly `width` channels wide
+    and the target exactly in the middle of it.
+
+    Clamping SHIFTS rather than truncates. A target near channel 0 would
+    otherwise get half a window, with the peak pinned against the edge --
+    the view slides inward instead, so a line at channel 5 is still shown
+    with real context around it. The width is only reduced when the whole
+    spectrum is narrower than the window, where there is nothing else to
+    show.
+    """
+    if max_channel < 0:
+        raise ValueError("max_channel must be >= 0")
+    width = min(float(width), float(max_channel))
+    half = width / 2.0
+    lo = float(channel) - half
+    hi = float(channel) + half
+    if lo < 0.0:
+        hi -= lo          # push the window right by however far it overhung
+        lo = 0.0
+    if hi > max_channel:
+        lo -= hi - max_channel
+        hi = float(max_channel)
+    return max(0.0, lo), min(float(max_channel), hi)
+
+
 def pan_button_is_active(event, axes, nav_toolbar, controllers):
     """True when this mouse press should start a drag-pan.
 

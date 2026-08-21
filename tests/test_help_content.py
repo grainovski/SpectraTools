@@ -516,7 +516,10 @@ def test_howto_saving_section_notes_n42_is_read_only():
 
 def test_howto_html_documents_matrix_analysis():
     html = build_howto_html()
-    assert "<h3>13. Matrix analysis</h3>" in html
+    # Matched on the TITLE, not the number: pinning the number turns every
+    # inserted section into a spurious failure here, and the number is
+    # covered properly by test_howto_section_numbering_is_sound below.
+    assert "Matrix analysis</h3>" in html
     assert "Open Matrix" in html
     assert "Ctrl+Shift+O" in html.replace("&#43;", "+")
 
@@ -872,3 +875,33 @@ def test_knowledge_database_explains_the_capped_tail_beta():
         for h in re.findall(r"<h2>(.*?)</h2>", build_knowledge_database_html(), re.S)
     }
     assert any("uncertainty reads" in h for h in headings), headings
+
+
+def test_howto_section_numbering_is_sound():
+    """Numbered sections run 1..N with no gaps or duplicates, and every
+    cross-reference of the form "12. Some Title" names the section that
+    actually carries that number.
+
+    Both halves earned their place. Inserting Go To as section 12 left two
+    sections numbered 13 until it was caught; and two references had long
+    read "11. Matrix analysis" while that section had drifted to 13, which
+    nothing checked.
+    """
+    import re
+
+    html = build_howto_html()
+    numbered = re.findall(r"<h3>(\d+)\.\s*([^<]+)</h3>", html)
+    numbers = [int(n) for n, _ in numbered]
+    assert numbers, "no numbered sections found"
+    assert numbers == sorted(numbers), f"sections out of order: {numbers}"
+    assert len(numbers) == len(set(numbers)), f"duplicate section numbers: {numbers}"
+    assert numbers == list(range(1, len(numbers) + 1)), f"gap in numbering: {numbers}"
+
+    by_number = {n: title.strip().lower() for n, title in numbered}
+    for number, title in re.findall(r'"(\d+)\.\s*([^"]+)"', html):
+        actual = by_number.get(number)
+        assert actual is not None, f'reference to "{number}. {title}" but no such section'
+        assert actual == title.strip().lower(), (
+            f'reference says "{number}. {title.strip()}" but section {number} '
+            f'is "{actual}"'
+        )

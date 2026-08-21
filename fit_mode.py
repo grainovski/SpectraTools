@@ -191,6 +191,34 @@ _MARK_TYPE_LABEL = {
 }
 
 
+def is_bare_key_event(event):
+    """True when this key event carries no Ctrl/Alt/Meta modifier.
+
+    Marking keys are BARE keypresses -- hold B and click. Without this
+    check a shortcut that happens to share the letter also arms marking,
+    because the filter only ever looked at which key came through. Three
+    were live before Go To existed: Ctrl+B (Preview Background Fit) armed
+    background marking, Ctrl+R (Rebin) armed the fit region, and the matrix
+    panel's Ctrl+C (Clear) armed cut marking. Ctrl+G for Go To would have
+    been a fourth.
+
+    It matters more than a stray armed flag suggests, because the release
+    that would disarm it may never arrive: the shortcut usually opens a
+    dialog, which takes focus, so the canvas sees the press and never the
+    KeyRelease. The mark type stays armed and the next ordinary click on
+    the plot silently places a mark the user did not ask for.
+
+    Shift is deliberately NOT excluded -- it does not change which letter
+    was pressed, and no shortcut here is Shift-plus-letter alone.
+    """
+    blocking = (
+        Qt.KeyboardModifier.ControlModifier
+        | Qt.KeyboardModifier.AltModifier
+        | Qt.KeyboardModifier.MetaModifier
+    )
+    return not (event.modifiers() & blocking)
+
+
 def _mark_type_for_key_event(event):
     """Resolves a key event to "b"/"r"/"p" (or None), preferring the
     normal Qt.Key lookup and falling back to a Windows-only physical
@@ -498,7 +526,8 @@ class FitModeController(QObject):
 
     def eventFilter(self, obj, event):
         if obj is self.main_window.canvas:
-            if event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat():
+            if (event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat()
+                    and is_bare_key_event(event)):
                 mark_type = _mark_type_for_key_event(event)
                 if mark_type is not None:
                     self._held_key = mark_type
@@ -527,6 +556,13 @@ class FitModeController(QObject):
         if active is not None:
             for result in active.fits:
                 result.visible = False
+        # Go To's mark is a mark on the plot, so the one control that clears
+        # marks clears it too. redraw=False: the replot below covers it.
+        # getattr because `main_window` here is a duck-typed view -- the real
+        # ones both carry GoToMixin, but test doubles need not.
+        clear_goto = getattr(self.main_window, "clear_goto_marker", None)
+        if clear_goto is not None:
+            clear_goto(redraw=False)
         self.main_window._plot_data(preserve_view=True)
 
     def reset_marks(self):

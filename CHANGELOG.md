@@ -4,6 +4,43 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [4.1.1] - unreleased
+
+### Added
+
+- **Go To** (<kbd>Ctrl+G</kbd>, or View &gt; Go To...) jumps the view to one
+  place in the spectrum. Type an energy in keV when a calibration is active
+  or a channel when one is not — the dialog asks for whichever the x-axis is
+  showing, and states the range the spectrum covers. The view centres on the
+  target in a 100-channel window with the Y axis rescaled to what is on
+  screen, and a dotted marker is left at the spot. Near either end of the
+  spectrum the window slides inward rather than being halved, so a line at
+  channel 5 still gets context around it. The mark is stored as a channel,
+  so toggling the calibration moves it to the matching energy instead of
+  stranding it. <kbd>Ctrl+C</kbd> clears it with the other marks. Works the
+  same way in a matrix panel's projection.
+
+### Changed
+
+- **Log scale Y moved from <kbd>Ctrl+G</kbd> to <kbd>Ctrl+Y</kbd>**, freeing
+  the key every editor and browser uses for "go to". Ctrl+Y is the better
+  mnemonic for it in any case. Calibration keeps <kbd>Ctrl+L</kbd>.
+
+### Fixed
+
+- **A shortcut sharing a letter with a marking key no longer arms that
+  marking.** <kbd>Ctrl+B</kbd> (Preview Background Fit) armed background
+  marking, <kbd>Ctrl+R</kbd> (Rebin) armed the fit region, and in a matrix
+  panel <kbd>Ctrl+C</kbd> (Clear) armed cut marking — the key filter only
+  ever looked at which letter arrived, never at the modifiers. It mattered
+  more than a stray flag suggests: the shortcut usually opens a dialog,
+  which takes focus, so the key release that would disarm it never arrived
+  and the next ordinary click placed a mark nobody asked for. Found while
+  adding Go To, which would have been a fourth instance.
+- Two HowTo cross-references pointed at "11. Matrix analysis" when that
+  section had drifted to 13. The section numbering and every numbered
+  cross-reference are now checked by a test.
+
 ## [4.1.0] - 2026-08-19
 
 A full audit of the code for scientific correctness, stability and

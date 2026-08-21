@@ -104,7 +104,8 @@ program supports.</p>
 <h3>View menu</h3>
 <table>
 <tr><th>Shortcut</th><th>Action</th></tr>
-<tr><td><kbd>Ctrl+G</kbd></td><td>Toggle log-scale Y axis</td></tr>
+<tr><td><kbd>Ctrl+G</kbd></td><td>Go To an energy or channel</td></tr>
+<tr><td><kbd>Ctrl+Y</kbd></td><td>Toggle log-scale Y axis</td></tr>
 <tr><td><kbd>Ctrl+1</kbd></td><td>Toggle the Spectra panel</td></tr>
 <tr><td><kbd>Ctrl+D</kbd></td><td>Toggle dark theme</td></tr>
 </table>
@@ -175,7 +176,7 @@ that tool drives the left button itself.</p>
 <tr><td><kbd>Ctrl+E</kbd></td><td>Export the working projection's fits</td></tr>
 <tr><td><kbd>Ctrl+2</kbd></td><td>Toggle the Fit Results panel</td></tr>
 <tr><td><kbd>Ctrl+3</kbd></td><td>Toggle the Fit Parameters panel</td></tr>
-<tr><td><kbd>Ctrl+L</kbd></td><td>Calibrate... (same calibration as the main window's Operations &gt; Calibration... -- see "11. Matrix analysis" below)</td></tr>
+<tr><td><kbd>Ctrl+L</kbd></td><td>Calibrate... (same calibration as the main window's Operations &gt; Calibration... -- see "14. Matrix analysis" below)</td></tr>
 <tr><td><kbd>Ctrl+=</kbd></td><td>Zoom in (X axis)</td></tr>
 <tr><td><kbd>Ctrl+-</kbd></td><td>Zoom out (X axis)</td></tr>
 <tr><td><kbd>Ctrl+0</kbd></td><td>Show full projection</td></tr>
@@ -386,14 +387,35 @@ own position uncertainties means one of the assignments is wrong. Two
 assignments determine a line and three a quadratic; assign more than the
 minimum whenever you can.</p>
 
-<h3>12. View options</h3>
-<p><kbd>Ctrl+G</kbd> toggles a logarithmic Y axis. <kbd>Ctrl+D</kbd>
+<h3>12. Go To an energy or channel</h3>
+<p><kbd>Ctrl+G</kbd>, or <b>View &gt; Go To...</b>, jumps the view to one
+place in the spectrum. Type an <b>energy in keV</b> when a calibration is
+active, or a <b>channel</b> when one is not -- the dialog asks for whichever
+the x-axis is currently showing, and states the range the spectrum covers so
+you know what is available before typing.</p>
+<p>The view centres on what you entered, zoomed to a 100-channel window, and
+the Y axis rescales to whatever is now on screen. A dotted purple line marks
+the spot. <kbd>Ctrl+=</kbd> and <kbd>Ctrl+-</kbd> widen or narrow the view
+from there.</p>
+<p>The window is 100 <i>channels</i> rather than a fixed keV span on purpose:
+it means the same thing whether or not a calibration is active, and stays
+sensible across coarse and fine binning where a fixed energy span would be
+far too wide on one and far too narrow on the other. Near either end of the
+spectrum the window slides inward rather than being cut in half, so a line at
+channel 5 is still shown with context around it.</p>
+<p>The mark is stored as a channel, so toggling or replacing the calibration
+moves it to the matching energy rather than stranding it at a stale
+coordinate. <kbd>Ctrl+C</kbd> (Clear) removes it along with the fit marks.
+Go To works the same way in a matrix panel's projection window.</p>
+
+<h3>13. View options</h3>
+<p><kbd>Ctrl+Y</kbd> toggles a logarithmic Y axis. <kbd>Ctrl+D</kbd>
 toggles dark theme. <kbd>Ctrl+1</kbd>/<kbd>Ctrl+2</kbd>/<kbd>Ctrl+3</kbd>
 show or hide the Spectra, Fit Results, and Fit Parameters panels.
 <kbd>Ctrl+=</kbd>/<kbd>Ctrl+-</kbd> zoom the X axis in/out around the
 current view, and <kbd>Ctrl+0</kbd> resets to the full spectrum.</p>
 
-<h3>13. Matrix analysis</h3>
+<h3>14. Matrix analysis</h3>
 <p><b>File &gt; Open Matrix...</b> (<kbd>Ctrl+Shift+O</kbd>) opens a
 2D coincidence matrix (<b>.mtx</b>) in its own window. Only the raw
 histogram is read -- there's no way to save a matrix back out.
@@ -947,7 +969,7 @@ build a new spectrum on the <i>other</i> axis -- not shown
 here.</figcaption>
 </figure>
 <p>A <b>2D coincidence matrix</b> (<b>File &gt; Open Matrix...</b>, see
-the HowTo page's "11. Matrix analysis") records pairs of gamma rays
+the HowTo page's "14. Matrix analysis") records pairs of gamma rays
 detected close together in time -- typically one in each of two
 detectors watching the same source. Each coincident pair increments one
 cell of the matrix; X and Y are the two detectors' own channel axes, so
