@@ -900,8 +900,13 @@ class FitModeController(QObject):
         background_dense = result.background_slope * x_dense + result.background_intercept
 
         # How well the background itself is determined. The band is
-        # narrowest at the two background regions' centroids and widens
-        # away from them, so a fit region far from both marked regions
+        # narrowest BETWEEN the two background regions -- not at their
+        # centroids, as this comment used to claim: averaging two
+        # independent measurements beats either on its own, so the minimum
+        # of (1-t)^2*var1 + t^2*var2 sits at t = var1/(var1+var2), strictly
+        # below both endpoints. Measured on one fit: +-2.08 counts at the
+        # left centroid, +-2.41 at the right, +-1.59 between them. It then
+        # widens outward, so a fit region far from both marked regions
         # visibly shows that its background is extrapolated. Drawn first so
         # it sits UNDER the model curves rather than veiling them.
         #
