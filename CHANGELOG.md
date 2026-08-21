@@ -28,6 +28,16 @@ when individual pieces of work happened.
 
 ### Fixed
 
+- **The dialog flicker returned on AlmaLinux, and the Linux packages were
+  the reason.** v4.1.0 stopped forcing the X11 platform so Qt could use
+  Wayland, which is what removed the flicker — but neither the .rpm nor
+  the .deb declared the Wayland client libraries, because those dependency
+  lists dated from when the app always forced X11. AlmaLinux 10 ships
+  neither `libwayland-cursor` nor `libwayland-egl` by default, so Qt found
+  its own Wayland plugin, failed to load it, silently fell back to
+  XWayland, and the flicker came back. Ubuntu happened to have both
+  preinstalled, which is why only one distro showed it. Both packages now
+  require them.
 - **A shortcut sharing a letter with a marking key no longer arms that
   marking.** <kbd>Ctrl+B</kbd> (Preview Background Fit) armed background
   marking, <kbd>Ctrl+R</kbd> (Rebin) armed the fit region, and in a matrix
