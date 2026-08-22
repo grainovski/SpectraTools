@@ -5,7 +5,8 @@ environment. Several things this project depends on are deliberately *not*
 in git, and the release toolchain is external. This is the full list, in the
 order it is worth doing.
 
-Written when moving from the machine that produced v4.1.0 (2026-08-19).
+Written when moving from the machine that produced v4.1.0 (2026-08-19);
+refreshed after v4.1.1 (2026-08-22).
 
 ## 1. What the clone gives you
 
@@ -15,8 +16,18 @@ cd SpectraTools
 ```
 
 That brings the application, the tests, the packaging scripts, the docs, and
-all 16 tags (`v1.0.0` … `v4.1.0`). The repository is the source of truth for
-everything under version control, and `master` is the released state.
+all 17 tags (`v1.0.0` … `v4.1.1`). The repository is the source of truth for
+everything under version control.
+
+**`master` is not always the released state.** Work is sometimes committed
+without cutting a release, so the newest tag can be behind `master`. Check
+before assuming a clone matches the last published build:
+
+```bash
+git log --oneline $(git describe --tags --abbrev=0)..master
+```
+
+Anything listed there is on `master` but not in any released package.
 
 ## 2. What the clone does NOT give you
 
@@ -71,7 +82,7 @@ Verify:
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expect **1082 passed, 1 failed**. The one failure is
+Expect **1127 passed, 1 failed** (as of v4.1.1). The one failure is
 `test_load_mtx_decodes_real_fixture_reasonably_fast`, a decode-speed
 assertion calibrated to one particular machine. It fails on slower hardware
 with no regression present. **Do not loosen its threshold.** Run the suite
@@ -123,11 +134,12 @@ which is generated and gitignored.
 
 ## 5. Released artifacts
 
-Not in the repository (`releases/` is gitignored, ~2.4 GB across versions).
-Every published build is on GitHub:
+Not in the repository (`releases/` is gitignored). Older versions are
+pruned locally once verified recoverable, so only the current and previous
+release are usually present. Every published build is on GitHub:
 
 ```bash
-gh release download v4.1.0 --dir releases/v4.1.0
+gh release download v4.1.1 --dir releases/v4.1.1
 ```
 
 `gh` needs `gh auth login` on the new machine; the device-authorisation step
@@ -135,7 +147,7 @@ needs a human.
 
 ## 6. Claude's project memory
 
-`claude-memory.tar.gz` holds ~50 notes covering the reasoning behind
+`claude-memory.tar.gz` holds ~52 notes covering the reasoning behind
 decisions that are not derivable from the code: TV parity choices, WSLg
 compositor behaviour, release-process traps, and per-version histories.
 
