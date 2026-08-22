@@ -966,3 +966,31 @@ def test_kb_does_not_explain_the_fit_background_checkbox_twice():
     headings = re.findall(r"<h2>(.*?)</h2>", html, re.S)
     about_checkbox = [h for h in headings if "Fit background" in h or "fit background" in h]
     assert len(about_checkbox) <= 1, f"more than one section on the checkbox: {about_checkbox}"
+
+
+
+def test_kb_says_what_the_optimiser_is_fitted_against_in_each_mode():
+    """The mechanical heart of the difference: unticked fits the residual
+    left after subtracting the two-point line, ticked fits the raw counts
+    with the line as two more free parameters."""
+    text = _rendered_text(build_knowledge_database_html())
+    assert "fitted against the residual" in text
+    assert "fitted against the raw counts" in text
+    assert "the background has no free parameters and cannot move" in text
+
+
+def test_kb_says_the_two_point_line_seeds_both_modes():
+    """Easy to assume the line is only computed when the box is unticked.
+    It is computed either way -- it seeds the peak amplitudes and widths
+    in both."""
+    text = _rendered_text(build_knowledge_database_html())
+    assert "it is what seeds the peak" in text
+
+
+def test_kb_explains_why_the_background_level_is_quoted_at_the_region_middle():
+    """The page already stated the fact. Without the reason it reads as an
+    arbitrary display choice, when it is what keeps the two background
+    parameters independently determinable."""
+    text = _rendered_text(build_knowledge_database_html())
+    assert "almost perfectly anti-correlated with the slope" in text
+    assert "converted back to an ordinary line" in text

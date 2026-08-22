@@ -746,6 +746,24 @@ much the background contributes relative to the peak's own counts.</li>
 <li>The background gets its own fitted uncertainty, and the shaded band
 is computed from that instead of from the two regions.</li>
 </ul>
+<p>Mechanically, the difference is what the optimiser is handed. The
+two-point line is computed either way -- it is what seeds the peak
+amplitudes and widths in both modes, since those estimates want the
+background out of the way whichever way it is later treated. What changes
+is the target:</p>
+<ul>
+<li><b>Unticked</b>, the line is subtracted once and the optimiser is
+fitted against the <i>residual</i>. The model contains only peaks; the
+background has no free parameters and cannot move.</li>
+<li><b>Ticked</b>, the optimiser is fitted against the <i>raw counts</i>,
+and the model is peaks <i>plus</i> a line whose level and slope are two
+more free parameters. The two-point line is demoted to their starting
+guess.</li>
+</ul>
+<p>That is why the reported uncertainties differ: fitting a residual as
+though it were the measurement asserts the subtraction was exact, while
+fitting the raw counts lets the data say how much of what it sees is peak
+and how much is background.</p>
 <p>It is not automatically the better choice. Two extra free parameters
 cost two degrees of freedom, and on a short fit region the background
 slope and the peak width start to describe the same thing, which can
@@ -756,7 +774,14 @@ background, where it buys nothing.</p>
 <p>Rows for <b>Background level</b> and <b>Background slope</b> appear in
 the Fit Parameters panel while it is on, and can be fixed like any other
 parameter. "Level" is the height of the line at the middle of the fit
-region, not at channel zero.</p>
+region, not at channel zero -- and that is a deliberate choice, not a
+display convention. Fitting the level at channel zero would make it an
+extrapolated number: for a peak near channel 3000 it is enormous and
+almost perfectly anti-correlated with the slope, so the two parameters
+stop being independently determinable and the fit becomes unstable for a
+reason that has nothing to do with the data. Measuring the level at the
+middle of the region removes that. The value you see is converted back to
+an ordinary line before anything is drawn or reported.</p>
 
 <h2>What you see on the plot after fitting</h2>
 <p>A committed fit draws the same four things in both modes:</p>
