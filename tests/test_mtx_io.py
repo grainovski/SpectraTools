@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from histogram_io import ParseError
+from lc_codec import decode_row, zigzag_decode
 from mtx_io import MAGIC_LC, load_mtx
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -103,34 +104,187 @@ def test_load_mtx_symmetric_file_is_actually_symmetric():
     assert gg[10, 2000] == gg[2000, 10] == 1
 
 
-def test_load_mtx_decodes_real_fixture_reasonably_fast():
-    # A timing regression guard for lc_codec.decode_row's performance,
-    # not its correctness (that's covered exhaustively above and in
-    # test_lc_codec.py). Deliberately calls load_mtx() directly rather
-    # than going through _load_cached(): that module-level
-    # functools.lru_cache exists purely so the other real-file tests
-    # in this module don't each pay for a fresh decode, which means
-    # any of them may have already warmed the cache for "gg.mtx" by
-    # the time this test runs (pytest's default collection order is
-    # file-definition order, but that's an implementation detail this
-    # test shouldn't depend on) -- calling _load_cached here could
-    # silently measure a cache hit (microseconds) instead of a real
-    # cold decode. load_mtx() itself has no caching of its own, so
-    # calling it directly always exercises the genuine decode path.
-    #
-    # Before the lc_codec.decode_row optimization (pre-sized output
-    # list instead of append()/extend(), a precomputed zigzag lookup
-    # table instead of a per-value function call), this measured
-    # ~4.8s on the machine this test was written on; after, ~3.9s
-    # (consistent across repeated runs, <1% spread). The threshold
-    # below sits meaningfully under the old baseline -- so a
-    # regression back to the unoptimized decoder fails this test with
-    # real margin, not marginally -- while leaving headroom above the
-    # new measured time for slower/loaded machines.
-    t0 = time.time()
-    load_mtx(os.path.join(FIXTURES, "gg.mtx"))
-    elapsed = time.time() - t0
-    assert elapsed < 4.4
+@functools.lru_cache(maxsize=None)
+def _compressed_rows(filename, count):
+    """The raw per-row byte strings lc_codec.decode_row actually
+    consumes, straight out of a real fixture's row table, plus that
+    matrix's column count. Lets a benchmark drive the decoder directly
+    instead of going through load_mtx() -- which would also time file
+    I/O and numpy assembly (~30% of its runtime), diluting exactly the
+    thing under test. Cached because the fixture is 31 MB."""
+    with open(os.path.join(FIXTURES, filename), "rb") as f:
+        blob = f.read()
+    (_magic, _version, _levels, lines, columns, poslentablepos,
+     _freepos, _freelistpos, _used, _free, _status) = struct.unpack("<11I", blob[:44])
+    table = struct.unpack(f"<{lines * 2}I", blob[poslentablepos:poslentablepos + lines * 8])
+    rows = []
+    for row in range(lines):
+        pos, length = table[row * 2], table[row * 2 + 1]
+        if length == 0:
+            continue  # never written -- no tag stream to decode
+        rows.append(blob[pos:pos + length])
+        if len(rows) >= count:
+            break
+    if len(rows) < count:
+        raise AssertionError(
+            f"{filename} yielded only {len(rows)} non-empty rows, needed {count} -- "
+            f"timing a decoder over too few rows measures scheduler noise, not "
+            f"decode speed, and would make the ratio below meaningless"
+        )
+    return tuple(rows), columns
+
+
+def _unoptimized_decode_row(data, num_values, path, *, kind):
+    """A FROZEN copy of lc_codec.decode_row exactly as it stood before
+    commit c9ffee6 optimized it -- retrieved verbatim from
+    `git show c9ffee6^:lc_codec.py`, not reconstructed from memory.
+
+    This is the baseline the speed guard below measures against, so it
+    must keep behaving like the OLD code forever. Do NOT "clean this
+    up", dedupe it against lc_codec.decode_row, or apply the same
+    optimizations to it -- any of those silently turns the guard into a
+    comparison of the current implementation against itself, which can
+    never fail. It is duplicated logic on purpose."""
+    values = []
+    last = 0
+    pos = 0
+    nleft = num_values
+    try:
+        while nleft > 0:
+            t = data[pos]
+            pos += 1
+
+            if t & 0x80:
+                n = t & 0x3F
+                if n > 59:
+                    bytes_extra = n - 59
+                    n = 59
+                    for i in range(bytes_extra):
+                        b = data[pos]
+                        pos += 1
+                        n += (b + 1) << (i * 8)
+
+                if t & 0x40:
+                    diff = n & 1
+                    same = (n >> 1) + 3
+                    values.append(last + diff)
+                    nleft -= same
+                    if nleft <= 0:
+                        raise ParseError(f"{kind}: same-run tag overruns row: {path}")
+                    values.extend([last] * same)
+                else:
+                    last = last + zigzag_decode(n)
+                    values.append(last)
+                nleft -= 1
+
+            elif t & 0x40:
+                nleft -= 2
+                if nleft < 0:
+                    raise ParseError(f"{kind}: 2-value pack overruns row: {path}")
+                a = t & 0x7
+                b = (t >> 3) & 0x7
+                values.append(last + zigzag_decode(a))
+                last = last + zigzag_decode(b)
+                values.append(last)
+
+            else:
+                nleft -= 3
+                if nleft < 0:
+                    raise ParseError(f"{kind}: 3-value pack overruns row: {path}")
+                a = t & 0x3
+                b = (t >> 2) & 0x3
+                c = (t >> 4) & 0x3
+                values.append(last + zigzag_decode(a))
+                values.append(last + zigzag_decode(b))
+                last = last + zigzag_decode(c)
+                values.append(last)
+    except IndexError as exc:
+        raise ParseError(f"{kind}: row data ends mid-tag: {path}") from exc
+
+    return values
+
+
+_BENCHMARK_ROWS = 100
+# Ratio of (current decode) / (pre-c9ffee6 decode) that must be beaten.
+# Measured on the machine this was written on: 0.842-0.846 across six
+# fresh processes (spread 0.004). A wholesale revert to the old decoder
+# puts it at ~1.0 by construction. 0.95 sits between the two with ~26x
+# the observed spread as headroom on the passing side, and still fails a
+# revert by a clear 0.05.
+_MAX_DECODE_RATIO = 0.95
+
+
+def _best_decode_time(decoder, rows, columns, repeats=3):
+    """Fastest of `repeats` passes over the same rows. Best-of, not
+    mean: scheduler noise and other load can only ever ADD time, so the
+    minimum is the closest available estimate of the real cost and the
+    most reproducible thing to compare."""
+    best = None
+    for _ in range(repeats):
+        start = time.perf_counter()
+        for row_bytes in rows:
+            decoder(row_bytes, columns, "benchmark", kind="lc matrix file")
+        elapsed = time.perf_counter() - start
+        best = elapsed if best is None else min(best, elapsed)
+    return best
+
+
+def test_decode_row_is_faster_than_the_pre_optimization_implementation():
+    """Timing regression guard for lc_codec.decode_row, expressed as a
+    RATIO against a frozen copy of the pre-optimization decoder rather
+    than an absolute wall-clock bound.
+
+    The previous version of this test asserted `elapsed < 4.4` seconds
+    for a full load_mtx("gg.mtx"). That number was calibrated on one
+    machine and made the test a property of the hardware: it failed on
+    a ~25% slower box with the optimization verifiably present, and no
+    threshold could fix that -- anything loose enough to pass there
+    would also let a genuine regression pass here, destroying the guard
+    on the machine where it worked.
+
+    Timing both decoders in the same process on the same rows cancels
+    machine speed out entirely: a slow machine slows both sides equally
+    and the ratio holds."""
+    rows, columns = _compressed_rows("gg.mtx", _BENCHMARK_ROWS)
+
+    # Same input, same output -- otherwise the two sides aren't
+    # comparable and the ratio would be meaningless. This also catches
+    # the frozen reference drifting away from the real decoder's
+    # semantics if the format ever gains a tag kind.
+    for row_bytes in rows:
+        assert decode_row(row_bytes, columns, "x", kind="lc matrix file") == \
+            _unoptimized_decode_row(row_bytes, columns, "x", kind="lc matrix file")
+
+    current = _best_decode_time(decode_row, rows, columns)
+    baseline = _best_decode_time(_unoptimized_decode_row, rows, columns)
+
+    assert current < baseline * _MAX_DECODE_RATIO, (
+        f"decode_row is not meaningfully faster than the pre-c9ffee6 "
+        f"implementation: {current:.4f}s vs {baseline:.4f}s "
+        f"(ratio {current / baseline:.3f}, must be < {_MAX_DECODE_RATIO})"
+    )
+
+
+def test_decode_speed_guard_would_catch_a_reverted_optimization():
+    """Control for the test above: the harness must be able to FAIL.
+
+    Runs the frozen pre-optimization decoder against itself. That is
+    exactly what the measurement would see if someone reverted
+    lc_codec.decode_row, so the ratio has to land near 1.0 and miss the
+    threshold. Without this, a benchmark that silently measured nothing
+    (a cached result, an empty row list, both sides accidentally bound
+    to the same function) would report a passing ratio and the real
+    guard above would be worthless -- a broken check reads as a result."""
+    rows, columns = _compressed_rows("gg.mtx", _BENCHMARK_ROWS)
+
+    first = _best_decode_time(_unoptimized_decode_row, rows, columns)
+    second = _best_decode_time(_unoptimized_decode_row, rows, columns)
+
+    assert not (first < second * _MAX_DECODE_RATIO), (
+        f"the speed guard cannot distinguish a decoder from itself "
+        f"({first:.4f}s vs {second:.4f}s, ratio {first / second:.3f}) -- "
+        f"it would not catch a reverted optimization"
+    )
 
 
 def _build_lc_header(levels, lines, columns, poslentablepos, version=2):
