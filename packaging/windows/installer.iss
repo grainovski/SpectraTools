@@ -1,6 +1,6 @@
 [Setup]
 AppName=SpectraTools
-AppVersion=4.1.1
+AppVersion=4.1.2
 DefaultDirName={autopf}\SpectraTools
 DefaultGroupName=SpectraTools
 OutputDir=output

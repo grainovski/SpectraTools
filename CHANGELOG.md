@@ -4,6 +4,29 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [4.1.2] - unreleased
+
+### Changed
+
+- Reading a `.mtx` matrix file is a few percent faster. `lc_codec.decode_row`
+  built its output through a pre-sized list, on the assumption that this
+  avoided per-`append()` growth overhead; a direct A/B — same code, same
+  rows, only that one difference — measured it 5–6% *slower* than plain
+  `append()`/`extend()` on Python 3.13, so it was removed. Decoded values
+  are unchanged, verified byte-for-byte across all 16384 rows of both real
+  matrix fixtures and on every decode error path.
+
+### Internal
+
+- The `.mtx` decode-speed regression test no longer asserts an absolute
+  wall-clock bound. That bound was calibrated on one machine, which made
+  the test a property of the hardware: it failed outright on slower
+  hardware with no regression present, and cleared the bar by only ~9%
+  even where it passed. It now times the decoder against a frozen copy of
+  the pre-optimization implementation in the same process and asserts a
+  ratio, which holds on any machine, alongside a control test proving the
+  guard can still fail.
+
 ## [4.1.1] - 2026-08-22
 
 ### Added

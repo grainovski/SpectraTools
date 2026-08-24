@@ -38,17 +38,32 @@ def decode_row(data, num_values, path, *, kind):
     format's wording by omission, the exact bug this parameter was
     added to fix.
 
-    Performance: a pre-sized output list (no per-value append()/
-    extend() overhead) plus _ZIGZAG_TABLE above (no per-value
-    zigzag_decode() call for the common case) measured ~20% faster on
-    real 8192x8192 matrix fixtures. A full numpy vectorization was
-    also tried and verified byte-for-byte correct, but measured no
-    faster (the tag stream's variable-length encoding forces a
-    sequential scan that alone costs as much as this whole function
-    does) -- see commit c9ffee6's message for why, before re-attempting
-    it without new profiling data."""
-    values = [0] * num_values
-    out = 0
+    Performance: _ZIGZAG_TABLE above (no per-value zigzag_decode()
+    call for the common case) is what makes this fast -- worth ~18% on
+    real 8192x8192 matrix fixtures, and essentially the whole win.
+
+    Two things that sound faster and are NOT, both measured rather
+    than reasoned about, so neither gets re-attempted for free:
+
+    * A pre-sized output list (`values = [0] * num_values` with an
+      index, instead of append()/extend()) shipped here from c9ffee6
+      until 2026-08-24 on the assumption that it avoided growth
+      overhead. A clean A/B on Python 3.13 -- same code, same rows,
+      only that one difference -- put it 5-6% SLOWER than append()
+      across three trials (ratios 1.058/1.062/1.050). CPython
+      over-allocates on append and the amortised cost is below what
+      the extra index bookkeeping costs in the loop. Removed.
+    * A full numpy vectorization, verified byte-for-byte correct,
+      measured no faster at all: the tag stream is variable-length,
+      so reconstructing where each value lands needs a sequential
+      scan that alone costs about what this whole function does.
+      See commit c9ffee6's message.
+
+    tests/test_mtx_io.py guards the table's contribution by timing
+    this function against a frozen copy of the pre-c9ffee6 decoder in
+    the same process and asserting a ratio, so the guard holds on any
+    machine."""
+    values = []
     last = 0
     pos = 0
     nleft = num_values
@@ -71,22 +86,14 @@ def decode_row(data, num_values, path, *, kind):
                 if t & 0x40:
                     diff = n & 1
                     same = (n >> 1) + 3
-                    values[out] = last + diff
-                    out += 1
+                    values.append(last + diff)
                     nleft -= same
                     if nleft <= 0:
                         raise ParseError(f"{kind}: same-run tag overruns row: {path}")
-                    # Unlike a direct values[out] write, slice-assignment
-                    # silently GROWS the list instead of raising if
-                    # out+same ever exceeded num_values -- only safe
-                    # because the nleft<=0 check above guarantees it
-                    # can't. Do not remove that check.
-                    values[out:out + same] = [last] * same
-                    out += same
+                    values.extend([last] * same)
                 else:
                     last += zz[n] if n < 64 else zigzag_decode(n)
-                    values[out] = last
-                    out += 1
+                    values.append(last)
                 nleft -= 1
 
             elif t & 0x40:
@@ -95,10 +102,9 @@ def decode_row(data, num_values, path, *, kind):
                     raise ParseError(f"{kind}: 2-value pack overruns row: {path}")
                 a = t & 0x7
                 b = (t >> 3) & 0x7
-                values[out] = last + zz[a]
+                values.append(last + zz[a])
                 last += zz[b]
-                values[out + 1] = last
-                out += 2
+                values.append(last)
 
             else:
                 nleft -= 3
@@ -107,11 +113,10 @@ def decode_row(data, num_values, path, *, kind):
                 a = t & 0x3
                 b = (t >> 2) & 0x3
                 c = (t >> 4) & 0x3
-                values[out] = last + zz[a]
-                values[out + 1] = last + zz[b]
+                values.append(last + zz[a])
+                values.append(last + zz[b])
                 last += zz[c]
-                values[out + 2] = last
-                out += 3
+                values.append(last)
     except IndexError as exc:
         raise ParseError(f"{kind}: row data ends mid-tag: {path}") from exc
 
