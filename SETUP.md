@@ -82,16 +82,27 @@ Verify:
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expect **1127 passed, 1 failed** (as of v4.1.1). The one failure is
-`test_load_mtx_decodes_real_fixture_reasonably_fast`, a decode-speed
-assertion calibrated to one particular machine. It fails on slower hardware
-with no regression present. **Do not loosen its threshold.** Run the suite
-as the project does, deselecting it:
+Expect **1129 passed, 0 failed** (as of v4.1.2). No test needs deselecting
+any more: the decode-speed guard used to assert an absolute wall-clock bound
+calibrated on one machine and failed on slower hardware with no regression
+present, but it now times the decoder against a frozen copy of the
+pre-optimization implementation in the same process and asserts a ratio,
+which holds anywhere.
 
-```bash
-.venv/Scripts/python.exe -m pytest -q \
-  --deselect tests/test_mtx_io.py::test_load_mtx_decodes_real_fixture_reasonably_fast
-```
+**Budget real time for it.** The Qt and matrix tests dominate: a full run
+took just over three hours on the machine this was last measured on, and
+the matrix fixtures decode into 536 MB arrays, so peak memory reaches ~5 GB.
+Running a single file (`-q tests/test_mtx_io.py`) is seconds, so prefer that
+while iterating.
+
+**A green run does not by itself mean the whole suite ran.**
+`tests/test_root_io.py` and `tests/test_root_ui.py` open with
+`pytest.importorskip("uproot")`, so a virtualenv predating v4.0.0 — when
+`uproot` was added to `requirements.txt` — silently collects 30 fewer tests
+and still reports all-passed. If the count comes out at 1099 rather than
+1129, that is this, and the fix is to re-run the install step above. Note
+the Windows build needs `uproot` too: `build.ps1` passes
+`--collect-all awkward_cpp`, which fails outright without it.
 
 ## 4. Release toolchain (only needed to build installers)
 
