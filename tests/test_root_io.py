@@ -220,6 +220,33 @@ def test_fractional_contents_are_refused_rather_than_rounded(tmp_path):
         root_io.load_spectrum(path, "w")
 
 
+def test_out_of_range_contents_are_refused_rather_than_wrapped(tmp_path):
+    """A FINITE value beyond int64's range is its own rint, passes the
+    fractional-contents check, and used to sail into a bare
+    .astype(np.int64), silently wrapping to a garbage sentinel count.
+    The checked cast raises with the object's name instead -- same guard
+    as spe_io/spk_io."""
+    path = tmp_path / "huge.root"
+    counts = np.zeros(8)
+    counts[3] = 1e19
+    _write(path, {"h": _th1(counts)})
+    with pytest.raises(RootError, match="outside the representable integer range"):
+        root_io.load_spectrum(path, "h")
+
+
+def test_non_finite_contents_are_refused_not_imported(tmp_path):
+    """NaN and +-inf are caught upstream by _open_object's isfinite
+    check, before the cast is ever reached -- pinned here so a NaN or
+    inf bin can never import as data whichever guard happens to fire."""
+    for name, bad in (("nan", np.nan), ("plusinf", np.inf), ("minusinf", -np.inf)):
+        path = tmp_path / f"{name}.root"
+        counts = np.zeros(8)
+        counts[3] = bad
+        _write(path, {"h": _th1(counts)})
+        with pytest.raises(RootError, match="non-finite"):
+            root_io.load_spectrum(path, "h")
+
+
 def test_non_uniform_binning_is_refused(tmp_path):
     """This app's calibration is a polynomial in channel number and cannot
     express arbitrary bin edges, so approximating them would be a lie."""

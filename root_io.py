@@ -21,6 +21,7 @@ is about 35 MB.
 import numpy as np
 
 from calibration import Calibration
+from int64_cast import checked_round_to_int64
 
 
 class RootError(Exception):
@@ -195,7 +196,18 @@ def _as_counts(values, object_path, path):
             f"ROOT histogram {object_path!r} holds fractional (weighted or scaled) "
             f"contents, which this app cannot use as counts: {path}"
         )
-    return rounded.astype(np.int64)
+    # Guarded, not a bare .astype(): NaN/inf are already refused upstream
+    # (_open_object's isfinite check), but a FINITE value beyond int64's
+    # range is its own rint, passes allclose, and a bare cast silently
+    # wraps it to a garbage sentinel count. Same guard as every other
+    # float-source reader (spe_io, spk_io).
+    return checked_round_to_int64(
+        rounded,
+        lambda: RootError(
+            f"ROOT histogram {object_path!r} holds a count outside the "
+            f"representable integer range: {path}"
+        ),
+    )
 
 
 def load_spectrum(path, object_path):
