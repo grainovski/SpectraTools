@@ -976,6 +976,68 @@ def test_invalid_initial_guess_value_shows_a_status_message_instead_of_crashing(
     assert "Value for 'Peak 1 amplitude' is not a valid number: 'not a number'" in message
 
 
+def test_non_finite_panel_value_shows_a_status_message_instead_of_poisoning_the_fit(qapp):
+    """float() alone accepts "nan" and "inf"; as a fixed value or seed
+    either poisons the fit with a confusing downstream failure. The
+    field itself is named instead, like any other invalid entry."""
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+
+    main_window.fit_controller.run_fit()
+    table = main_window.fit_controller.parameters_table
+    table.cellWidget(2, 2).setChecked(True)  # fix "Shared FWHM"
+    table.item(2, 1).setText("nan")
+
+    main_window.fit_controller.run_fit()  # must not raise
+
+    assert len(spectrum.fits) == 1  # second fit did not commit
+    message = main_window.statusBar().currentMessage()
+    assert "Fixed value for 'Shared FWHM' must be a finite number: 'nan'" in message
+
+
+def test_uninvertible_kev_panel_value_shows_a_status_message_instead_of_crashing(qapp):
+    """With a quadratic calibration active a position cell holds keV, and
+    Calibration.invert legitimately raises CalibrationError when Newton's
+    method lands on the parabola's vertex. That escaped _read_panel_values
+    uncaught and crashed the app; it is a bad FIELD, and is now reported
+    like one. The calibration (a=0, b=2, c=1) and value (-2) are chosen so
+    the initial Newton guess x0 = E/b = -1 IS the vertex, making the raise
+    deterministic rather than a numerical accident."""
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_controller.run_fit()
+
+    main_window._apply_calibration_change(
+        Calibration(kind="quadratic", a=0.0, b=2.0, c=1.0), True
+    )
+    table = main_window.fit_controller.parameters_table
+    table.item(1, 1).setText("-2")  # "Peak 1 position", now in keV
+
+    main_window.fit_controller.run_fit()  # must not raise
+
+    assert len(spectrum.fits) == 1  # second fit did not commit
+    message = main_window.statusBar().currentMessage()
+    assert "outside the active calibration's range" in message
+
+
 def test_stale_fixed_parameter_is_dropped_without_aborting_the_fit(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 import fit_export
+from calibration import CalibrationError
 from peak_fit import (
     FWHM_FACTOR, FitError, IntegrationResult, channel_indices, compute_background, fit_peaks,
     fit_result_values_by_name, hypermet_left_tail, integrate_region, parameter_names,
@@ -1144,9 +1145,25 @@ class FitModeController(QObject):
                     raise FitError(
                         f"{error_label} for '{_parameter_label(name, calibrated)}' is not a valid number: {text!r}"
                     )
-                result[name] = _panel_value_to_internal(
-                    self.main_window, name, value, self._parameters_panel_values_shown
-                )
+                # float() alone accepts "nan" and "inf", which would poison
+                # the fit as a fixed value or seed with a confusing
+                # downstream failure instead of naming the bad field here.
+                if not math.isfinite(value):
+                    raise FitError(
+                        f"{error_label} for '{_parameter_label(name, calibrated)}' must be a finite number: {text!r}"
+                    )
+                try:
+                    result[name] = _panel_value_to_internal(
+                        self.main_window, name, value, self._parameters_panel_values_shown
+                    )
+                except CalibrationError as exc:
+                    # A quadratic calibration legitimately cannot invert a
+                    # keV value below its vertex -- report it like any other
+                    # invalid field instead of crashing.
+                    raise FitError(
+                        f"{error_label} for '{_parameter_label(name, calibrated)}' is outside "
+                        f"the active calibration's range: {exc}"
+                    )
         return result
 
     def fixed_params_from_panel(self):
