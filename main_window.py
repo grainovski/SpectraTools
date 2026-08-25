@@ -697,16 +697,17 @@ class MainWindow(GoToMixin, QMainWindow):
 
     def _apply_multiply(self, spectrum, factor):
         try:
-            spectrum.data = multiply(spectrum.data, factor)
+            data = multiply(spectrum.data, factor)
         except ValueError as exc:
             QMessageBox.warning(self, "Multiply by Factor", f"Could not multiply: {exc}")
             return
-        # After the counts, and only once they actually changed -- the
-        # overflow branch above returns without touching either, so the two
-        # can never end up describing different data. A spectrum carrying a
-        # propagated variance (a matrix cut, an Add/Subtract result) needs it
-        # scaled by factor**2; one without keeps None and stays Poisson.
-        spectrum.variance = scaled_variance(spectrum.variance, factor)
+        # Variance before counts: scaled_variance materializes the Poisson
+        # assumption from the PRE-multiply counts when the spectrum carries
+        # no propagated variance, so it must still be able to see them.
+        # The overflow branch above returns before touching either, so the
+        # two can never end up describing different data.
+        spectrum.variance = scaled_variance(spectrum.variance, factor, spectrum.data)
+        spectrum.data = data
         self.fit_controller.reset_marks()
         spectrum.fits.clear()
         self._plot_data(preserve_view=True)
@@ -799,10 +800,13 @@ class MainWindow(GoToMixin, QMainWindow):
                 continue
             if factor == 1.0:
                 continue
-            spectrum.data = multiply(spectrum.data, factor)
-            # Normalize scales through the same multiply(), so it carries the
-            # same obligation to scale the variance with it.
-            spectrum.variance = scaled_variance(spectrum.variance, factor)
+            scaled = multiply(spectrum.data, factor)
+            # Normalize scales through the same multiply(), so it carries
+            # the same obligation -- and the same ordering as
+            # _apply_multiply: scaled_variance reads the PRE-multiply
+            # counts, so it runs before the counts are replaced.
+            spectrum.variance = scaled_variance(spectrum.variance, factor, spectrum.data)
+            spectrum.data = scaled
             spectrum.fits.clear()
 
         self.fit_controller.reset_marks()

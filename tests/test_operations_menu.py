@@ -209,6 +209,44 @@ def test_apply_multiply_shows_a_warning_instead_of_crashing_on_overflow(qapp, mo
 
     assert len(warnings) == 1
     assert list(spectrum.data) == list(original)  # left untouched, not corrupted
+    assert spectrum.variance is None  # the overflow branch touches neither
+
+
+def test_apply_multiply_materializes_and_scales_a_poisson_variance(qapp):
+    """A file-loaded spectrum's variance is None ("assume Poisson") -- a
+    statement about its PRE-multiply counts. After multiply by f the
+    counts are f*N, where that assumption would claim var = f*N against
+    a truth of f**2 * N, so the variance must be materialized from the
+    original counts and scaled. Without this, every fit weight and error
+    bar on a multiplied spectrum was off by sqrt(f), silently."""
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    original = spectrum.data.copy()
+    assert spectrum.variance is None
+
+    main_window._apply_multiply(spectrum, 4.0)
+
+    assert spectrum.variance is not None
+    assert np.allclose(spectrum.variance, 16.0 * np.maximum(original, 0.0))
+
+
+def test_normalize_materializes_and_scales_a_poisson_variance(qapp):
+    """Normalize goes through the same multiply() and carries the same
+    obligation -- the scaled spectrum's variance comes from its own
+    pre-scale counts times the factor squared."""
+    main_window = MainWindow()
+    spectrum_a = _make_active_spectrum(main_window)
+    spectrum_b = _make_active_spectrum(main_window)
+    spectrum_a.data = np.array([10, 20, 30], dtype=np.int64)
+    spectrum_b.data = np.array([5, 40, 15], dtype=np.int64)
+    main_window.fit_controller.state.pending_fit_click = 1
+
+    main_window._normalize_spectra()
+
+    # A was scaled by 2 (reference 20 vs max 40): variance = 4 * original.
+    assert np.allclose(spectrum_a.variance, 4.0 * np.array([10.0, 20.0, 30.0]))
+    # B was already at the max (factor 1.0, skipped): stays Poisson-assumed.
+    assert spectrum_b.variance is None
 
 
 def test_open_multiply_dialog_applies_the_entered_factor(qapp, monkeypatch):
@@ -1844,11 +1882,17 @@ def test_multiply_scales_the_propagated_variance_by_the_factor_squared(qapp):
     )
 
 
-def test_multiply_leaves_a_poisson_spectrum_without_a_variance(qapp):
+def test_multiply_by_one_leaves_a_poisson_spectrum_without_a_variance(qapp):
+    """A no-op factor leaves the counts untouched, so the Poisson
+    assumption (variance None) remains exactly true and must not be
+    materialized. Any OTHER factor now materializes and scales it -- see
+    test_apply_multiply_materializes_and_scales_a_poisson_variance; this
+    test used to pin factor 2.0 leaving None, which was the audit-F1 bug
+    (uncertainties off by sqrt(f) on every multiplied file spectrum)."""
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)
     assert spectrum.variance is None
-    main_window._apply_multiply(spectrum, 2.0)
+    main_window._apply_multiply(spectrum, 1.0)
     assert spectrum.variance is None
 
 

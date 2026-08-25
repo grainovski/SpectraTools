@@ -218,21 +218,45 @@ def test_scaled_variance_squares_the_factor():
     from spectrum_operations import scaled_variance
 
     variance = np.array([4.0, 9.0, 0.0, 25.0])
-    assert np.allclose(scaled_variance(variance, 3.0), variance * 9.0)
+    counts = np.array([1.0, 1.0, 1.0, 1.0])  # ignored when a variance is supplied
+    assert np.allclose(scaled_variance(variance, 3.0, counts), variance * 9.0)
 
 
-def test_scaled_variance_passes_none_through():
-    """None means 'assume Poisson', and scaling a spectrum that never
-    carried a propagated variance must not invent one."""
+def test_scaled_variance_materializes_poisson_from_the_prescale_counts():
+    """None means 'assume Poisson' -- a statement about the counts the
+    spectrum was loaded with, which stops being true once they are
+    scaled: after multiply the counts are f*N, and reading THEM as
+    Poisson claims var = f*N where the truth is f**2 * N. So the Poisson
+    variance must be materialized from the pre-scale counts and scaled
+    like any other. (This used to pass None through, leaving every fit
+    weight and error bar on a multiplied spectrum off by sqrt(f).)"""
     from spectrum_operations import scaled_variance
 
-    assert scaled_variance(None, 3.0) is None
+    counts = np.array([100.0, 4.0, 0.0])
+    assert np.allclose(scaled_variance(None, 3.0, counts), [900.0, 36.0, 0.0])
+
+
+def test_scaled_variance_materialization_floors_negative_counts_at_zero():
+    """Same floor as poisson_variance itself: already-subtracted negative
+    counts carry no Poisson variance to read off."""
+    from spectrum_operations import scaled_variance
+
+    assert np.allclose(scaled_variance(None, 2.0, np.array([-50.0, 9.0])), [0.0, 36.0])
+
+
+def test_scaled_variance_keeps_none_for_a_noop_factor():
+    """factor == 1 leaves the counts untouched, so the Poisson assumption
+    remains exactly true and must not be materialized -- a no-op multiply
+    must not change what the spectrum claims about itself."""
+    from spectrum_operations import scaled_variance
+
+    assert scaled_variance(None, 1.0, np.array([10.0, 20.0])) is None
 
 
 def test_scaled_variance_of_a_fractional_factor_shrinks_it():
     from spectrum_operations import scaled_variance
 
-    assert np.allclose(scaled_variance(np.array([100.0]), 0.5), [25.0])
+    assert np.allclose(scaled_variance(np.array([100.0]), 0.5, np.array([1.0])), [25.0])
 
 
 def test_rebinned_variance_adds_the_grouped_variances():

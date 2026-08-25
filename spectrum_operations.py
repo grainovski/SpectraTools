@@ -94,7 +94,7 @@ def subtract(data_a, data_b, factor):
     return _checked_int64(np.round(data_a - factor * data_b))
 
 
-def scaled_variance(variance, factor):
+def scaled_variance(variance, factor, data):
     """Variance of multiply()'s result: var(f*X) = f**2 * var(X).
 
     Multiply and Normalize used to replace a spectrum's counts and leave
@@ -104,12 +104,28 @@ def scaled_variance(variance, factor):
     correct 2006.80, understated by exactly the factor and with no warning
     of any kind.
 
-    None passes through unchanged: it means "this spectrum came from a file,
-    assume Poisson", and scaling must not invent a variance for a spectrum
-    that never carried one -- the counts themselves still describe it.
+    `data` is the spectrum's counts BEFORE the multiply. It matters for a
+    spectrum with no propagated variance (None, meaning "came from a file,
+    assume Poisson"): that assumption is a statement about THESE counts,
+    and it stops being true the moment they are scaled. After multiply the
+    counts are f*N, and reading them as Poisson claims var = f*N where the
+    truth is f**2 * var(X) = f**2 * N -- wrong by exactly the factor, in
+    every fit weight, error bar and chi-square that follows, with no
+    warning of any kind. So the Poisson variance is materialized here,
+    from the pre-scale counts, and scaled like any other variance. (This
+    used to pass None through on the grounds that "the counts themselves
+    still describe it"; for any factor other than 1 they do not.)
+
+    A factor of exactly 1 leaves the counts untouched, so the Poisson
+    assumption remains exactly true and None stays None -- a no-op
+    multiply must not change what the spectrum claims about itself (a
+    materialized variance also flips behaviour that keys on "carries a
+    variance", e.g. integrate_region's negative-count refusal).
     """
     if variance is None:
-        return None
+        if factor == 1:
+            return None
+        variance = poisson_variance(data)
     return np.asarray(variance, dtype=float) * float(factor) ** 2
 
 
