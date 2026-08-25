@@ -136,9 +136,16 @@ class EnergyAssignDialog(QDialog):
             if not text:
                 continue
             try:
-                energies.append(float(text))
+                value = float(text)
             except ValueError:
                 raise ValueError(f"{label}: {text!r} is not a number") from None
+            # float() alone accepts "nan"/"inf", which from_points would
+            # only reject later with a message about the whole fit's
+            # coefficients -- name the offending row here instead, exactly
+            # like an unparseable entry.
+            if not math.isfinite(value):
+                raise ValueError(f"{label}: {text!r} is not a finite energy") from None
+            energies.append(value)
             channels.append(channel)
             errors.append(channel_err)
         return channels, energies, errors

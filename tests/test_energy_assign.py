@@ -95,6 +95,28 @@ def test_blank_rows_are_skipped_but_unparseable_ones_are_reported(qapp):
     assert "b:" in dialog.status.text()
 
 
+def test_non_finite_energy_is_reported_with_its_row(qapp):
+    """float() alone accepts "nan" and "inf"; from_points would only
+    reject those later, with a message about the whole fit's coefficients.
+    The offending ROW is named instead, exactly like a typo."""
+    dialog = EnergyAssignDialog(
+        None,
+        [("a", 100.0), ("b", 300.0), ("c", 500.0)],
+    )
+    dialog.table.item(0, EnergyAssignDialog.ENERGY_COLUMN).setText("60")
+    dialog.table.item(1, EnergyAssignDialog.ENERGY_COLUMN).setText("nan")
+    dialog.table.item(2, EnergyAssignDialog.ENERGY_COLUMN).setText("260")
+    dialog._on_accept()
+    assert dialog.result_calibration is None
+    assert "not a finite energy" in dialog.status.text()
+    assert "b:" in dialog.status.text()
+
+    dialog.table.item(1, EnergyAssignDialog.ENERGY_COLUMN).setText("inf")
+    dialog._on_accept()
+    assert dialog.result_calibration is None
+    assert "not a finite energy" in dialog.status.text()
+
+
 def test_too_few_assignments_is_reported_rather_than_accepted(qapp):
     dialog = EnergyAssignDialog(None, [("a", 100.0), ("b", 300.0)])
     dialog.table.item(0, EnergyAssignDialog.ENERGY_COLUMN).setText("60")
