@@ -62,18 +62,33 @@ must be physically copied, which changes the plan.
 ### 2. Inventory what git will not carry
 
 ```bash
-git status --short | grep '^??'             # untracked
-git status --short --ignored | grep '^!!'   # ignored (review, do not assume disposable)
+git status --short | grep '^??'                        # untracked
+git status --short --ignored=traditional | grep '^!!'  # ignored, directory-level
 ```
 
+**Get the list before you get the sizes.** Measuring every entry with
+`du -sh` in the same pass is the obvious move and it will hang: ignored
+trees routinely include a virtualenv or `node_modules` with tens of
+thousands of files, and one `du` over that can take minutes. Size only the
+handful of entries you are actually deciding about, and put a `timeout` on
+it. This is a real failure, not a theoretical one — it wedged a five-minute
+command the first time this skill was run for real.
+
 Then classify. Do not guess — size and name are weak signals, and this is
-the step where being wrong is expensive. Useful questions to resolve it:
+the step where being wrong is expensive. Four questions resolve almost
+everything:
 
 - **Is there another copy anywhere?** A release binary that is also on a
   GitHub/GitLab release page is recoverable; the same file with no remote
   copy is not. Check with `gh release list` / `gh release view --json assets`
   or the equivalent, and verify per-asset (name, size, upload state) rather
   than trusting that a release exists.
+- **Does the build regenerate it?** Before archiving anything ignored, grep
+  the build scripts for it. A file that looks build-critical is often
+  produced on demand — an icon, a generated header, a version stamp — and
+  the script may quietly create it when absent. Read the code inside the
+  guard, not just the guard: `if [ ! -f X ]` followed by a command that
+  *makes* X means the project self-heals and there is nothing to carry.
 - **Can it be regenerated, and at what cost?** A virtualenv rebuilds in
   minutes and should never be copied — it usually contains absolute paths to
   the old machine and will silently misbehave if moved. A dataset that took
@@ -111,6 +126,15 @@ the most honest description of what a project actually requires:
 | `Cargo.toml`, `go.mod`, `Gemfile`, `pom.xml`, `build.gradle*`, `composer.json`, `*.csproj`, `mix.exs`, `pubspec.yaml` | Rust / Go / Ruby / Java / PHP / .NET / Elixir / Dart |
 | `.github/workflows/*.yml`, `.gitlab-ci.yml`, `Dockerfile`, `Makefile` | The real toolchain, versions, and test command |
 | `.tool-versions`, `.nvmrc`, `.python-version`, `runtime.txt` | Pinned language versions |
+
+CI config is the most honest description of a project's requirements when it
+exists — but plenty of real projects have none, especially ones built and
+released from a developer's own machine. When there is no CI, the same
+information lives in the build and packaging scripts (`packaging/`,
+`scripts/`, `build.*`), in any setup or contributing document, and in the
+comments around pinned dependency versions, which usually explain *why* a
+bound exists. Read those instead rather than reporting the toolchain as
+unknown.
 
 ### 5. Record a baseline the receiving machine can check itself against
 

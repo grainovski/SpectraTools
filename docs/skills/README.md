@@ -25,6 +25,11 @@ skips whole files when an optional dependency is missing still reports
 green, over a *smaller* suite. Comparing counts against a recorded baseline
 makes that visible; looking at pass/fail alone does not.
 
+See `HOWTO.md` for the full usage manual — which skill to use when, what
+I do versus what you do, a complete worked move, and what has actually been
+tested. `EXAMPLE-MANIFEST.json` is a real manifest generated from this
+project.
+
 ## Installing
 
 They are active when copied into the personal skills directory:
