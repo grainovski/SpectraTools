@@ -36,6 +36,26 @@ def test_matrix_heatmap_window_has_navigation_toolbar_for_zoom(qapp):
     assert "Zoom" in action_texts
 
 
+def test_matrix_heatmap_axes_are_labeled_in_original_channels_after_downsampling(qapp):
+    """The heatmap downsamples for display, but its axes say "channel" --
+    without an explicit extent, imshow ticks ran over the downsampled
+    BLOCK indices, so "channel 500" on an 8192-channel matrix was really
+    channel 4000. The extent pins the ticks to the original channel
+    coordinates whatever the downsampling factor. Asymmetric shape so a
+    rows/cols (Y/X) swap cannot cancel out."""
+    matrix = np.zeros((2048, 1024), dtype=np.int64)  # rows=Y=2048, cols=X=1024
+    window = MatrixHeatmapWindow(matrix, "big.mtx", "light", _fake_panel())
+
+    assert _downsample_for_display(matrix).shape == (1024, 512)  # it DID downsample
+    assert tuple(window.image.get_extent()) == (0, 1024, 0, 2048)  # (left, right, bottom, top)
+
+
+def test_matrix_heatmap_extent_matches_channels_without_downsampling_too(qapp):
+    matrix = np.arange(100, dtype=np.int64).reshape(10, 10)
+    window = MatrixHeatmapWindow(matrix, "small.mtx", "light", _fake_panel())
+    assert tuple(window.image.get_extent()) == (0, 10, 0, 10)
+
+
 def test_matrix_heatmap_handles_negative_values_without_crashing(qapp):
     matrix = np.array([[-5, 10], [20, -1]], dtype=np.int64)
     window = MatrixHeatmapWindow(matrix, "test.mtx", "light", _fake_panel())

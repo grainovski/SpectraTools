@@ -70,7 +70,15 @@ class MatrixHeatmapWindow(QMainWindow):
         # without error -- plain LogNorm requires strictly positive
         # data and would raise on any matrix with a negative cell.
         norm = SymLogNorm(linthresh=1.0, vmin=display_matrix.min(), vmax=max(display_matrix.max(), 1))
-        self.image = self.axes.imshow(display_matrix, norm=norm, origin="lower", aspect="auto")
+        # extent in the ORIGINAL matrix's channel coordinates: without it,
+        # imshow labels the axes with the downsampled block indices -- a
+        # user reading "channel 500" off an 8192-channel matrix's heatmap
+        # was actually looking at channel 4000. The image is still the
+        # downsampled overview; only the tick labels change meaning.
+        self.image = self.axes.imshow(
+            display_matrix, norm=norm, origin="lower", aspect="auto",
+            extent=(0, matrix.shape[1], 0, matrix.shape[0]),
+        )
         self.colorbar = self.figure.colorbar(self.image, ax=self.axes)
         self.axes.set_xlabel("X channel")
         self.axes.set_ylabel("Y channel")
