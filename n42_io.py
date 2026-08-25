@@ -63,7 +63,16 @@ def _parse_calibration(root, spectrum_el):
     ref = spectrum_el.get("energyCalibrationReference")
     if ref is None:
         return None
-    cal_el = root.find(f".//{_NS}EnergyCalibration[@id='{ref}']")
+    # Matched in Python, NOT by interpolating `ref` into an XPath
+    # predicate: XML attributes may legally contain apostrophes and
+    # brackets, and f".//...[@id='{ref}']" made ElementTree raise
+    # SyntaxError on such a file -- which escaped the loader's
+    # ParseError/OSError handling and crashed the app on well-formed
+    # input.
+    cal_el = next(
+        (el for el in root.iter(f"{_NS}EnergyCalibration") if el.get("id") == ref),
+        None,
+    )
     if cal_el is None:
         return None
     values_el = cal_el.find(f"{_NS}CoefficientValues")

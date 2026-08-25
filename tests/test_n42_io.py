@@ -62,6 +62,43 @@ def test_load_n42_basic_none_compression(tmp_path):
     assert calibration.c == 3.0
 
 
+def test_load_n42_calibration_reference_with_xpath_metacharacters(tmp_path):
+    """XML attributes may legally contain apostrophes and brackets.
+    The lookup used to interpolate the reference into an XPath predicate
+    (.//EnergyCalibration[@id='{ref}']), which made ElementTree raise
+    SyntaxError on such a file -- escaping the loader's ParseError/OSError
+    handling and crashing the app on well-formed input. Matching is now
+    plain Python equality: a weird id still RESOLVES when it matches."""
+    weird_id = "cal's [1]"
+    calibration_block = (
+        f'<EnergyCalibration id="{weird_id}">'
+        "<CoefficientValues>1.0 2.0</CoefficientValues>"
+        "</EnergyCalibration>"
+    )
+    xml_text = _MINIMAL_N42.format(
+        calibration_block=calibration_block,
+        spectrum_block=_spectrum_block("0 1 2 3", cal_ref=weird_id),
+    )
+    data, calibration = load_n42(_write_n42(tmp_path, xml_text))
+    assert list(data) == [0, 1, 2, 3]
+    assert calibration.kind == "linear"
+    assert calibration.a == 1.0
+    assert calibration.b == 2.0
+
+
+def test_load_n42_unresolvable_weird_reference_is_no_calibration_not_a_crash(tmp_path):
+    """Same metacharacters, no matching calibration: the spectrum loads
+    with calibration None -- the function's usual answer for an unusable
+    calibration -- instead of raising SyntaxError."""
+    xml_text = _MINIMAL_N42.format(
+        calibration_block=_CALIBRATION_BLOCK.format(coefficients="1.0 2.0"),
+        spectrum_block=_spectrum_block("0 1 2 3", cal_ref="no'such[ref]"),
+    )
+    data, calibration = load_n42(_write_n42(tmp_path, xml_text))
+    assert list(data) == [0, 1, 2, 3]
+    assert calibration is None
+
+
 def test_load_n42_counted_zeroes_compression(tmp_path):
     xml_text = _MINIMAL_N42.format(
         calibration_block="",
