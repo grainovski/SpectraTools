@@ -967,11 +967,29 @@ class MainWindow(GoToMixin, QMainWindow):
             writer(path, spectrum.data)
         except OSError as exc:
             QMessageBox.warning(self, "Save Spectrum", f"Could not save: {exc}")
+            return
         except ValueError as exc:
             QMessageBox.warning(
                 self, "Save Spectrum",
                 f"Could not save in this format: {exc}\n\n"
                 "Try a different format (e.g. Text), or Multiply by a smaller factor first.",
+            )
+            return
+        if spectrum.variance is not None:
+            # A derived spectrum (matrix cut, Add/Subtract, Multiply result)
+            # carries a propagated per-channel variance that no spectrum
+            # file format can hold -- the save quietly kept only the counts,
+            # and reloading the file will re-assume Poisson uncertainties
+            # read off them. That silent downgrade is exactly what the
+            # variance propagation exists to prevent, so say it happened
+            # rather than let a later analysis trust the wrong error bars.
+            QMessageBox.information(
+                self, "Save Spectrum",
+                "Saved counts only. This spectrum carries propagated "
+                "uncertainties (it is a derived spectrum), and no spectrum "
+                "file format stores them -- reloading the saved file will "
+                "assume Poisson uncertainties from the counts instead, "
+                "which are not the ones this spectrum carries now.",
             )
 
     def _on_theme_toggled(self, checked):

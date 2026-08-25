@@ -1907,6 +1907,67 @@ def test_rebin_rebins_the_propagated_variance_to_match(qapp):
     assert np.allclose(spectrum.variance, 320.0)  # two 160.0 channels added
 
 
+def test_saving_a_derived_spectrum_says_the_variance_is_not_saved(qapp, tmp_path, monkeypatch):
+    """No spectrum file format stores a propagated variance, so saving a
+    derived spectrum quietly keeps only the counts and a reload
+    re-assumes Poisson -- the exact silent downgrade the variance
+    propagation exists to prevent. The save still happens; the user is
+    told what it kept."""
+    main_window = MainWindow()
+    spectrum = _derived_spectrum(main_window)
+    infos = []
+    monkeypatch.setattr(
+        "main_window.QMessageBox.information",
+        lambda *a, **k: infos.append(a) or None,
+    )
+
+    main_window._write_spectrum(spectrum, str(tmp_path / "out.spe"), "SPE files (*.spe)")
+
+    assert (tmp_path / "out.spe").exists()  # the save itself still happened
+    assert len(infos) == 1
+    assert "Saved counts only" in infos[0][2]
+
+
+def test_saving_a_plain_spectrum_shows_no_variance_note(qapp, tmp_path, monkeypatch):
+    """A file-loaded spectrum's counts ARE its full description -- the
+    note would be noise there."""
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    infos = []
+    monkeypatch.setattr(
+        "main_window.QMessageBox.information",
+        lambda *a, **k: infos.append(a) or None,
+    )
+
+    main_window._write_spectrum(spectrum, str(tmp_path / "out.spe"), "SPE files (*.spe)")
+
+    assert (tmp_path / "out.spe").exists()
+    assert infos == []
+
+
+def test_failed_save_of_a_derived_spectrum_shows_no_variance_note(qapp, tmp_path, monkeypatch):
+    """The note reports what a SUCCESSFUL save kept; a failed save kept
+    nothing, and claiming otherwise would be wrong twice over."""
+    main_window = MainWindow()
+    spectrum = _derived_spectrum(main_window)
+    infos, warnings = [], []
+    monkeypatch.setattr(
+        "main_window.QMessageBox.information",
+        lambda *a, **k: infos.append(a) or None,
+    )
+    monkeypatch.setattr(
+        "main_window.QMessageBox.warning",
+        lambda *a, **k: warnings.append(a) or None,
+    )
+    blocked = tmp_path / "blocked.spe"
+    blocked.mkdir()  # opening a directory for writing raises OSError
+
+    main_window._write_spectrum(spectrum, str(blocked), "SPE files (*.spe)")
+
+    assert len(warnings) == 1
+    assert infos == []
+
+
 def test_rebinned_derived_spectrum_can_still_be_fitted(qapp):
     """The user-visible symptom the length mismatch caused: fit_peaks
     rejects a variance whose length does not match the spectrum, so a
