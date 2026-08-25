@@ -177,6 +177,18 @@ def test_malformed_json_is_refused_with_the_path(tmp_path):
         fit_persist.load(path)
 
 
+def test_a_binary_file_is_refused_not_crashed_on(tmp_path):
+    """Picking a binary file (an installer, a .mtx, a .root) in the Load
+    Fits dialog fails DECODING before json ever parses -- and the dialog
+    catches only FitFileError, so an uncaught UnicodeDecodeError here
+    crashed the whole app. Bytes chosen to be invalid UTF-8 from the
+    first read."""
+    path = tmp_path / "binary.json"
+    path.write_bytes(b"\xff\xfe\x00\x01" + bytes(range(256)))
+    with pytest.raises(FitFileError, match="not UTF-8 text"):
+        fit_persist.load(path)
+
+
 # --- refit -------------------------------------------------------------
 
 

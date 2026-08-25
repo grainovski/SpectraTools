@@ -158,6 +158,12 @@ def load(path):
             document = json.load(f)
     except json.JSONDecodeError as exc:
         raise FitFileError(f"Not a valid fit file: {path} ({exc})") from exc
+    except UnicodeDecodeError as exc:
+        # A binary file (an installer, a .mtx, a .root) picked in the Load
+        # Fits dialog fails DECODING before json ever sees it -- and the
+        # dialog catches only FitFileError, so this used to crash the app.
+        # Same guard calibration.read_coefficients_file already carries.
+        raise FitFileError(f"Not a valid fit file (not UTF-8 text): {path}") from exc
     except OSError as exc:
         raise FitFileError(f"Could not read {path}: {exc}") from exc
 
