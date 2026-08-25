@@ -6,7 +6,13 @@ in git, and the release toolchain is external. This is the full list, in the
 order it is worth doing.
 
 Written when moving from the machine that produced v4.1.0 (2026-08-19);
-refreshed after v4.1.1 (2026-08-22).
+refreshed after v4.1.2 (2026-08-24).
+
+For the migration procedure itself — what to package up on the machine you
+are leaving, and the much shorter path for a machine that has had this
+project before — see `docs/MIGRATION-FIRST-TIME.md` and
+`docs/MIGRATION-RETURNING.md`. This document is the environment reference
+those two point at.
 
 ## 1. What the clone gives you
 
@@ -16,7 +22,7 @@ cd SpectraTools
 ```
 
 That brings the application, the tests, the packaging scripts, the docs, and
-all 17 tags (`v1.0.0` … `v4.1.1`). The repository is the source of truth for
+all 18 tags (`v1.0.0` … `v4.1.2`). The repository is the source of truth for
 everything under version control.
 
 **`master` is not always the released state.** Work is sometimes committed
@@ -64,7 +70,7 @@ change to this project is a change to a file git already knows about.
 
 ## 3. Python environment
 
-Python 3.13 on Windows is what the last release was built with (3.13.15).
+Python 3.13 on Windows is what the last release was built with (3.13.x).
 
 ```bash
 python -m venv .venv
@@ -150,7 +156,7 @@ pruned locally once verified recoverable, so only the current and previous
 release are usually present. Every published build is on GitHub:
 
 ```bash
-gh release download v4.1.1 --dir releases/v4.1.1
+gh release download v4.1.2 --dir releases/v4.1.2
 ```
 
 `gh` needs `gh auth login` on the new machine; the device-authorisation step
