@@ -375,14 +375,19 @@ def write_csv(path, results, spectrum_path, calibration=None):
 
 
 def _latex_escape(text):
-    """LaTeX has five characters that are syntax rather than text, and a
-    spectrum path is very likely to contain underscores."""
-    for character, replacement in (
-        ("\\", r"\textbackslash{}"), ("&", r"\&"), ("%", r"\%"),
-        ("$", r"\$"), ("#", r"\#"), ("_", r"\_"), ("{", r"\{"), ("}", r"\}"),
-    ):
-        text = text.replace(character, replacement)
-    return text
+    """LaTeX has characters that are syntax rather than text, and a
+    spectrum path is very likely to contain underscores.
+
+    Escaped in ONE pass over the input, not sequential str.replace
+    calls: the backslash's own replacement contains braces, and the
+    later brace-escaping pass mangled it into \\textbackslash\\{\\} --
+    the classic ordering bug. A single pass never rescans its own
+    output, so no ordering exists to get wrong."""
+    replacements = {
+        "\\": r"\textbackslash{}", "&": r"\&", "%": r"\%",
+        "$": r"\$", "#": r"\#", "_": r"\_", "{": r"\{", "}": r"\}",
+    }
+    return "".join(replacements.get(character, character) for character in text)
 
 
 def _latex_cell(value, err, digits=4):

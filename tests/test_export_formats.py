@@ -145,6 +145,22 @@ def test_latex_escapes_characters_that_are_syntax(tmp_path):
     assert "my_run" not in comment
 
 
+def test_latex_escape_handles_backslashes_and_braces_together():
+    """The old sequential-replace version escaped the backslash FIRST,
+    then the brace pass mangled its own insertion into
+    \\textbackslash\\{\\} -- the classic ordering bug, latent because no
+    current caller feeds it a backslash. A single pass never rescans its
+    own output. A Windows path is exactly where a backslash would come
+    from."""
+    from fit_export import _latex_escape
+
+    assert _latex_escape("a\\b") == r"a\textbackslash{}b"
+    assert _latex_escape("{x}") == r"\{x\}"
+    assert _latex_escape("C:\\runs\\{gg}_1.mtx") == (
+        r"C:\textbackslash{}runs\textbackslash{}\{gg\}\_1.mtx"
+    )
+
+
 def test_latex_omits_an_undetermined_uncertainty_rather_than_printing_nan(tmp_path):
     path = tmp_path / "nan.tex"
     fit_export.write_latex(path, [(1, _fit([_peak(area_err=float("nan"))]))], "s.txt")
