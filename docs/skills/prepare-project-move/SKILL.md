@@ -196,18 +196,63 @@ Then write `MIGRATION-MANIFEST.json` next to the archives:
 ```
 
 Checksum every archive (`sha256sum`) so the far end can prove the transfer
-was clean rather than hoping.
+was clean rather than hoping. Write them to a `SHA256SUMS.txt` in the same
+format `sha256sum -c` expects, so verifying on arrival is one command
+rather than a manual comparison.
 
-### 7. Hand off
+Compression is worth a moment's thought on the big archive: installers,
+media and other already-compressed payloads gain nothing from gzip and can
+add minutes. Plain `tar` for those, and name the file `.tar` so it is
+obvious.
+
+### 7. Ship the skills themselves, and write a human entry point
+
+Two things are easy to forget precisely because you have them and the
+receiving machine does not.
+
+**The skills do not travel.** They live in the user's profile
+(`~/.claude/skills/`), not in the project, so a new computer has none of
+them — including the one that would tell it how to receive this migration.
+Copy the migration skills into the handoff folder alongside the archives.
+Without this, the archives arrive with nothing that knows what to do
+with them.
+
+**The manifest is machine-readable, not human-readable.** Write a short
+`START-HERE.md` next to it, addressed to a person sitting at the receiving
+machine with no context. It should cover: what each file in the folder is
+and how big; that installing the skills is step zero, with the exact target
+path for their OS and a way to confirm it worked; how to tell which
+scenario they are in; **the literal sentence to type**, including the path
+to the handoff folder, since that is the one thing the assistant cannot
+guess; what the assistant will do versus what it will ask of them; the
+expected test result and what a smaller number means; and a by-hand
+fallback if no assistant is available.
+
+Both of these came out of running this skill for real: the archives were
+correct and complete, and would still have arrived at a machine with no
+skills installed and no plain-language instructions.
+
+### 8. Hand off
 
 State clearly what you did and what only the user can do. You cannot move
 bytes between machines; they can.
 
 Report: each archive with its size and one-line purpose, the total to
 transfer, anything flagged as irreplaceable, and any credentials you
-deliberately did not archive. Then give the concrete next step — copy these
-N files plus the manifest to the USB stick / cloud folder, and on the other
-machine run `migrate-project-first-time` or `migrate-project-returning`.
+deliberately did not archive. Then give the concrete next step — copy this
+folder to the USB stick / cloud drive, and on the other machine open
+`START-HERE.md` and follow it.
+
+Verify the copy at its destination rather than trusting that it worked:
+re-run `sha256sum -c SHA256SUMS.txt` there, and open each archive
+(`tar -tzf`) to confirm it is readable with the expected number of entries.
+A truncated cloud-sync or USB write passes a size check and fails much
+later, in a way that looks like a project problem rather than a transfer
+one.
+
+If the destination is a cloud folder, say plainly that the files exist on
+local disk immediately but are not retrievable from another machine until
+the sync client reports finished.
 
 If a cloud-sync folder is present on the machine, offer to copy the archives
 there rather than making them do it by hand.
