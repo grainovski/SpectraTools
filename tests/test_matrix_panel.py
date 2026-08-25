@@ -178,6 +178,60 @@ def test_matrix_panel_activate_cut_result_matches_direct_computation(qapp):
     assert added.data == pytest.approx(expected)
 
 
+def test_matrix_panel_activate_cut_names_the_span_independent_of_marking_order(qapp):
+    """The auto-log stem is named for the SPAN the gates cover; it used
+    to read gates[0][0]/gates[-1][1] in MARKING order, so the same two
+    gates marked in the other order produced a different stem (e.g.
+    _cut_3000_600 vs _cut_500_3100) and scattered one logical cut's fit
+    logs across two files. min/max over all bounds is order-blind."""
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    # High-channel gate marked FIRST -- the order the old naming got wrong.
+    panel.cut_controller.state.cut_regions = [(3000.0, 3100.0), (500.0, 600.0)]
+    panel._activate_cut()
+
+    added = main_window.spectra[-1]
+    assert os.path.basename(added.path) == "gg_x_cut_500_3100_x2.mtx"
+
+
+def test_matrix_panel_log_scale_action_shares_the_main_windows_gesture(qapp):
+    """A projection is a spectrum view; Log scale Y was the one view
+    control with no counterpart here. Same key, same checkable toggle."""
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    assert panel.log_scale_action.isCheckable() is True
+    assert panel.log_scale_action.shortcut().toString() == "Ctrl+Y"
+    assert panel.log_scale_action in panel.nav_toolbar.actions()
+
+
+def test_matrix_panel_log_scale_toggle_switches_yscale_and_floors_positive(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    assert panel.axes.get_yscale() == "linear"
+
+    panel.log_scale_action.setChecked(True)
+
+    assert panel.axes.get_yscale() == "log"
+    # A projection routinely holds zero-count channels; a non-positive
+    # bottom bound would make the log axis silently ignore set_ylim.
+    assert panel.axes.get_ylim()[0] > 0
+
+    panel.log_scale_action.setChecked(False)
+    assert panel.axes.get_yscale() == "linear"
+
+
+def test_matrix_panel_log_scale_toggle_preserves_the_current_view(qapp):
+    main_window = MainWindow()
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    panel.axes.set_xlim(100.0, 500.0)
+
+    panel.log_scale_action.setChecked(True)
+
+    assert panel.axes.get_xlim() == (100.0, 500.0)
+
+
 def test_matrix_panel_activate_cut_label_includes_working_axis(qapp):
     # An X-gated cut and a Y-gated cut at the same nominal region bounds
     # are physically different results (compute_cut indexes by the

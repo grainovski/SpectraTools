@@ -252,6 +252,16 @@ class MatrixPanel(GoToMixin, QMainWindow):
         self.goto_action.triggered.connect(self.open_goto_dialog)
         self.nav_toolbar.addAction(self.goto_action)
 
+        self.log_scale_action = QAction("Log scale Y", self)
+        # Same key and behaviour as the main window's View-menu toggle --
+        # the one view control that had no counterpart here, despite the
+        # rule the rest of this toolbar already follows: a projection is a
+        # spectrum view and must not behave differently.
+        self.log_scale_action.setShortcut("Ctrl+Y")
+        self.log_scale_action.setCheckable(True)
+        self.log_scale_action.toggled.connect(self._on_log_scale_toggled)
+        self.nav_toolbar.addAction(self.log_scale_action)
+
         self.full_view_action = QAction("Full View", self)
         self.full_view_action.setShortcut("Ctrl+0")
         self.full_view_action.triggered.connect(self._show_full_view)
@@ -596,8 +606,19 @@ class MatrixPanel(GoToMixin, QMainWindow):
         window = spectrum.data[lo_bound:hi_bound]
         y_min = float(np.min(window))
         y_max = float(np.max(window))
-        margin = (y_max - y_min) * 0.05 or 1.0
-        self.axes.set_ylim(y_min - margin, y_max + margin)
+        if self.log_scale_action.isChecked():
+            # Same floor as main_window._autoscale_y: a log-scaled axis
+            # silently ignores set_ylim() with a non-positive bound, and a
+            # projection routinely holds zero-count channels.
+            y_min = max(y_min, 1.0)
+            y_max = max(y_max, y_min * 1.1)
+            self.axes.set_ylim(y_min / 1.1, y_max * 1.1)
+        else:
+            margin = (y_max - y_min) * 0.05 or 1.0
+            self.axes.set_ylim(y_min - margin, y_max + margin)
+
+    def _on_log_scale_toggled(self, checked):
+        self._plot_data(preserve_view=True)
 
     def _on_axis_changed(self, index):
         self.working_axis = self.axis_selector.itemData(index)
@@ -639,6 +660,7 @@ class MatrixPanel(GoToMixin, QMainWindow):
         self.draw_goto_marker()
         self.axes.set_xlabel("Energy (keV)" if self._calibration_active else f"{self.working_axis.upper()} channel")
         self.axes.set_ylabel("Counts")
+        self.axes.set_yscale("log" if self.log_scale_action.isChecked() else "linear")
         self.axes.set_xlim(xlim)
         self._autoscale_y(xlim)
         self.canvas.draw()
@@ -720,9 +742,15 @@ class MatrixPanel(GoToMixin, QMainWindow):
         # the comment above exists for.
         gates = state.cut_regions
         suffix = f"_x{len(gates)}" if len(gates) > 1 else ""
+        # min/max over ALL gate bounds, not first-marked/last-marked: the
+        # list is in marking order, so gates[0]/gates[-1] named the same
+        # logical cut differently depending on which gate was clicked
+        # first, scattering its auto-log across two files.
+        span_lo = min(lo for lo, _hi in gates)
+        span_hi = max(hi for _lo, hi in gates)
         path = (
             f"{root}_{self.working_axis}_cut_"
-            f"{round(gates[0][0])}_{round(gates[-1][1])}{suffix}{ext}"
+            f"{round(span_lo)}_{round(span_hi)}{suffix}{ext}"
         )
         self.main_window._add_combined_spectrum(path, result, variance=variance)
 
