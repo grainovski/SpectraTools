@@ -92,6 +92,17 @@ def load(path):
         return None
     if matrix.ndim != 2:
         return None
+    try:
+        # Stamp recency explicitly. The prune sorts by st_atime, but NTFS
+        # last-access updates are disabled or lazily batched on many
+        # Windows systems, so reads alone may never refresh it -- degrading
+        # "least recently USED" to "oldest CREATED", which evicts exactly
+        # the daily-driver matrix the cache exists for. utime sets both
+        # atime and mtime to now, portably. Best-effort like everything
+        # else here: a hit that cannot be stamped is still a hit.
+        os.utime(target)
+    except OSError:
+        pass
     return matrix
 
 

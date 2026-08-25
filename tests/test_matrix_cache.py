@@ -41,6 +41,27 @@ def test_a_miss_returns_none_rather_than_raising(cache_home, source):
     assert matrix_cache.load(str(source)) is None
 
 
+def test_a_hit_stamps_the_cache_entry_as_recently_used(cache_home, source):
+    """The prune evicts by st_atime, but NTFS last-access updates are
+    disabled or lazily batched on many Windows systems, so reads alone
+    may never refresh it -- degrading LRU to oldest-CREATED, which
+    evicts exactly the daily-driver matrix the cache exists for. load()
+    therefore stamps the entry explicitly (os.utime), which works on
+    every platform whatever the filesystem's atime policy."""
+    matrix_cache.store(str(source), np.zeros((4, 4), dtype=np.int64))
+    entry = matrix_cache.cached_path(str(source))
+
+    long_ago = 1_000_000_000  # 2001, unambiguously stale
+    os.utime(entry, (long_ago, long_ago))
+    assert os.stat(entry).st_atime == pytest.approx(long_ago, abs=2)
+
+    assert matrix_cache.load(str(source)) is not None
+
+    stamped = os.stat(entry)
+    assert stamped.st_atime > long_ago + 1_000_000
+    assert stamped.st_mtime > long_ago + 1_000_000
+
+
 def test_editing_the_source_invalidates_the_cache(cache_home, source):
     """The failure this guards against: re-sorting a matrix from the same
     run writes a NEW file at the SAME path, and a path-only key would
