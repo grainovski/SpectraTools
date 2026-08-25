@@ -1044,6 +1044,68 @@ def test_double_click_reloads_a_committed_fit_for_editing(qapp):
     assert reloaded_table.cellWidget(0, 2).isChecked() is False  # amplitude was free
 
 
+def test_double_click_restores_a_fitted_background_result_in_its_own_mode(qapp):
+    """fit_background is the third mode flag a stored fit carries, and it
+    used to be the one flag double-click did NOT restore: the panel came
+    back without its bg_c0/bg_c1 rows, the checkbox kept whatever the
+    previous fit used, and a refit from that panel silently ran in the
+    other background mode -- different areas and uncertainties than the
+    fit the user asked to revisit."""
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    main_window.fit_background_action.setChecked(True)
+    main_window.fit_controller.run_fit()
+    assert main_window.spectra[0].fits[-1].fit_background is True
+
+    # The user moves on: unchecks the mode, clears the marks.
+    main_window.fit_background_action.setChecked(False)
+    main_window.fit_controller.reset_marks()
+
+    item = main_window.fit_controller.results_table.item(0, 0)
+    main_window.fit_controller._on_result_double_clicked(item)
+
+    assert main_window.fit_background_action.isChecked() is True
+    # The panel shows the fitted-background parameter set, bg rows included.
+    names = main_window.fit_controller._parameter_names_shown
+    assert names == ["amp_0", "pos_0", "sigma", "bg_c0", "bg_c1"]
+    assert main_window.fit_controller.parameters_table.rowCount() == 5
+
+
+def test_double_click_restores_a_plain_fit_with_the_background_mode_off(qapp):
+    """The converse direction: a stale checked box must be cleared when
+    the restored fit did NOT fit its background."""
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+
+    _held_key_click(main_window, "b", 70)
+    _held_key_click(main_window, "b", 85)
+    _held_key_click(main_window, "b", 115)
+    _held_key_click(main_window, "b", 130)
+    _held_key_click(main_window, "r", 85)
+    _held_key_click(main_window, "r", 115)
+    _held_key_click(main_window, "p", 100)
+    assert main_window.fit_background_action.isChecked() is False
+    main_window.fit_controller.run_fit()
+
+    main_window.fit_background_action.setChecked(True)  # user toggles it later
+    main_window.fit_controller.reset_marks()
+
+    item = main_window.fit_controller.results_table.item(0, 0)
+    main_window.fit_controller._on_result_double_clicked(item)
+
+    assert main_window.fit_background_action.isChecked() is False
+    names = main_window.fit_controller._parameter_names_shown
+    assert names == ["amp_0", "pos_0", "sigma"]
+
+
 def test_double_click_reloads_a_zero_background_integration_result_without_crashing(qapp):
     main_window = MainWindow()
     spectrum = _make_active_spectrum(main_window)

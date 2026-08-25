@@ -1360,9 +1360,16 @@ class FitModeController(QObject):
 
         self.main_window.independent_widths_action.setChecked(not result.link_widths)
         self.main_window.left_tail_action.setChecked(result.tail_fraction is not None)
+        # The third mode flag, restored like the other two. Leaving it out
+        # meant double-clicking a fitted-background result showed the panel
+        # WITHOUT its bg_c0/bg_c1 rows and left the checkbox on whatever the
+        # previous fit used -- so a refit from that panel silently ran in
+        # the other background mode.
+        self.main_window.fit_background_action.setChecked(result.fit_background)
 
         names = parameter_names(
-            len(result.peaks), result.link_widths, result.tail_fraction is not None
+            len(result.peaks), result.link_widths, result.tail_fraction is not None,
+            result.fit_background,
         )
         self._parameter_names_shown = []  # force a full rebuild below
         self.update_parameters_panel(names, fit_result_values_by_name(result))
