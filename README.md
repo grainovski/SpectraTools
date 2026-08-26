@@ -8,17 +8,33 @@ See `CHANGELOG.md` for what's new in each release.
 
 ## Installing
 
-Pre-built releases are under `releases/`, one subdirectory per version
-(e.g. `releases/v3.0.0/`). Check that directory for the latest, or see
-`CHANGELOG.md` for the release history. Pick your platform:
+Every release is published on the project's GitHub Releases page with
+installers for both platforms, the changelog, per-platform install
+instructions, and a `SHA256SUMS.txt` for verifying what you downloaded.
+See `CHANGELOG.md` for the release history. Pick your platform:
 
 ### Windows
 
 Requires **Windows 10 or later** (Qt6, which this app is built on,
-doesn't support Windows 7/8). Run the installer inside the latest
-release directory (e.g. `SpectraTools-v3.0.0-Setup.exe` in
-`releases/v3.0.0/`) and follow the installer. No other prerequisites —
-everything the app needs is bundled.
+doesn't support Windows 7/8). Download
+`SpectraTools-v<version>-Setup.exe` from the release page and run it —
+no other prerequisites, everything the app needs is bundled.
+
+**Windows will warn you that the publisher is unknown.** It is right:
+the installer is not code-signed. That warning appears for any unsigned
+program whatever it does, and says nothing about whether this particular
+file is genuine. Click **More info → Run anyway** — and rather than
+trusting the dialog either way, verify the download against the
+published checksum:
+
+```powershell
+Get-FileHash -Algorithm SHA256 .\SpectraTools-v<version>-Setup.exe
+```
+
+and compare it with the matching line in the release's
+`SHA256SUMS.txt`. See `packaging/windows/INSTALL.md` for the full
+instructions, including a per-user install without an administrator
+prompt, and why the first launch is slower than every launch after it.
 
 ### Linux
 
@@ -28,13 +44,12 @@ supported — PySide6, the Qt6 binding this app uses, stopped publishing
 wheels compatible with that old a glibc after version 6.2.4 (2021), and
 that's an upstream constraint no packaging choice here can work around.
 
-Install the `.deb` or `.rpm` from the latest release directory — the
-commands below show v3.0.0 as an example; substitute whatever version
-you actually have:
+Install the `.deb` or `.rpm` from the release page — the commands below
+show 4.2.1 as an example; substitute whatever version you actually have:
 
 ```
-sudo apt install ./spectratools_3.0.0_amd64.deb      # Debian/Ubuntu
-sudo dnf install ./spectratools-3.0.0-1.x86_64.rpm    # RHEL/CentOS/AlmaLinux/Rocky
+sudo apt install ./spectratools_4.2.1_amd64.deb      # Debian/Ubuntu
+sudo dnf install ./spectratools-4.2.1-1.x86_64.rpm    # RHEL/CentOS/AlmaLinux/Rocky
 ```
 
 Both automatically install any missing runtime libraries as part of the

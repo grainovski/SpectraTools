@@ -4,6 +4,42 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [4.2.1] - 2026-08-26
+
+A Windows packaging and documentation release. No change to the
+application itself — the Linux packages are functionally identical to
+4.2.0, and are rebuilt only so every platform carries the same version
+number.
+
+### Changed
+
+- **The Windows build ships as a directory rather than a single-file
+  executable.** The old `--onefile` build unpacked its entire ~108 MB
+  bundle into a temporary folder on *every* launch, with nothing cached
+  between runs — a cost the Linux packages never paid, because they were
+  already built this way. Repeat launches are now quicker, and the app no
+  longer looks like a self-extracting archive to antivirus software,
+  which is a shape scanners treat with suspicion. The installer hides the
+  difference: it installs and uninstalls exactly as before.
+- **The Windows installer download is substantially smaller**, now that
+  it compresses its contents. The previous single-file build was already
+  compressed internally, so compressing the installer too would have
+  gained nothing; a directory of loose runtime files compresses well.
+
+### Added
+
+- **Windows install instructions** (`packaging/windows/INSTALL.md`),
+  shipped with each release. They explain the "unknown publisher"
+  warning Windows shows — what it does and does not mean, and how to get
+  past it — how to install without an administrator prompt, and why the
+  very first launch is slower than every launch after it (Windows
+  Defender's initial scan and a one-time font-cache build, neither of
+  which recurs).
+- **A `SHA256SUMS.txt` with every release**, so a download can be checked
+  against the file that was actually published. Since the installer is
+  not code-signed, this is the meaningful integrity check — and unlike a
+  signature prompt, it detects a corrupted or altered download.
+
 ## [4.2.0] - 2026-08-26
 
 Everything in this release comes out of a full audit of the codebase —
