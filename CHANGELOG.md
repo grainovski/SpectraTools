@@ -4,6 +4,69 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [4.2.0] - 2026-08-26
+
+Everything in this release comes out of a full audit of the codebase —
+13 findings across correctness, stability and polish, each fixed with its
+own regression test, plus randomised sweeps (including the first-ever
+sweep of the fitted-background mode: 200 cases, no violations) and a
+leak-regression check confirming repeated matrix-panel open/close stays
+flat.
+
+### Fixed
+
+- **Multiply and Normalize now propagate uncertainties correctly for
+  file-loaded spectra.** Scaling a spectrum's counts by a factor *f* left
+  later fits and integrations reading the scaled counts as plain Poisson
+  data, which misstates the variance by exactly *f* — every error bar and
+  reduced χ² on a multiplied or normalized spectrum was off by √f, with no
+  warning. The uncertainty is now derived from the pre-scale counts and
+  scaled with the data. Multiplying by exactly 1 changes nothing, as it
+  should.
+- **Double-clicking a stored fit restores its "Fit background" mode.** It
+  used to restore the other two mode flags but not this one, so the
+  parameters panel came back without its background rows and a refit
+  silently ran in the wrong background mode — producing different areas
+  and uncertainties than the fit being revisited.
+- **A ROOT histogram bin holding a value too large for a 64-bit count is
+  refused with a clear message** instead of silently wrapping to a
+  meaningless number on import. (Non-finite bins were already refused.)
+- Three crashes from ordinary input are gone: picking a binary file in
+  **Load Fits…**, typing `nan`/`inf` — or, with a quadratic calibration
+  active, an energy the calibration cannot reach — into the **Fit
+  Parameters** panel, and opening an N42 file whose calibration reference
+  contains an apostrophe or bracket (legal XML).
+- **The heatmap's axes now tick in real channel numbers.** On large
+  matrices the display is downsampled, and the axis labels used to show
+  the downsampled indices while saying "channel" — off by 8× on an
+  8192-channel matrix.
+- The Energy Assignment dialog names the offending row when an energy is
+  entered as `nan`/`inf`, instead of failing later with a message about
+  the whole calibration.
+- Activating the same multi-gate cut always produces the same auto-log
+  file name regardless of the order the gates were marked in; previously
+  each marking order got its own file, splitting one cut's fit log.
+
+### Added
+
+- **Log scale Y in the matrix panel**, on the same Ctrl+Y as the main
+  window — the one view control the projection view was missing.
+- **Saving a derived spectrum now says what was saved.** No spectrum file
+  format stores propagated uncertainties, so saving a matrix cut or an
+  Add/Subtract result keeps only the counts — and reloading the file
+  re-assumes Poisson uncertainties. A note after such a save says so;
+  saving an ordinary file-loaded spectrum is unchanged.
+
+### Internal
+
+- The decoded-matrix disk cache marks an entry as recently used on every
+  hit, so its least-recently-used eviction works even where the
+  filesystem never updates access times (common on Windows/NTFS).
+- LaTeX export escaping is a single pass and can no longer mangle
+  backslashes; the fit-plausibility, calibration round-trip, codec
+  round-trip and integration self-consistency sweeps were all extended
+  and ran clean.
+
 ## [4.1.2] - 2026-08-24
 
 ### Changed

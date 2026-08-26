@@ -6,7 +6,7 @@ in git, and the release toolchain is external. This is the full list, in the
 order it is worth doing.
 
 Written when moving from the machine that produced v4.1.0 (2026-08-19);
-refreshed after v4.1.2 (2026-08-24).
+refreshed after v4.2.0 (2026-08-26).
 
 For the migration procedure itself — what to package up on the machine you
 are leaving, and the much shorter path for a machine that has had this
@@ -22,7 +22,7 @@ cd SpectraTools
 ```
 
 That brings the application, the tests, the packaging scripts, the docs, and
-all 18 tags (`v1.0.0` … `v4.1.2`). The repository is the source of truth for
+all 19 tags (`v1.0.0` … `v4.2.0`). The repository is the source of truth for
 everything under version control.
 
 **`master` is not always the released state.** Work is sometimes committed
@@ -88,12 +88,16 @@ Verify:
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expect **1129 passed, 0 failed** (as of v4.1.2). No test needs deselecting
+Expect **1154 passed, 0 failed** (as of v4.2.0). No test needs deselecting
 any more: the decode-speed guard used to assert an absolute wall-clock bound
 calibrated on one machine and failed on slower hardware with no regression
 present, but it now times the decoder against a frozen copy of the
 pre-optimization implementation in the same process and asserts a ratio,
-which holds anywhere.
+which holds anywhere. One caveat remains: the ratio's two timing windows
+run back-to-back, so sustained background load (an overnight maintenance
+scan, say) covering only the first window can false-fail it. If it is the
+lone failure of a long unattended run, re-run just that test on the idle
+machine before believing it.
 
 **Budget real time for it.** The Qt and matrix tests dominate: a full run
 took just over three hours on the machine this was last measured on, and
@@ -105,8 +109,8 @@ while iterating.
 `tests/test_root_io.py` and `tests/test_root_ui.py` open with
 `pytest.importorskip("uproot")`, so a virtualenv predating v4.0.0 — when
 `uproot` was added to `requirements.txt` — silently collects 30 fewer tests
-and still reports all-passed. If the count comes out at 1099 rather than
-1129, that is this, and the fix is to re-run the install step above. Note
+and still reports all-passed. If the count comes out 30 short (1124 rather
+than 1154), that is this, and the fix is to re-run the install step above. Note
 the Windows build needs `uproot` too: `build.ps1` passes
 `--collect-all awkward_cpp`, which fails outright without it.
 
@@ -156,7 +160,7 @@ pruned locally once verified recoverable, so only the current and previous
 release are usually present. Every published build is on GitHub:
 
 ```bash
-gh release download v4.1.2 --dir releases/v4.1.2
+gh release download v4.2.0 --dir releases/v4.2.0
 ```
 
 `gh` needs `gh auth login` on the new machine; the device-authorisation step
