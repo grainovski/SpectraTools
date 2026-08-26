@@ -75,7 +75,11 @@ fi
 # || true: without it, a failed/empty grep here triggers errexit under
 # pipefail before the -z check below ever runs (verified) -- this lets
 # that check do its job as intended.
-VERSION="$(grep '^AppVersion=' "$ROOT_DIR/packaging/windows/installer.iss" | head -1 | sed 's/^AppVersion=//' | tr -d '\r')" || true
+# Reads the #define, NOT the [Setup] AppVersion= line -- installer.iss uses
+# Inno's preprocessor, so that line holds the literal '{#AppVersion}'.
+# Matching it produced 'Version: {#AppVersion}' and a hard rpmbuild parse
+# failure. build.ps1 carries the same parse; all three must agree.
+VERSION="$(grep -E '^#define[[:space:]]+AppVersion' "$ROOT_DIR/packaging/windows/installer.iss" | head -1 | sed -E 's/^#define[[:space:]]+AppVersion[[:space:]]+"?([^"]*)"?.*/\1/' | tr -d '\r')" || true
 if [ -z "$VERSION" ]; then
     echo "Could not find AppVersion in packaging/windows/installer.iss" >&2
     exit 1

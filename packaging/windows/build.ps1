@@ -6,9 +6,14 @@ if (-not (Test-Path "$root/assets/icon.ico")) {
     & "$root/.venv/Scripts/python.exe" "$root/packaging/make_icon.py"
 }
 
-$versionMatch = Select-String -Path "$root/packaging/windows/installer.iss" -Pattern '^AppVersion=(.+)$'
+# Reads the #define, NOT the [Setup] AppVersion= line: since installer.iss
+# moved to Inno's preprocessor, that line reads the literal '{#AppVersion}'
+# and a '^AppVersion=' match would stamp that string into build_info.py --
+# silently, since ISCC itself resolves the define just fine. The same parse
+# lives in packaging/linux/build.sh and build_deb.sh; all three must agree.
+$versionMatch = Select-String -Path "$root/packaging/windows/installer.iss" -Pattern '^#define\s+AppVersion\s+"(.+)"\s*$'
 if (-not $versionMatch) {
-    throw "Could not find AppVersion in packaging/windows/installer.iss"
+    throw "Could not find a '#define AppVersion' line in packaging/windows/installer.iss"
 }
 # Escaped before embedding below: AppVersion is developer-edited (e.g. a
 # stray quote from accidentally quoting the value) and gets embedded
@@ -35,27 +40,13 @@ BUILD_DATE = "$buildDate"
 )
 Write-Host "Stamped build_info.py: VERSION=$version BUILD_DATE=$buildDate"
 
-# --onefile (vs. Linux's --onedir, see build.sh): originally paired with
-# Inno Setup convenience and, historically, the now-removed AppImage's
-# own AppDir structure on the Linux side. That second reason no longer
-# applies (Linux packaging moved to native .deb/.rpm), but onefile is
-# kept deliberately for Windows: Inno Setup packages a single exe
-# cleanly, and onedir's many loose files would need their own directory
-# layout decision in the installer. Tradeoff: onefile's PyInstaller
-# bootloader re-extracts the whole bundle to a temp dir on every launch
-# (no persistent cache), so Windows cold-starts slower than Linux's
-# onedir build does on equivalent hardware, and onefile executables are
-# a more common antivirus false-positive target. Revisit if startup
-# time or AV false positives become a real user complaint -- see the
-# v3.1.0 audit finding that first raised this.
-# --collect-all awkward_cpp is REQUIRED, not defensive. uproot (the ROOT
-# reader added in v4.0.0) depends on awkward, whose awkward_cpp component
-# loads awkward-cpu-kernels.dll through ctypes. PyInstaller's analysis
-# does not see a ctypes load, so without this the build succeeds and then
-# fails at IMPORT with "Failed to load dynlib/dll ... awkward-cpu-kernels
-# .dll" -- found by building and running a onefile exe, not by reading
-# documentation. Costs about 35 MB.
-& "$root/.venv/Scripts/python.exe" -m PyInstaller --noconfirm --onefile --windowed --collect-all awkward_cpp --name SpectraTools --icon "$root/assets/icon.ico" main.py
+# Build options (onedir, windowed, collect-all awkward_cpp, icon) are in
+# packaging/windows/SpectraTools.spec rather than here, so the spec file
+# is the single source of truth for PyInstaller configuration.
+# NOTE for smoke-testing: a onedir launch is the app itself, so the PID you
+# start IS the app. The onefile-era trick of hunting the bootloader's CHILD
+# process for the real window no longer applies.
+& "$root/.venv/Scripts/python.exe" -m PyInstaller --noconfirm packaging/windows/SpectraTools.spec
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed with exit code $LASTEXITCODE"
 }
