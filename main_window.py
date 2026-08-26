@@ -49,6 +49,7 @@ from histogram_io import ParseError, load_histogram, save_histogram
 from matrix_panel import MatrixPanel
 import matrix_cache
 from mtx_io import load_mtx
+from lzs_io import load_lzs
 from n42_io import load_n42
 from peak_fit import FitError, channel_indices
 from settings import Settings
@@ -1008,8 +1009,9 @@ class MainWindow(GoToMixin, QMainWindow):
             self,
             "Open Histogram",
             self.settings.last_folder(),
-            "Spectrum files (*.txt *.spe *.spk *.n42);;Text files (*.txt);;"
-            "SPE files (*.spe);;SPK files (*.spk);;N42 files (*.n42);;All files (*)",
+            "Spectrum files (*.txt *.spe *.spk *.n42 *.lzs);;Text files (*.txt);;"
+            "SPE files (*.spe);;SPK files (*.spk);;N42 files (*.n42);;"
+            "LZS files (*.lzs);;All files (*)",
         )
         if paths:
             self._load_files(paths)
@@ -1433,6 +1435,8 @@ class MainWindow(GoToMixin, QMainWindow):
                 data = load_spk(path)
             elif lower.endswith(".n42"):
                 data, calibration = load_n42(path)
+            elif lower.endswith(".lzs"):
+                data, calibration = load_lzs(path)
             else:
                 data = load_histogram(path)
         except ParseError as exc:

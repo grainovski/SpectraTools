@@ -42,7 +42,7 @@ Four categories, none of which git carries:
 | Missing | Why it is not tracked | How to restore |
 |---|---|---|
 | Reference C sources (`tv-1.9.13/`, `srcRW/`, `libmfile-1.0.7/`, `hdtv/`) | Third-party upstream code, ~105 MB unpacked | copy `reference-sources.tar.gz`, or re-download from upstream |
-| Sample spectra and matrices (`*.n42`, `*.spk`, `*.spe`, `*.mtx`, `*.root`, `demo.txt`, `test*.txt`) | Measurement data, not source | copy `sample-data.tar.gz` |
+| Sample spectra and matrices (`*.n42`, `*.spk`, `*.spe`, `*.lzs`, `*.mtx`, `*.root`, `demo.txt`, `test*.txt`) | Measurement data, not source | copy `sample-data.tar.gz` |
 | Claude's project memory | Lives under `~/.claude`, outside the repo | copy `claude-memory.tar.gz` — see §6 |
 | `.venv/`, `build_info.py`, `releases/` | Generated | rebuilt by the steps below |
 

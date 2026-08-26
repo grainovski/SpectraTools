@@ -494,10 +494,14 @@ def test_knowledge_database_html_figure_numbers_and_cross_references():
     assert "&sigma;&sup2; = &Sigma;((x&minus;centroid)" in html
 
 
-def test_howto_loading_section_mentions_n42_format():
+def test_howto_loading_section_lists_every_readable_format():
+    """The count in the prose is part of the claim: adding a reader
+    without updating it leaves the page quietly wrong about what the
+    app can open."""
     html = build_howto_html()
-    assert "<b>.n42</b>" in html
-    assert "four supported formats" in html
+    assert "five supported formats" in html
+    for extension in (".txt", ".spe", ".spk", ".n42", ".lzs"):
+        assert f"<b>{extension}</b>" in html
 
 
 def test_howto_saving_section_notes_n42_is_read_only():
@@ -507,6 +511,7 @@ def test_howto_saving_section_notes_n42_is_read_only():
     # elsewhere on the page.
     saving_section = html.split("<h3>3. Saving a spectrum</h3>")[1].split("<h3>")[0]
     assert "<b>.n42</b>" in saving_section
+    assert "<b>.lzs</b>" in saving_section
     assert "read-only" in saving_section
     # Guards against the specific stale claim this test was added to fix:
     # saving no longer supports "the same" formats as reading now that

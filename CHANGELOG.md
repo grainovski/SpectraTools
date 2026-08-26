@@ -6,10 +6,42 @@ when individual pieces of work happened.
 
 ## [4.2.1] - 2026-08-26
 
-A Windows packaging and documentation release. No change to the
-application itself — the Linux packages are functionally identical to
-4.2.0, and are rebuilt only so every platform carries the same version
-number.
+Support for a new spectrum format, plus a Windows packaging and
+documentation overhaul.
+
+### Added
+
+- **`.lzs` spectrum files (labZY / nanoMCA) can now be opened**, from
+  **File > Open...** like any other spectrum. The histogram is read
+  together with the instrument's own two-point energy calibration,
+  which is applied automatically when the file marks it enabled and no
+  calibration is already active -- the same rule an N42 file's
+  calibration follows. Acquisition times, hardware registers and
+  firmware details are ignored, and the format is read-only.
+
+  Two details of the format are worth knowing, because both would
+  quietly corrupt a reading if handled naively. A file's `softsize`
+  field is **not** the number of valid channels: one of the sample
+  files declares 8192 against a hardware size of 16384 while holding
+  99.97% of its counts above channel 8192, so the full histogram is
+  always read. And the files are not strictly valid XML -- every one
+  written by the current firmware closes a tag in its status section
+  with a mismatched name, which a conventional XML reader rejects
+  outright. Each section is therefore read independently, so a defect
+  in a part of the file this app ignores cannot stop the spectrum
+  loading.
+
+- **Windows install instructions** (`packaging/windows/INSTALL.md`),
+  shipped with each release. They explain the "unknown publisher"
+  warning Windows shows — what it does and does not mean, and how to get
+  past it — how to install without an administrator prompt, and why the
+  very first launch is slower than every launch after it (Windows
+  Defender's initial scan and a one-time font-cache build, neither of
+  which recurs).
+- **A `SHA256SUMS.txt` with every release**, so a download can be checked
+  against the file that was actually published. Since the installer is
+  not code-signed, this is the meaningful integrity check — and unlike a
+  signature prompt, it detects a corrupted or altered download.
 
 ### Changed
 
@@ -25,20 +57,6 @@ number.
   it compresses its contents. The previous single-file build was already
   compressed internally, so compressing the installer too would have
   gained nothing; a directory of loose runtime files compresses well.
-
-### Added
-
-- **Windows install instructions** (`packaging/windows/INSTALL.md`),
-  shipped with each release. They explain the "unknown publisher"
-  warning Windows shows — what it does and does not mean, and how to get
-  past it — how to install without an administrator prompt, and why the
-  very first launch is slower than every launch after it (Windows
-  Defender's initial scan and a one-time font-cache build, neither of
-  which recurs).
-- **A `SHA256SUMS.txt` with every release**, so a download can be checked
-  against the file that was actually published. Since the installer is
-  not code-signed, this is the meaningful integrity check — and unlike a
-  signature prompt, it detects a corrupted or altered download.
 
 ## [4.2.0] - 2026-08-26
 

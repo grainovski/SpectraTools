@@ -57,7 +57,7 @@ v4.0.0 ROOT work and is not present on every machine.)
 Measurement data for driving the app by hand. Not needed by the suite.
 
 ```bash
-tar -czf sample-data.tar.gz *.n42 *.spk *.spe *.mtx *.root demo.txt test.txt test1.txt
+tar -czf sample-data.tar.gz *.n42 *.spk *.spe *.lzs *.mtx *.root demo.txt test.txt test1.txt
 ```
 
 ### 1c. Released artifacts — check before assuming they are disposable

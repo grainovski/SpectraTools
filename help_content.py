@@ -194,12 +194,16 @@ that tool drives the left button itself.</p>
 
 <h3>1. Loading a spectrum</h3>
 <p><b>File &gt; Open...</b> (<kbd>Ctrl+O</kbd>) opens a file picker for the
-four supported formats: <b>.txt</b> (one integer count per line, channel
-number implied by line position), <b>.spe</b>, <b>.spk</b>, and
+five supported formats: <b>.txt</b> (one integer count per line, channel
+number implied by line position), <b>.spe</b>, <b>.spk</b>,
 <b>.n42</b> (ANSI/IEEE N42.42; only the raw histogram and, if present,
 the embedded energy calibration are read -- everything else in the file
 is ignored, and an N42 file's calibration is applied automatically only
-when no calibration is already active). Recently opened files also
+when no calibration is already active), and <b>.lzs</b> (labZY /
+nanoMCA; the histogram plus the instrument's own two-point energy
+calibration, which is read only when the file marks it enabled and is
+applied on the same terms as an N42 file's -- acquisition times,
+hardware registers and firmware details are ignored). Recently opened files also
 appear under <b>File &gt; Recent Files</b> for one-click reopening.
 Every spectrum you open stays loaded until you close it -- opening a
 new one adds it alongside the others rather than replacing what's
@@ -235,7 +239,7 @@ spectrum without needing to right-click a specific row.</p>
 <h3>3. Saving a spectrum</h3>
 <p><b>File &gt; Save Spectrum...</b> (<kbd>Ctrl+S</kbd>) saves the active
 spectrum, prompting you to choose one of three formats (.txt/.spe/.spk);
-<b>.n42</b> is read-only and isn't offered here.</p>
+<b>.n42</b> and <b>.lzs</b> are read-only and aren't offered here.</p>
 
 <h3>4. Calibrating the energy axis</h3>
 <p><b>Operations &gt; Calibration...</b> (<kbd>Ctrl+L</kbd>) opens a
