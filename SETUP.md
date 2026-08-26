@@ -6,7 +6,7 @@ in git, and the release toolchain is external. This is the full list, in the
 order it is worth doing.
 
 Written when moving from the machine that produced v4.1.0 (2026-08-19);
-refreshed after v4.2.0 (2026-08-26).
+refreshed after v4.2.1 (2026-08-26).
 
 For the migration procedure itself — what to package up on the machine you
 are leaving, and the much shorter path for a machine that has had this
@@ -22,7 +22,7 @@ cd SpectraTools
 ```
 
 That brings the application, the tests, the packaging scripts, the docs, and
-all 19 tags (`v1.0.0` … `v4.2.0`). The repository is the source of truth for
+all 20 tags (`v1.0.0` … `v4.2.1`). The repository is the source of truth for
 everything under version control.
 
 **`master` is not always the released state.** Work is sometimes committed
@@ -88,7 +88,7 @@ Verify:
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expect **1154 passed, 0 failed** (as of v4.2.0). No test needs deselecting
+Expect **1174 passed, 0 failed** (as of v4.2.1). No test needs deselecting
 any more: the decode-speed guard used to assert an absolute wall-clock bound
 calibrated on one machine and failed on slower hardware with no regression
 present, but it now times the decoder against a frozen copy of the
@@ -109,8 +109,8 @@ while iterating.
 `tests/test_root_io.py` and `tests/test_root_ui.py` open with
 `pytest.importorskip("uproot")`, so a virtualenv predating v4.0.0 — when
 `uproot` was added to `requirements.txt` — silently collects 30 fewer tests
-and still reports all-passed. If the count comes out 30 short (1124 rather
-than 1154), that is this, and the fix is to re-run the install step above. Note
+and still reports all-passed. If the count comes out 30 short (1144 rather
+than 1174), that is this, and the fix is to re-run the install step above. Note
 the Windows build needs `uproot` too: `build.ps1` passes
 `--collect-all awkward_cpp`, which fails outright without it.
 
@@ -160,7 +160,7 @@ pruned locally once verified recoverable, so only the current and previous
 release are usually present. Every published build is on GitHub:
 
 ```bash
-gh release download v4.2.0 --dir releases/v4.2.0
+gh release download v4.2.1 --dir releases/v4.2.1
 ```
 
 `gh` needs `gh auth login` on the new machine; the device-authorisation step
