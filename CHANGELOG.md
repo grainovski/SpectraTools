@@ -58,6 +58,17 @@ documentation overhaul.
   compressed internally, so compressing the installer too would have
   gained nothing; a directory of loose runtime files compresses well.
 
+### Internal
+
+- The Windows bundle is no longer UPX-packed. Packing every executable and
+  DLL re-creates the self-extracting shape that antivirus heuristics treat
+  with suspicion -- which is the same shape leaving the single-file build
+  had just removed, and it matters for an unsigned application, where
+  scanners have little else to judge by. The setting was inert (UPX is not
+  installed on the build machine, so it was silently skipped and no
+  released binary was ever packed), but a setting that only waits for a
+  tool to appear is a trap rather than a preference.
+
 ## [4.2.0] - 2026-08-26
 
 Everything in this release comes out of a full audit of the codebase —
