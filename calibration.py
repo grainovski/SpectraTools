@@ -241,6 +241,36 @@ def from_points(channels, energies, quadratic=False, channel_errors=None):
     )
 
 
+def turning_point(calibration):
+    """The channel at which a quadratic calibration reverses direction,
+    or None when it never does (a line, or c == 0).
+
+    E = a + b*ch + c*ch**2 has dE/dch = b + 2c*ch, which is zero at
+    ch = -b/(2c). Either side of that channel the energy axis runs the
+    opposite way, so a calibration whose turning point falls INSIDE a
+    spectrum's channel range folds that axis back on itself: two
+    different channels share one energy, and converting an energy back
+    to a channel has two answers.
+
+    That is not a hypothetical. `from_points` fits whatever points it is
+    given, and a mistyped energy or a peak assigned to the wrong line can
+    produce a parabola that turns inside the data -- it will still pass
+    through the assigned points, so the coefficients and even the
+    residuals can look reasonable. A randomised sweep of quadratic
+    calibrations hit exactly this: `invert` returned the OTHER branch,
+    which is not a bug in the inversion (both channels genuinely have
+    that energy) but a sign the calibration itself is unusable over the
+    range in question.
+
+    Returned as a plain channel number so the caller can decide what
+    counts as "inside the range" -- this module knows nothing about how
+    many channels any particular spectrum has.
+    """
+    if calibration is None or calibration.c == 0.0:
+        return None
+    return -calibration.b / (2.0 * calibration.c)
+
+
 def residuals(calibration, channels, energies):
     """Assigned energy minus what the calibration predicts, per point.
 

@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from calibration import turning_point
 from calibration_dialog import CalibrationDialog
 from goto_view import GoToMixin
 from combine_dialog import CombineDialog
@@ -635,6 +636,10 @@ class MainWindow(GoToMixin, QMainWindow):
         calibration dialog's OK handler and the toolbar's quick Active
         toggle, so either path keeps the plot, the toolbar button, and
         the Fit Results table in sync."""
+        # Captured before the overwrite below so the fold check can tell a
+        # genuinely NEW calibration from the Active toggle, which passes the
+        # very same object back and must not re-warn on every flip.
+        previous_calibration = self._calibration
         channel_bounds = None
         if self.spectra:
             old_xlim = self.axes.get_xlim()
@@ -668,6 +673,9 @@ class MainWindow(GoToMixin, QMainWindow):
             )
             self._plot_data(xlim_override=new_xlim)
         self.fit_controller.refresh_parameters_panel_calibration()
+        if (new_calibration is not None and new_active
+                and new_calibration is not previous_calibration):
+            self._warn_if_calibration_folds(new_calibration)
         # Calibration is shared with any open MatrixPanel (its
         # _calibration/_calibration_active are properties delegating to
         # these exact attributes, not a separate copy) -- a change made
@@ -1919,6 +1927,44 @@ class MainWindow(GoToMixin, QMainWindow):
         if self._calibration is None or checked == self._calibration_active:
             return
         self._apply_calibration_change(self._calibration, checked)
+
+    def _warn_if_calibration_folds(self, calibration):
+        """Warns when `calibration` reverses direction inside the loaded
+        spectra's channel range, which makes the energy axis fold back on
+        itself: two channels then share one energy, and converting an
+        energy to a channel has two answers rather than one.
+
+        Only reachable with a quadratic. It is worth interrupting for
+        because nothing else about such a calibration looks wrong -- it
+        still passes through every assigned point, so the coefficients
+        and the residuals can both look reasonable while Go To, the
+        keV-space fit parameters and the axis labels quietly disagree
+        about which channel an energy means. A mistyped energy or a peak
+        assigned to the wrong line is enough to produce one.
+
+        Deliberately silent when the turning point lies OUTSIDE the data:
+        a parabola has one everywhere, and a curve that only bends beyond
+        the last channel is an ordinary, perfectly usable calibration.
+        """
+        turning = turning_point(calibration)
+        if turning is None or not self.spectra:
+            return
+        max_channel = max(len(spectrum.data) for spectrum in self.spectra) - 1
+        if not (0.0 <= turning <= max_channel):
+            return
+        QMessageBox.warning(
+            self, "Calibration",
+            f"This calibration reverses direction at channel {turning:.1f}, "
+            f"which is inside the loaded data (0-{max_channel}).\n\n"
+            "Above and below that channel the energy axis runs opposite "
+            "ways, so two different channels share the same energy and "
+            "converting an energy back to a channel is ambiguous. Go To "
+            "and any energy you type into the Fit Parameters panel may "
+            "resolve to the wrong side.\n\n"
+            "A quadratic that turns inside the data usually means one "
+            "assigned energy is wrong, or that the points do not support "
+            "a quadratic -- check the residuals, or fit a line instead.",
+        )
 
     def _build_fit_mode_buttons(self):
         self.fit_button = QAction("Fit", self)

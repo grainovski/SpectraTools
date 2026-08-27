@@ -2100,3 +2100,105 @@ def test_pan_predicate_ignores_presses_outside_the_axes_and_other_buttons():
     event.x = None
     assert pan_button_is_active(
         event, axes, _StubToolbar(), (_StubController(),)) is False
+
+
+# --- folded-calibration warning ----------------------------------------
+
+
+def _folding_calibration():
+    """A quadratic whose vertex lands at channel ~100 -- inside the
+    200-channel spectrum _make_active_spectrum builds."""
+    from calibration import Calibration
+
+    return Calibration(kind="quadratic", a=0.0, b=2.0, c=-0.01)
+
+
+def _warning_recorder(monkeypatch):
+    warnings = []
+    monkeypatch.setattr("main_window.QMessageBox.warning",
+                        lambda *a, **k: warnings.append(a) or None)
+    return warnings
+
+
+def test_a_calibration_that_folds_inside_the_data_warns(qapp, monkeypatch):
+    """A quadratic turning inside the spectrum makes two channels share
+    one energy. Nothing else about it looks wrong -- it still passes
+    through every assigned point -- so it is worth interrupting for."""
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    warnings = _warning_recorder(monkeypatch)
+
+    main_window._apply_calibration_change(_folding_calibration(), True)
+
+    assert len(warnings) == 1
+    assert "reverses direction" in warnings[0][2]
+    assert "channel 100" in warnings[0][2]
+
+
+def test_a_calibration_that_turns_beyond_the_data_does_not_warn(qapp, monkeypatch):
+    """Every parabola turns somewhere. One that only bends past the last
+    channel is an ordinary, usable calibration."""
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    warnings = _warning_recorder(monkeypatch)
+
+    # Vertex at channel 5000, far outside the 200-channel spectrum.
+    main_window._apply_calibration_change(
+        Calibration(kind="quadratic", a=0.0, b=2.0, c=-2.0e-4), True
+    )
+
+    assert warnings == []
+
+
+def test_a_linear_calibration_never_warns(qapp, monkeypatch):
+    from calibration import Calibration
+
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    warnings = _warning_recorder(monkeypatch)
+
+    main_window._apply_calibration_change(Calibration(kind="linear", a=0.0, b=2.0), True)
+
+    assert warnings == []
+
+
+def test_toggling_active_does_not_re_warn_about_the_same_calibration(qapp, monkeypatch):
+    """The Active toggle passes the SAME calibration object back through
+    _apply_calibration_change. Warning again on every flip would train
+    the user to dismiss it."""
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    calibration = _folding_calibration()
+    warnings = _warning_recorder(monkeypatch)
+
+    main_window._apply_calibration_change(calibration, True)
+    assert len(warnings) == 1
+
+    main_window._apply_calibration_change(calibration, False)
+    main_window._apply_calibration_change(calibration, True)
+
+    assert len(warnings) == 1
+
+
+def test_an_inactive_folded_calibration_does_not_warn(qapp, monkeypatch):
+    """An inactive calibration changes nothing on screen, so there is
+    nothing to warn about yet."""
+    main_window = MainWindow()
+    _make_active_spectrum(main_window)
+    warnings = _warning_recorder(monkeypatch)
+
+    main_window._apply_calibration_change(_folding_calibration(), False)
+
+    assert warnings == []
+
+
+def test_no_spectrum_loaded_means_no_channel_range_to_judge(qapp, monkeypatch):
+    """With nothing loaded there is no data for the fold to fall inside."""
+    main_window = MainWindow()
+    warnings = _warning_recorder(monkeypatch)
+
+    main_window._apply_calibration_change(_folding_calibration(), True)
+
+    assert warnings == []

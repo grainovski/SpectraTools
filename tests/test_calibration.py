@@ -424,3 +424,44 @@ def test_coefficient_errors_do_not_affect_calibration_equality():
     )
     typed = Calibration(kind="linear", a=fitted.a, b=fitted.b)
     assert fitted == typed
+
+
+# --- turning point / folded calibrations -------------------------------
+
+
+def test_turning_point_is_none_for_a_line():
+    """A line never reverses, so there is nothing to warn about."""
+    from calibration import turning_point
+
+    assert turning_point(Calibration(kind="linear", a=1.0, b=2.0)) is None
+
+
+def test_turning_point_is_none_when_the_quadratic_term_is_zero():
+    """kind='quadratic' with c == 0 IS a line, whatever it is called."""
+    from calibration import turning_point
+
+    assert turning_point(Calibration(kind="quadratic", a=1.0, b=2.0, c=0.0)) is None
+
+
+def test_turning_point_is_where_the_derivative_vanishes():
+    from calibration import turning_point
+
+    calibration = Calibration(kind="quadratic", a=0.0, b=2.0, c=1.0)
+    turning = turning_point(calibration)
+    assert turning == pytest.approx(-1.0)
+    assert calibration.derivative(turning) == pytest.approx(0.0)
+
+
+def test_turning_point_reproduces_the_folded_case_a_sweep_found():
+    """The concrete calibration a randomised sweep produced, whose
+    inversion returned the other branch: its vertex sits at ~6967,
+    inside an 8192-channel spectrum."""
+    from calibration import turning_point
+
+    calibration = Calibration(kind="quadratic", a=1.242, b=0.960, c=-6.89e-05)
+    turning = turning_point(calibration)
+    assert turning == pytest.approx(6966.6, abs=0.1)
+    # Both sides of the fold genuinely share an energy -- which is why
+    # inverting is ambiguous rather than wrong.
+    left, right = turning - 500.0, turning + 500.0
+    assert calibration.apply(left) == pytest.approx(calibration.apply(right))
