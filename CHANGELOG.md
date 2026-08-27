@@ -4,6 +4,39 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [4.2.2] - 2026-08-27
+
+### Added
+
+- **A warning when a calibration folds back on itself.** A quadratic
+  calibration reverses direction at one channel, and if that channel
+  falls inside the loaded spectrum, two different channels end up
+  sharing the same energy -- so converting an energy back to a channel
+  has two answers, and Go To or an energy typed into the Fit Parameters
+  panel may resolve to the wrong one. Nothing else about such a
+  calibration looks wrong: it still passes through every assigned point,
+  so the coefficients and residuals can both look reasonable. Setting
+  one now says so, and suggests the usual causes (a mistyped energy, a
+  peak assigned to the wrong line, or points that simply do not support
+  a quadratic). A calibration that only bends beyond the last channel is
+  ordinary and stays silent, as does a straight line.
+
+### Internal
+
+- The `.mtx` decode-speed guard no longer times one decoder to
+  completion before the other. It alternates them, swapping the order
+  each round, so background load reaches both sides equally. Timing them
+  in sequence put the two measurements minutes apart inside a full suite
+  run, and load covering only the first window was enough to fail the
+  test with nothing wrong in the code -- which happened once during an
+  overnight run, reporting a ratio twice its normal value while three
+  immediate re-runs on an idle machine passed. The sample count also
+  rose from three to six per side: the control test compares a decoder
+  against itself with only 5% of headroom, and three samples were too
+  few for a best-of estimate to stay inside that. Both now hold under
+  six competing CPU-bound processes, and the guard still fails as it
+  should when the optimization is reverted.
+
 ## [4.2.1] - 2026-08-26
 
 Support for a new spectrum format, plus a Windows packaging and
