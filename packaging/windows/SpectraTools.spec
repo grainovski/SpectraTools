@@ -34,6 +34,19 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
+# UPX packing is switched OFF here, deliberately. UPX compresses each
+# executable and DLL, and a packed binary is one of the oldest antivirus
+# heuristics there is -- self-extracting code is what packers and droppers
+# both look like. That matters more than usual here: SpectraTools is
+# unsigned, so scanners have nothing but shape to judge it on, and a user
+# did hit Windows refusing the unsigned installer (INSTALL.md exists
+# because of it). Moving from onefile to onedir removed exactly that
+# self-extracting signature; packing the pieces would hand it straight
+# back, for a few MB, against an installer that already compresses with
+# lzma2/solid. It was inert when written -- UPX is not installed on the
+# build host, so PyInstaller skipped it silently and the shipped v4.2.1
+# binaries were never packed -- but 'inert until someone installs a tool'
+# is a trap, not a setting.
 exe = EXE(
     pyz,
     a.scripts,
@@ -43,19 +56,32 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     console=False,
     windowed=True,
     icon=_icon,
 )
 
+# UPX packing is switched OFF here, deliberately. UPX compresses each
+# executable and DLL, and a packed binary is one of the oldest antivirus
+# heuristics there is -- self-extracting code is what packers and droppers
+# both look like. That matters more than usual here: SpectraTools is
+# unsigned, so scanners have nothing but shape to judge it on, and a user
+# did hit Windows refusing the unsigned installer (INSTALL.md exists
+# because of it). Moving from onefile to onedir removed exactly that
+# self-extracting signature; packing the pieces would hand it straight
+# back, for a few MB, against an installer that already compresses with
+# lzma2/solid. It was inert when written -- UPX is not installed on the
+# build host, so PyInstaller skipped it silently and the shipped v4.2.1
+# binaries were never packed -- but 'inert until someone installs a tool'
+# is a trap, not a setting.
 coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name='SpectraTools',
 )
