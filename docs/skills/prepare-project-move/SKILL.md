@@ -250,9 +250,26 @@ A truncated cloud-sync or USB write passes a size check and fails much
 later, in a way that looks like a project problem rather than a transfer
 one.
 
-If the destination is a cloud folder, say plainly that the files exist on
-local disk immediately but are not retrievable from another machine until
-the sync client reports finished.
+**For a cloud folder, "the destination" is the cloud, not the mounted
+drive** — and that distinction has teeth. Running `sha256sum -c` inside a
+synced folder proves only that the bytes are readable *on this machine*.
+A file still queued for upload, or half-uploaded, passes that check
+identically, and the receiving machine gets nothing. The check answers
+integrity; it does not answer arrival.
+
+So do both. For integrity, checksum locally as above. For arrival, list
+the destination folder **through the provider** and compare each file's
+reported size against what you just wrote — an MCP connector for the
+provider, or a CLI such as `rclone lsjson`, `gdrive list`, `aws s3 ls`.
+Two things corroborate a finished upload rather than a queued one: every
+size matches exactly, and the server-side modification times land shortly
+after your local writes, in the same order you created the files.
+
+If you have no API access, say plainly that the files exist on local disk
+immediately but are not retrievable from another machine until the sync
+client itself reports finished, and ask the user to confirm that it does.
+Do not report a cloud hand-off as complete on the strength of a local
+checksum alone.
 
 If a cloud-sync folder is present on the machine, offer to copy the archives
 there rather than making them do it by hand.
