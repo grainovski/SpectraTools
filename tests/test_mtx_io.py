@@ -214,19 +214,56 @@ _BENCHMARK_ROWS = 100
 _MAX_DECODE_RATIO = 0.95
 
 
-def _best_decode_time(decoder, rows, columns, repeats=3):
-    """Fastest of `repeats` passes over the same rows. Best-of, not
-    mean: scheduler noise and other load can only ever ADD time, so the
-    minimum is the closest available estimate of the real cost and the
-    most reproducible thing to compare."""
-    best = None
-    for _ in range(repeats):
-        start = time.perf_counter()
-        for row_bytes in rows:
-            decoder(row_bytes, columns, "benchmark", kind="lc matrix file")
-        elapsed = time.perf_counter() - start
-        best = elapsed if best is None else min(best, elapsed)
-    return best
+def _time_one_pass(decoder, rows, columns):
+    """Wall-clock for one pass of `decoder` over every row."""
+    start = time.perf_counter()
+    for row_bytes in rows:
+        decoder(row_bytes, columns, "benchmark", kind="lc matrix file")
+    return time.perf_counter() - start
+
+
+def _interleaved_best_times(first, second, rows, columns, repeats=6):
+    """Best-of-`repeats` for two decoders, timed ALTERNATELY and with the
+    order swapped every other repeat. Returns (best_first, best_second).
+
+    Best-of, not mean, because scheduler noise can only ever ADD time, so
+    the minimum is the closest available estimate of the real cost.
+
+    Two properties matter, and both were established by measurement
+    rather than reasoning:
+
+    INTERLEAVING is what makes the ratio survive a busy machine. Timing
+    one decoder to completion and then the other puts the two windows
+    minutes apart inside a long suite run, so load covering only the
+    first window skews the ratio with nothing wrong in the code. That
+    false-failed this guard once overnight -- ratio 1.647 against a norm
+    of 0.84, while three fresh runs on an idle machine passed at once.
+    Best-of sheds momentary noise but not sustained interference; only
+    exposing both sides to the same interval does that.
+
+    REPEATS=6, not 3, because the minimum needs enough samples to
+    converge. Measured on this machine with the SAME decoder in both
+    slots, individual pairs ranged from 0.84 to 1.01 while the best-of
+    ratio settled at 1.001 -- so three samples can leave one side's
+    minimum several percent high by luck alone. The control test below
+    compares a decoder against itself against a 0.95 threshold, i.e. it
+    fails on a 5% fluctuation, and it did exactly that with three.
+
+    The order swap costs nothing and removes any position effect (cache
+    warmth, turbo decay) before it can matter; an even `repeats` keeps
+    the two sides in each position equally often.
+    """
+    best_first = best_second = None
+    for index in range(repeats):
+        if index % 2 == 0:
+            elapsed_first = _time_one_pass(first, rows, columns)
+            elapsed_second = _time_one_pass(second, rows, columns)
+        else:
+            elapsed_second = _time_one_pass(second, rows, columns)
+            elapsed_first = _time_one_pass(first, rows, columns)
+        best_first = elapsed_first if best_first is None else min(best_first, elapsed_first)
+        best_second = elapsed_second if best_second is None else min(best_second, elapsed_second)
+    return best_first, best_second
 
 
 def test_decode_row_is_faster_than_the_pre_optimization_implementation():
@@ -255,8 +292,9 @@ def test_decode_row_is_faster_than_the_pre_optimization_implementation():
         assert decode_row(row_bytes, columns, "x", kind="lc matrix file") == \
             _unoptimized_decode_row(row_bytes, columns, "x", kind="lc matrix file")
 
-    current = _best_decode_time(decode_row, rows, columns)
-    baseline = _best_decode_time(_unoptimized_decode_row, rows, columns)
+    current, baseline = _interleaved_best_times(
+        decode_row, _unoptimized_decode_row, rows, columns
+    )
 
     assert current < baseline * _MAX_DECODE_RATIO, (
         f"decode_row is not meaningfully faster than the pre-c9ffee6 "
@@ -277,8 +315,9 @@ def test_decode_speed_guard_would_catch_a_reverted_optimization():
     guard above would be worthless -- a broken check reads as a result."""
     rows, columns = _compressed_rows("gg.mtx", _BENCHMARK_ROWS)
 
-    first = _best_decode_time(_unoptimized_decode_row, rows, columns)
-    second = _best_decode_time(_unoptimized_decode_row, rows, columns)
+    first, second = _interleaved_best_times(
+        _unoptimized_decode_row, _unoptimized_decode_row, rows, columns
+    )
 
     assert not (first < second * _MAX_DECODE_RATIO), (
         f"the speed guard cannot distinguish a decoder from itself "
