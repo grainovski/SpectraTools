@@ -75,8 +75,30 @@ installer over an old version, you will end up with **two** entries in
 Installed apps and two Start-menu shortcuts.
 
 Uninstall the old version through **Settings -> Apps -> Installed apps**
-before installing 4.2.1. This is a one-time step; upgrades from 4.2.1
-onward are detected automatically.
+before installing the new one. This is a one-time step; upgrades from
+4.2.1 onward are detected automatically.
+
+**Order matters, and the wrong order is worth knowing about.** If you
+have already installed the new version and only then uninstall the old
+one, the app will appear to vanish from the Start menu even though it is
+perfectly installed and still runs. Both versions create a shortcut at
+the same path, so the newer installer overwrites it and the older
+uninstaller — which still lists that path among its own files — deletes
+it on the way out. The identifier that keeps the two installs separate
+in Installed apps does not separate their Start-menu shortcuts.
+
+Nothing is damaged if this happens, and reinstalling is not necessary.
+The program is still in `C:\Program Files\SpectraTools` (or
+`%LocalAppData%\Programs\SpectraTools` for a per-user install) and runs
+normally. To get the Start-menu entry back, either run the installer
+again — it recreates both shortcuts — or make a shortcut to
+`SpectraTools.exe` by hand.
+
+Be aware of one more thing while tidying up: removing a leftover entry
+from the registry does **not** remove the shortcut that came with it. A
+stale shortcut left pointing at a folder that no longer exists does
+nothing when clicked, which looks exactly like the application being
+broken.
 
 ## The first launch is slower than the ones after it
 
