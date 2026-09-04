@@ -13,6 +13,7 @@ import fit_mode
 from main_window import MainWindow
 from peak_fit import FWHM_FACTOR, FitResult, IntegrationResult, PeakResult, hypermet_left_tail
 from spectrum import LoadedSpectrum
+from value_format import compact
 
 _QT_KEY = {"b": Qt.Key.Key_B, "r": Qt.Key.Key_R, "p": Qt.Key.Key_P}
 
@@ -222,7 +223,7 @@ def test_results_table_headers_have_no_peak_column_and_have_chi2(qapp):
     main_window = MainWindow()
     table = main_window.fit_controller.results_table
     headers = [table.horizontalHeaderItem(i).text() for i in range(table.columnCount())]
-    assert headers == ["Fit", "Position", "FWHM", "Volume", "chi^2"]
+    assert headers == ["#", "Position", "Volume", "FWHM", "chi^2"]
 
 
 def test_results_table_shows_one_row_per_peak_with_explicit_columns(qapp):
@@ -241,9 +242,9 @@ def test_results_table_shows_one_row_per_peak_with_explicit_columns(qapp):
     table = main_window.fit_controller.results_table
     assert table.rowCount() == 1
     assert table.item(0, 1).text().startswith("100.0")  # Position
-    assert "±" in table.item(0, 1).text()
-    assert "±" in table.item(0, 2).text()  # FWHM
-    assert "±" in table.item(0, 3).text()  # Volume
+    assert "±" not in table.item(0, 1).text()  # compact notation, not "value ± error"
+    assert "±" not in table.item(0, 2).text()  # Volume
+    assert "±" not in table.item(0, 3).text()  # FWHM
     assert table.item(0, 4).text() != ""  # chi^2
 
 
@@ -317,7 +318,7 @@ def test_results_table_shows_channels_only_when_inactive(qapp):
     table = main_window.fit_controller.results_table
     position_text = table.item(0, 1).text()
     assert "keV" not in position_text
-    assert position_text == "100.00 ± 0.10"
+    assert position_text == compact(100.0, 0.1)
 
 
 def test_results_table_shows_only_kev_when_active(qapp):
@@ -348,18 +349,18 @@ def test_results_table_shows_only_kev_when_active(qapp):
 
     table = main_window.fit_controller.results_table
     assert table.horizontalHeaderItem(1).text() == "Position (keV)"
-    assert table.horizontalHeaderItem(2).text() == "FWHM (keV)"
+    assert table.horizontalHeaderItem(3).text() == "FWHM (keV)"
 
     position_text = table.item(0, 1).text()
     # position 100.0 +/- 0.1 -> keV 60.0 +/- 0.05 (err scaled by |b|=0.5)
-    assert position_text == "60.00 ± 0.05"
+    assert position_text == compact(60.0, 0.05)
 
-    fwhm_text = table.item(0, 2).text()
+    volume_text = table.item(0, 2).text()
+    assert volume_text == compact(1000.0, 50.0)  # unchanged -- area has no keV equivalent
+
+    fwhm_text = table.item(0, 3).text()
     # fwhm 5.0 +/- 0.2 -> keV 2.50 +/- 0.10
-    assert fwhm_text == "2.50 ± 0.10"
-
-    volume_text = table.item(0, 3).text()
-    assert volume_text == "1000.0 ± 50.0"  # unchanged -- area has no keV equivalent
+    assert fwhm_text == compact(2.5, 0.1)
 
 
 def test_results_table_headers_revert_to_channels_when_deactivated(qapp):
@@ -375,7 +376,7 @@ def test_results_table_headers_revert_to_channels_when_deactivated(qapp):
 
     table = main_window.fit_controller.results_table
     assert table.horizontalHeaderItem(1).text() == "Position"
-    assert table.horizontalHeaderItem(2).text() == "FWHM"
+    assert table.horizontalHeaderItem(3).text() == "FWHM"
 
 
 def test_results_table_fwhm_kev_uses_derivative_at_peak_position_not_fwhm_value(qapp):
@@ -408,7 +409,7 @@ def test_results_table_fwhm_kev_uses_derivative_at_peak_position_not_fwhm_value(
     main_window.fit_controller.update_results_list()
 
     table = main_window.fit_controller.results_table
-    fwhm_text = table.item(0, 2).text()
+    fwhm_text = table.item(0, 3).text()
     # Correct slope is the derivative AT THE PEAK'S POSITION (100), not
     # at the fwhm's own numeric value (5): derivative(100) = 1+2*0.5*100
     # = 101, vs. the buggy derivative(5) = 1+2*0.5*5 = 6 -- very different,
@@ -416,7 +417,7 @@ def test_results_table_fwhm_kev_uses_derivative_at_peak_position_not_fwhm_value(
     expected_slope = abs(cal.derivative(100.0))
     expected_energy = expected_slope * 5.0
     expected_err = expected_slope * 0.2
-    assert fwhm_text == f"{expected_energy:.2f} ± {expected_err:.2f}"
+    assert fwhm_text == compact(expected_energy, expected_err)
 
 
 def test_remove_fit_from_context_menu_removes_the_correct_fit_by_row(qapp, monkeypatch):
@@ -2284,7 +2285,7 @@ def test_results_panel_lists_committed_fit(qapp):
     table = main_window.fit_controller.results_table
     assert table.rowCount() == 1
     assert "100.00" in table.item(0, 1).text()  # Position
-    assert "5.00" in table.item(0, 2).text()  # FWHM
+    assert "5.00" in table.item(0, 3).text()  # FWHM
 
 
 def test_results_panel_updates_when_active_spectrum_changes(qapp):
@@ -2879,9 +2880,9 @@ def test_results_table_shows_a_region_row_for_an_integration_result(qapp):
     table = main_window.fit_controller.results_table
     assert table.rowCount() == 1
     result = spectrum.fits[0]
-    assert table.item(0, 1).text() == f"{result.net_centroid:.2f} ± {result.net_centroid_err:.2f}"
-    assert table.item(0, 2).text() == f"{result.net_fwhm:.2f} ± {result.net_fwhm_err:.2f}"
-    assert table.item(0, 3).text() == f"{result.net_area:.1f} ± {result.net_area_err:.1f}"
+    assert table.item(0, 1).text() == compact(result.net_centroid, result.net_centroid_err)
+    assert table.item(0, 2).text() == compact(result.net_area, result.net_area_err)
+    assert table.item(0, 3).text() == compact(result.net_fwhm, result.net_fwhm_err)
     assert table.item(0, 4).text() == "—"  # no chi^2 concept for Integration
     tooltip = table.item(0, 0).toolTip()
     assert "Gross:" in tooltip
@@ -2945,7 +2946,14 @@ def test_integration_tooltip_is_a_single_line_without_background(qapp):
     main_window.fit_controller.update_results_list()
 
     tooltip = main_window.fit_controller.results_table.item(0, 0).toolTip()
-    assert "\n" not in tooltip
+    # The fit-region line is always prepended now, so the tooltip as a
+    # whole is no longer single-line -- what this test actually guards is
+    # that the _integration_tooltip() body after it still collapses to
+    # ONE line (no Gross/Background/Net breakdown) when there's no
+    # background component.
+    region_line, body = tooltip.split("\n", 1)
+    assert region_line.startswith("fit region:")
+    assert "\n" not in body
     assert "Gross" not in tooltip
     assert "Background" not in tooltip
     assert "Net" not in tooltip
@@ -3011,7 +3019,7 @@ def test_results_table_integration_row_shows_only_kev_when_active(qapp):
 
     table = main_window.fit_controller.results_table
     # net_centroid 100.0 +/- 0.6 -> keV 60.00 +/- 0.30
-    assert table.item(0, 1).text() == "60.00 ± 0.30"
+    assert table.item(0, 1).text() == compact(60.0, 0.3)
 
 
 def test_run_integration_ignores_any_marked_peaks(qapp):

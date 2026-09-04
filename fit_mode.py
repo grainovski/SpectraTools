@@ -21,6 +21,7 @@ from peak_fit import (
 )
 from spectrum import active_spectrum
 from theme import NEUTRAL_LINE_COLOR, fit_drawing_colors
+from value_format import compact
 
 BG_REGION_CAP = 2
 
@@ -344,22 +345,23 @@ def _dual_unit_value(main_window, channel_value, channel_err, is_width, referenc
 
 
 def _unit_switched_value(main_window, channel_value, channel_err, is_width, reference_position=None):
-    """Formats a channel-space value+error as plain "X.XX ± Y.YY", in
-    keV when calibration is active or channels otherwise. Unlike
-    _dual_unit_value (used for the Integration tooltip's supplementary
-    detail, where there's room for both units), the Fit Results
-    table's columns are too narrow for a combined "ch (keV)" string --
-    the caller is responsible for indicating the active unit via the
-    column header instead of repeating it in every cell.
+    """Formats a channel-space value+error in compact notation (e.g.
+    "352.7217(14)"), in keV when calibration is active or channels
+    otherwise. Unlike _dual_unit_value (used for the Integration
+    tooltip's supplementary detail, where there's room for both
+    units), the Fit Results table's columns are too narrow for a
+    combined "ch (keV)" string -- the caller is responsible for
+    indicating the active unit via the column header instead of
+    repeating it in every cell.
     `is_width`/`reference_position` mean the same as in
     _dual_unit_value -- a width converts via the calibration's local
     derivative evaluated at reference_position, never at the width's
     own value."""
     converted = _to_energy(main_window, channel_value, channel_err, is_width, reference_position)
     if converted is None:
-        return f"{channel_value:.2f} ± {_err_text(channel_err)}"
+        return compact(channel_value, channel_err)
     value, err = converted
-    return f"{value:.2f} ± {_err_text(err)}"
+    return compact(value, err)
 
 
 def _integration_tooltip(main_window, result):
@@ -954,7 +956,7 @@ class FitModeController(QObject):
         mw = self.main_window
         self.results_table = QTableWidget(0, 5)
         self.results_table.setHorizontalHeaderLabels(
-            ["Fit", "Position", "FWHM", "Volume", "chi^2"]
+            ["#", "Position", "Volume", "FWHM", "chi^2"]
         )
         self.results_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.results_table.customContextMenuRequested.connect(self._on_results_context_menu)
@@ -1199,10 +1201,10 @@ class FitModeController(QObject):
     def update_results_list(self):
         calibrated = self.main_window._calibration_active and self.main_window._calibration is not None
         self.results_table.setHorizontalHeaderLabels([
-            "Fit",
+            "#",
             "Position (keV)" if calibrated else "Position",
-            "FWHM (keV)" if calibrated else "FWHM",
             "Volume",
+            "FWHM (keV)" if calibrated else "FWHM",
             "chi^2",
         ])
         self.results_table.setRowCount(0)
@@ -1212,8 +1214,11 @@ class FitModeController(QObject):
             return
         for fit_index, result in enumerate(active.fits):
             if isinstance(result, IntegrationResult):
-                fit_label = f"{fit_index + 1} [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]"
-                tooltip = _integration_tooltip(self.main_window, result)
+                fit_label = f"{fit_index + 1}"
+                tooltip = "\n".join([
+                    f"fit region: [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]",
+                    _integration_tooltip(self.main_window, result),
+                ])
                 row = self.results_table.rowCount()
                 self.results_table.insertRow(row)
                 self._results_row_fit_index.append(fit_index)
@@ -1222,18 +1227,19 @@ class FitModeController(QObject):
                     _unit_switched_value(
                         self.main_window, result.net_centroid, result.net_centroid_err, is_width=False
                     ),
+                    compact(result.net_area, result.net_area_err),
                     _unit_switched_value(
                         self.main_window, result.net_fwhm, result.net_fwhm_err,
                         is_width=True, reference_position=result.net_centroid,
                     ),
-                    f"{result.net_area:.1f} ± {_err_text(result.net_area_err, '.1f')}",
                     "—",  # no chi^2 concept for a direct-sum Integration result
                 ]
                 self._populate_results_row(row, values, tooltip, grayed=not result.visible)
                 continue
 
-            fit_label = f"{fit_index + 1} [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]"
+            fit_label = f"{fit_index + 1}"
             shared_tooltip_lines = [
+                f"fit region: [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]",
                 f"region full (no bg subtracted): {result.gross_area:.1f} ± {_err_text(result.gross_area_err, '.1f')}",
                 f"region net (bg subtracted): {result.net_area:.1f} ± {_err_text(result.net_area_err, '.1f')}",
                 f"reduced chi^2: {result.reduced_chi2:.3g}" if result.reduced_chi2 is not None
@@ -1266,11 +1272,11 @@ class FitModeController(QObject):
                     _unit_switched_value(
                         self.main_window, peak.position, peak.position_err, is_width=False
                     ),
+                    compact(peak.area, peak.area_err),
                     _unit_switched_value(
                         self.main_window, peak.fwhm, peak.fwhm_err,
                         is_width=True, reference_position=peak.position,
                     ),
-                    f"{peak.area:.1f} ± {_err_text(peak.area_err, '.1f')}",
                     f"{result.reduced_chi2:.3g}" if result.reduced_chi2 is not None else "—",
                 ]
                 self._populate_results_row(row, values, tooltip, grayed=not result.visible)
