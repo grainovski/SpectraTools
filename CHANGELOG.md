@@ -4,6 +4,67 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [5.0.0] - unreleased
+
+### Added
+
+- **Peak energies can be assigned from a `.sou` source file.** A `.sou`
+  file lists the known gamma lines of one calibration nuclide as four
+  numbers per line -- energy, energy error, intensity, intensity error --
+  and loading one lets a fitted peak be matched to a line instead of
+  having its energy typed by hand. The reader is deliberately strict:
+  any line that is not four finite numbers is refused, naming the line,
+  rather than skipped, because a silently dropped line would leave you
+  calibrating against a source quietly missing a peak. The intensity
+  column is shown but never relied on -- the sample files normalise
+  their strongest line to anything from 1000 to 100000, so there is no
+  common scale to trust.
+
+- **A calibration plot window.** Calibrating now opens a window showing
+  the fit rather than reporting coefficients in a status line: the
+  assigned points with their channel error bars, the fitted curve drawn
+  across the whole channel range so extrapolation beyond the assigned
+  points is visible, a residual strip beneath it, the coefficients with
+  uncertainties, and a reduced chi-squared. Coefficients look equally
+  plausible whether or not one point was misidentified; the residual
+  strip is where that shows.
+
+- **Reduced chi-squared for a calibration.** Channel uncertainties are
+  converted to energy through the calibration's own local slope. It is
+  reported only when it means something: the underlying fit falls back
+  to unweighted if *any* centroid error is unusable, and a chi-squared
+  computed from the usable subset would be judging a fit that was never
+  performed. In that case, and three others, the window says why instead
+  of showing a number.
+
+- **Export to CalEnEff.** A `Finish` button writes the seven
+  whitespace-separated columns CalEnEff reads -- channel, channel error,
+  net area, area error, energy, intensity in percent, intensity error --
+  with absolute uncertainties, as its own source documents. The area
+  written is the net area, since CalEnEff computes efficiency as N / I,
+  and a gross area would fold the background into the efficiency curve.
+  Because `.sou` intensities have no common scale, the strongest line in
+  the loaded file is normalised to 100, matching CalEnEff's own sample.
+  A constant factor rescales the efficiency curve without changing its
+  shape.
+
+- **Energy assignments are remembered per spectrum.** They survive
+  closing and reopening the calibration dialog, and are restored after a
+  refit by matching each assignment to a peak within that peak's own
+  FWHM. A `Clear` button forgets them -- along with the loaded source
+  file -- without disturbing the calibration currently in effect.
+
+### Changed
+
+- **The Fit Results panel has been re-columned** to `#`, `Position`,
+  `Volume`, `FWHM` and `chi^2`, with the fit region moved into a tooltip
+  so the numbers you read most often are not pushed sideways by one you
+  rarely need. Values now carry their uncertainty in the compact
+  `352.7217(14)` notation used by nuclear data tables, where the digits
+  in parentheses are the uncertainty in units of the last decimal shown.
+  A parameter held fixed, or one the data does not constrain, shows no
+  parenthesis rather than a misleading `(0)` or `(nan)`.
+
 ## [4.2.2] - 2026-08-27
 
 ### Added
