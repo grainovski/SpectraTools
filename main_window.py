@@ -1093,6 +1093,12 @@ class MainWindow(GoToMixin, QMainWindow):
                        and self._calibration.kind == "quadratic"),
             settings=self.settings,
             assignments=active.energy_assignments if active else None,
+            # Enables the live preview, which needs the channel range to
+            # draw over and a name to offer its export under.
+            max_channel=(len(active.data) - 1) if active is not None else None,
+            export_default_path=(
+                self._caleneff_default_path(active) if active is not None else None
+            ),
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
@@ -1120,16 +1126,21 @@ class MainWindow(GoToMixin, QMainWindow):
             pairs=tuple(zip(channels, energies)),
         )
 
+    def _caleneff_default_path(self, spectrum):
+        """Filename the CalEnEff export is offered under, derived from
+        the spectrum's own name. Shared by the live preview and the
+        window opened on OK so the two never propose different files
+        for the same spectrum."""
+        source = spectrum.path.split("::", 1)[0]
+        stem = os.path.splitext(os.path.basename(source))[0]
+        return os.path.join(os.path.dirname(source), f"{stem}_En_Area.txt")
+
     def _show_calibration_plot(self, spectrum, dialog):
         """The coefficients alone look equally plausible whether or not
         a line was misidentified; the plot's residual strip is where
         that shows."""
         points = dialog.export_points()
-        stem = os.path.splitext(os.path.basename(spectrum.path.split("::", 1)[0]))[0]
-        default_path = os.path.join(
-            os.path.dirname(spectrum.path.split("::", 1)[0]),
-            f"{stem}_En_Area.txt",
-        )
+        default_path = self._caleneff_default_path(spectrum)
         # Qt keeps a parented dialog alive after the attribute is rebound,
         # so without this a second calibration leaves the first window on
         # screen showing different coefficients and offering to export to

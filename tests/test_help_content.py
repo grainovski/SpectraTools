@@ -1069,7 +1069,25 @@ def test_help_documents_the_calibration_workflow():
 
 def test_help_documents_the_new_results_columns():
     kb = build_knowledge_database_html()
-    assert "352.7217(14)" in kb
+    # Short single-line fragments: the HTML is wrapped, so an assertion
+    # on a whole sentence silently matches nothing.
+    assert "1332.49(12)" in kb          # the notation, explained
+    assert "352.72" in kb               # the capped form, uncertainty dropped
+    assert "661.66(3)" in kb            # the capped form, uncertainty kept
+    assert "capped at two decimals" in kb
     # Not the bare word "tooltip" -- three unrelated pre-existing mentions
     # already satisfy that.
     assert "gross and net areas" in kb
+
+
+def test_help_does_not_still_describe_the_dropped_column():
+    """The '#' column and the old uncooked example are gone from the
+    app; documentation that still describes them is worse than none."""
+    kb = build_knowledge_database_html()
+    assert "<b>#</b>" not in kb
+    assert "352.7217(14)" not in kb
+
+
+def test_help_says_the_calibration_plot_is_live():
+    howto = build_howto_html()
+    assert "redraws after every change" in howto

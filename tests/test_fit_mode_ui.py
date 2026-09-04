@@ -13,7 +13,7 @@ import fit_mode
 from main_window import MainWindow
 from peak_fit import FWHM_FACTOR, FitResult, IntegrationResult, PeakResult, hypermet_left_tail
 from spectrum import LoadedSpectrum
-from value_format import compact
+from value_format import compact, compact_capped
 
 _QT_KEY = {"b": Qt.Key.Key_B, "r": Qt.Key.Key_R, "p": Qt.Key.Key_P}
 
@@ -223,7 +223,7 @@ def test_results_table_headers_have_no_peak_column_and_have_chi2(qapp):
     main_window = MainWindow()
     table = main_window.fit_controller.results_table
     headers = [table.horizontalHeaderItem(i).text() for i in range(table.columnCount())]
-    assert headers == ["#", "Position", "Volume", "FWHM", "chi^2"]
+    assert headers == ["Position", "Volume", "FWHM", "chi^2"]
 
 
 def test_results_table_shows_one_row_per_peak_with_explicit_columns(qapp):
@@ -241,11 +241,11 @@ def test_results_table_shows_one_row_per_peak_with_explicit_columns(qapp):
 
     table = main_window.fit_controller.results_table
     assert table.rowCount() == 1
-    assert table.item(0, 1).text().startswith("100.0")  # Position
-    assert "±" not in table.item(0, 1).text()  # compact notation, not "value ± error"
-    assert "±" not in table.item(0, 2).text()  # Volume
-    assert "±" not in table.item(0, 3).text()  # FWHM
-    assert table.item(0, 4).text() != ""  # chi^2
+    assert table.item(0, 0).text().startswith("100.0")  # Position
+    assert "±" not in table.item(0, 0).text()  # compact notation, not "value ± error"
+    assert "±" not in table.item(0, 1).text()  # Volume
+    assert "±" not in table.item(0, 2).text()  # FWHM
+    assert table.item(0, 3).text() != ""  # chi^2
 
 
 def test_results_table_has_one_row_per_peak_across_a_multi_peak_fit(qapp):
@@ -271,9 +271,12 @@ def test_results_table_has_one_row_per_peak_across_a_multi_peak_fit(qapp):
 
     table = main_window.fit_controller.results_table
     assert table.rowCount() == 2
-    assert table.item(0, 1).text().startswith("100.0")  # Position, peak 1
-    assert table.item(1, 1).text().startswith("120.0")  # Position, peak 2
-    assert table.item(0, 0).text() == table.item(1, 0).text()  # same Fit cell
+    assert table.item(0, 0).text().startswith("100.0")  # Position, peak 1
+    assert table.item(1, 0).text().startswith("120.0")  # Position, peak 2
+    # Both rows belong to one fit. The '#' cell used to say so; with that
+    # column gone the row->fit mapping is what carries it. (The tooltips
+    # are NOT equal -- they add per-peak areas below the shared lines.)
+    assert main_window.fit_controller._results_row_fit_index == [0, 0]
 
 
 def test_results_table_dims_hidden_fit_rows(qapp):
@@ -316,9 +319,9 @@ def test_results_table_shows_channels_only_when_inactive(qapp):
     )
     main_window.fit_controller.update_results_list()
     table = main_window.fit_controller.results_table
-    position_text = table.item(0, 1).text()
+    position_text = table.item(0, 0).text()
     assert "keV" not in position_text
-    assert position_text == compact(100.0, 0.1)
+    assert position_text == compact_capped(100.0, 0.1)
 
 
 def test_results_table_shows_only_kev_when_active(qapp):
@@ -348,19 +351,19 @@ def test_results_table_shows_only_kev_when_active(qapp):
     main_window.fit_controller.update_results_list()
 
     table = main_window.fit_controller.results_table
-    assert table.horizontalHeaderItem(1).text() == "Position (keV)"
-    assert table.horizontalHeaderItem(3).text() == "FWHM (keV)"
+    assert table.horizontalHeaderItem(0).text() == "Position (keV)"
+    assert table.horizontalHeaderItem(2).text() == "FWHM (keV)"
 
-    position_text = table.item(0, 1).text()
+    position_text = table.item(0, 0).text()
     # position 100.0 +/- 0.1 -> keV 60.0 +/- 0.05 (err scaled by |b|=0.5)
-    assert position_text == compact(60.0, 0.05)
+    assert position_text == compact_capped(60.0, 0.05)
 
-    volume_text = table.item(0, 2).text()
+    volume_text = table.item(0, 1).text()
     assert volume_text == compact(1000.0, 50.0)  # unchanged -- area has no keV equivalent
 
-    fwhm_text = table.item(0, 3).text()
+    fwhm_text = table.item(0, 2).text()
     # fwhm 5.0 +/- 0.2 -> keV 2.50 +/- 0.10
-    assert fwhm_text == compact(2.5, 0.1)
+    assert fwhm_text == compact_capped(2.5, 0.1)
 
 
 def test_results_table_headers_revert_to_channels_when_deactivated(qapp):
@@ -375,8 +378,8 @@ def test_results_table_headers_revert_to_channels_when_deactivated(qapp):
     main_window.fit_controller.update_results_list()
 
     table = main_window.fit_controller.results_table
-    assert table.horizontalHeaderItem(1).text() == "Position"
-    assert table.horizontalHeaderItem(3).text() == "FWHM"
+    assert table.horizontalHeaderItem(0).text() == "Position"
+    assert table.horizontalHeaderItem(2).text() == "FWHM"
 
 
 def test_results_table_fwhm_kev_uses_derivative_at_peak_position_not_fwhm_value(qapp):
@@ -409,7 +412,7 @@ def test_results_table_fwhm_kev_uses_derivative_at_peak_position_not_fwhm_value(
     main_window.fit_controller.update_results_list()
 
     table = main_window.fit_controller.results_table
-    fwhm_text = table.item(0, 3).text()
+    fwhm_text = table.item(0, 2).text()
     # Correct slope is the derivative AT THE PEAK'S POSITION (100), not
     # at the fwhm's own numeric value (5): derivative(100) = 1+2*0.5*100
     # = 101, vs. the buggy derivative(5) = 1+2*0.5*5 = 6 -- very different,
@@ -2284,8 +2287,8 @@ def test_results_panel_lists_committed_fit(qapp):
 
     table = main_window.fit_controller.results_table
     assert table.rowCount() == 1
-    assert "100.00" in table.item(0, 1).text()  # Position
-    assert "5.00" in table.item(0, 3).text()  # FWHM
+    assert "100.00" in table.item(0, 0).text()  # Position
+    assert "5.00" in table.item(0, 2).text()  # FWHM
 
 
 def test_results_panel_updates_when_active_spectrum_changes(qapp):
@@ -2880,10 +2883,10 @@ def test_results_table_shows_a_region_row_for_an_integration_result(qapp):
     table = main_window.fit_controller.results_table
     assert table.rowCount() == 1
     result = spectrum.fits[0]
-    assert table.item(0, 1).text() == compact(result.net_centroid, result.net_centroid_err)
-    assert table.item(0, 2).text() == compact(result.net_area, result.net_area_err)
-    assert table.item(0, 3).text() == compact(result.net_fwhm, result.net_fwhm_err)
-    assert table.item(0, 4).text() == "—"  # no chi^2 concept for Integration
+    assert table.item(0, 0).text() == compact_capped(result.net_centroid, result.net_centroid_err)
+    assert table.item(0, 1).text() == compact(result.net_area, result.net_area_err)
+    assert table.item(0, 2).text() == compact_capped(result.net_fwhm, result.net_fwhm_err)
+    assert table.item(0, 3).text() == "—"  # no chi^2 concept for Integration
     tooltip = table.item(0, 0).toolTip()
     assert "Gross:" in tooltip
     assert "Background:" in tooltip
@@ -3019,7 +3022,7 @@ def test_results_table_integration_row_shows_only_kev_when_active(qapp):
 
     table = main_window.fit_controller.results_table
     # net_centroid 100.0 +/- 0.6 -> keV 60.00 +/- 0.30
-    assert table.item(0, 1).text() == compact(60.0, 0.3)
+    assert table.item(0, 0).text() == compact_capped(60.0, 0.3)
 
 
 def test_run_integration_ignores_any_marked_peaks(qapp):

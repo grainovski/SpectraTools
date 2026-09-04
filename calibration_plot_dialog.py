@@ -38,44 +38,21 @@ class CalibrationPlotDialog(QDialog):
                  max_channel, default_path):
         super().__init__(parent)
         self.setWindowTitle("Energy Calibration")
-        self._calibration = calibration
-        self._points = list(points)
-        self._source_lines = list(source_lines or [])
         self._default_path = default_path
-
-        channels = [p[0] for p in self._points]
-        errors = [p[1] for p in self._points]
-        energies = [p[4] for p in self._points]
+        self._max_channel = max_channel
 
         layout = QVBoxLayout(self)
 
-        figure = Figure(figsize=(6.5, 5.0))
-        self.canvas = FigureCanvasQTAgg(figure)
+        self._figure = Figure(figsize=(6.5, 5.0))
+        self.canvas = FigureCanvasQTAgg(self._figure)
         # Residuals share the x axis and get a third of the height: they
         # are read against the main plot, not on their own.
-        self.axes, self.residual_axes = figure.subplots(
+        self.axes, self.residual_axes = self._figure.subplots(
             2, 1, sharex=True, gridspec_kw={"height_ratios": [3, 1]}
         )
-
-        self.axes.errorbar(
-            channels, energies, xerr=errors, fmt="o", capsize=3,
-            label="assigned peaks",
-        )
-        upper = max(max_channel, max(channels) if channels else 0)
-        grid = np.linspace(0.0, float(upper), _CURVE_SAMPLES)
-        self.axes.plot(grid, calibration.apply(grid), "-", label="calibration")
-        self.axes.set_ylabel("Energy (keV)")
-        self.axes.legend(loc="best")
-
-        residuals = [e - calibration.apply(c) for c, e in zip(channels, energies)]
-        self.residual_axes.axhline(0.0, linewidth=0.8)
-        self.residual_axes.errorbar(channels, residuals, fmt="o", capsize=3)
-        self.residual_axes.set_xlabel("Channel")
-        self.residual_axes.set_ylabel("Residual (keV)")
-        figure.tight_layout()
         layout.addWidget(self.canvas)
 
-        self.summary_label = QLabel(self._summary_text(channels, energies, errors))
+        self.summary_label = QLabel()
         self.summary_label.setWordWrap(True)
         self.summary_label.setTextInteractionFlags(
             self.summary_label.textInteractionFlags()
@@ -90,6 +67,50 @@ class CalibrationPlotDialog(QDialog):
         self.finish_button.clicked.connect(self._on_finish)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+        self.set_data(calibration, points, source_lines)
+
+    def set_data(self, calibration, points, source_lines, max_channel=None):
+        """Redraw for a new calibration without rebuilding the window.
+
+        The Calibrate dialog's live preview refreshes after every change
+        to the assignments. Closing and recreating the window each time
+        would raise it to the front and take focus away from the table
+        the user is still typing into, so the same window is redrawn
+        instead.
+        """
+        self._calibration = calibration
+        self._points = list(points)
+        self._source_lines = list(source_lines or [])
+        if max_channel is not None:
+            self._max_channel = max_channel
+
+        channels = [p[0] for p in self._points]
+        errors = [p[1] for p in self._points]
+        energies = [p[4] for p in self._points]
+
+        self.axes.clear()
+        self.residual_axes.clear()
+
+        self.axes.errorbar(
+            channels, energies, xerr=errors, fmt="o", capsize=3,
+            label="assigned peaks",
+        )
+        upper = max(self._max_channel, max(channels) if channels else 0)
+        grid = np.linspace(0.0, float(upper), _CURVE_SAMPLES)
+        self.axes.plot(grid, calibration.apply(grid), "-", label="calibration")
+        self.axes.set_ylabel("Energy (keV)")
+        self.axes.legend(loc="best")
+
+        residuals = [e - calibration.apply(c) for c, e in zip(channels, energies)]
+        self.residual_axes.axhline(0.0, linewidth=0.8)
+        self.residual_axes.errorbar(channels, residuals, fmt="o", capsize=3)
+        self.residual_axes.set_xlabel("Channel")
+        self.residual_axes.set_ylabel("Residual (keV)")
+        self._figure.tight_layout()
+        self.canvas.draw_idle()
+
+        self.summary_label.setText(self._summary_text(channels, energies, errors))
 
     def _summary_text(self, channels, energies, errors):
         cal = self._calibration

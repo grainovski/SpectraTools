@@ -27,7 +27,11 @@ when individual pieces of work happened.
   points is visible, a residual strip beneath it, the coefficients with
   uncertainties, and a reduced chi-squared. Coefficients look equally
   plausible whether or not one point was misidentified; the residual
-  strip is where that shows.
+  strip is where that shows. The window opens as soon as the
+  assignments can be fitted and redraws after every change to them --
+  an energy typed, a source loaded, a suggestion taken -- so a
+  misidentified line is visible while it can still be corrected, rather
+  than only once the calibration has been applied.
 
 - **Reduced chi-squared for a calibration.** Channel uncertainties are
   converted to energy through the calibration's own local slope. It is
@@ -56,14 +60,23 @@ when individual pieces of work happened.
 
 ### Changed
 
-- **The Fit Results panel has been re-columned** to `#`, `Position`,
-  `Volume`, `FWHM` and `chi^2`, with the fit region moved into a tooltip
-  so the numbers you read most often are not pushed sideways by one you
-  rarely need. Values now carry their uncertainty in the compact
-  `352.7217(14)` notation used by nuclear data tables, where the digits
-  in parentheses are the uncertainty in units of the last decimal shown.
-  A parameter held fixed, or one the data does not constrain, shows no
-  parenthesis rather than a misleading `(0)` or `(nan)`.
+- **The Fit Results panel has been re-columned** to `Position`,
+  `Volume`, `FWHM` and `chi^2`. The fit region has moved into a tooltip
+  that now covers the whole row, and the row-number column is gone
+  entirely -- both were spending width to show something you rarely
+  read. Each remaining column is sized to its own contents rather than
+  to an equal share of the dock.
+
+- **Values carry their uncertainty in compact notation**, as nuclear
+  data tables quote them: `1332.49(12)` is 1332.49 with an uncertainty
+  of 0.12, the parenthesised digits being in units of the last decimal
+  shown. A parameter held fixed, or one the data does not constrain,
+  shows no parenthesis rather than a misleading `(0)` or `(nan)`.
+  Position and FWHM are capped at two decimals -- an uncertainty too
+  small to write in them is dropped rather than rendered as `(0)`, so a
+  well-determined line reads as `352.72` instead of `352.7217(14)`.
+  Volume is not capped: it counts events, where the uncertainty is
+  routinely larger than one and the parenthesised digits are all of it.
 
 ## [4.2.2] - 2026-08-27
 

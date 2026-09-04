@@ -8,7 +8,7 @@ import math
 
 import pytest
 
-from value_format import compact
+from value_format import compact, compact_capped
 
 
 def test_basic_two_significant_digits():
@@ -102,3 +102,55 @@ def test_uncertainty_of_a_hundred_or_more_is_not_understated():
 
 def test_a_very_large_uncertainty_keeps_its_magnitude():
     assert compact(2000000.0, 1697.0) == "2000000(1700)"
+
+
+# --- compact_capped: the Fit Results panel's position/width form --------
+
+
+@pytest.mark.parametrize("value,error,expected", [
+    # Too precise to write in two decimals: the uncertainty goes entirely
+    # rather than being rendered as a misleading '(0)'.
+    (352.7217, 0.0014, "352.72"),
+    (1173.23, 0.004, "1173.23"),
+    (121.78, 0.006, "121.78"),
+    # Expressible: digits re-read at the capped place, not truncated
+    # from the ones computed for a finer one.
+    (661.657, 0.03, "661.66(3)"),
+    # Already inside the cap, so untouched.
+    (1332.49, 0.12, "1332.49(12)"),
+    (1408.0, 1.7, "1408.0(17)"),
+    # The >= 100 case that compact() itself once got wrong.
+    (20000.0, 170.0, "20000(170)"),
+])
+def test_compact_capped_examples(value, error, expected):
+    assert compact_capped(value, error) == expected
+
+
+def test_compact_capped_never_exceeds_the_cap():
+    """The property behind the examples: whatever the uncertainty, the
+    value never shows more than two decimals."""
+    for error in (1e-6, 1e-3, 0.0071, 0.03, 0.5, 7.0, 250.0):
+        text = compact_capped(1234.56789, error)
+        mantissa = text.split("(")[0]
+        decimals = len(mantissa.split(".")[1]) if "." in mantissa else 0
+        assert decimals <= 2, f"{error} -> {text}"
+
+
+def test_compact_capped_leaves_compact_alone():
+    """The cap is a separate rendering, not a change to the notation the
+    calibration plot and the Volume column still use."""
+    assert compact(352.7217, 0.0014) == "352.7217(14)"
+    assert compact(661.657, 0.03) == "661.657(30)"
+
+
+def test_compact_capped_handles_unusable_uncertainties():
+    """A fixed parameter (0.0) and an unconstrained one (NaN) are not
+    measurements; neither may render as '(0)' or '(nan)'."""
+    assert compact_capped(100.0, 0.0) == "100.00"
+    assert compact_capped(100.0, float("nan")) == "100.00"
+    assert compact_capped(100.0, None) == "100.00"
+    assert compact_capped(float("nan"), 1.0) == "—"
+
+
+def test_compact_capped_respects_a_different_cap():
+    assert compact_capped(352.7217, 0.0014, max_decimals=4) == "352.7217(14)"

@@ -284,11 +284,12 @@ def test_main_window_gives_the_dialog_its_settings(qapp, tmp_path, monkeypatch):
     real = module.EnergyAssignDialog
 
     class _Spy(real):
-        def __init__(self, parent, peaks, quadratic=False, settings=None,
-                     assignments=None):
-            seen["settings"] = settings
-            super().__init__(parent, peaks, quadratic=quadratic, settings=settings,
-                              assignments=assignments)
+        # **kwargs rather than the signature spelled out: this spy broke
+        # the moment the dialog gained an argument it did not care about,
+        # which is a test failing for a reason unrelated to what it checks.
+        def __init__(self, parent, peaks, **kwargs):
+            seen.update(kwargs)
+            super().__init__(parent, peaks, **kwargs)
 
         def exec(self):
             return QDialog.DialogCode.Rejected
@@ -297,6 +298,11 @@ def test_main_window_gives_the_dialog_its_settings(qapp, tmp_path, monkeypatch):
     window._open_calibrate_from_peaks_dialog()
 
     assert seen["settings"] is window.settings
+    # Without a channel range the dialog silently shows no live plot, so
+    # the app would lose the preview while every dialog-level test kept
+    # passing -- the same shape of gap this test exists to catch.
+    assert seen["max_channel"] == len(active.data) - 1
+    assert seen["export_default_path"].endswith("src_En_Area.txt")
 
 
 # --- what the status line says -----------------------------------------

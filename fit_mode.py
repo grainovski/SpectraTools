@@ -9,8 +9,8 @@ import numpy as np
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QDockWidget, QFileDialog, QMenu, QTableWidget, QTableWidgetItem, QToolBar,
-    QVBoxLayout, QWidget,
+    QCheckBox, QDockWidget, QFileDialog, QHeaderView, QMenu, QTableWidget,
+    QTableWidgetItem, QToolBar, QVBoxLayout, QWidget,
 )
 
 import fit_export
@@ -21,7 +21,7 @@ from peak_fit import (
 )
 from spectrum import active_spectrum
 from theme import NEUTRAL_LINE_COLOR, fit_drawing_colors
-from value_format import compact
+from value_format import compact, compact_capped
 
 BG_REGION_CAP = 2
 
@@ -359,9 +359,9 @@ def _unit_switched_value(main_window, channel_value, channel_err, is_width, refe
     own value."""
     converted = _to_energy(main_window, channel_value, channel_err, is_width, reference_position)
     if converted is None:
-        return compact(channel_value, channel_err)
+        return compact_capped(channel_value, channel_err)
     value, err = converted
-    return compact(value, err)
+    return compact_capped(value, err)
 
 
 def _integration_tooltip(main_window, result):
@@ -954,9 +954,15 @@ class FitModeController(QObject):
 
     def build_results_panel(self):
         mw = self.main_window
-        self.results_table = QTableWidget(0, 5)
+        self.results_table = QTableWidget(0, 4)
         self.results_table.setHorizontalHeaderLabels(
-            ["#", "Position", "Volume", "FWHM", "chi^2"]
+            ["Position", "Volume", "FWHM", "chi^2"]
+        )
+        # Sized to what is in them rather than to equal shares of the
+        # dock: the columns carry numbers of very different widths, and
+        # a fixed split left chi^2 padded while Position was clipped.
+        self.results_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents
         )
         self.results_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.results_table.customContextMenuRequested.connect(self._on_results_context_menu)
@@ -1187,13 +1193,17 @@ class FitModeController(QObject):
         """Fills one Fit Results row. Both branches of
         update_results_list() (Integration, and one row per peak of a
         Fit) built these cells with byte-identical code: read-only
-        flags, the tooltip on column 0 only, and gray text for a hidden
-        (Ctrl+C'd) result."""
+        flags, the tooltip, and gray text for a hidden (Ctrl+C'd)
+        result.
+
+        The tooltip is set on every cell. It used to sit on column 0
+        alone, which was the row-number cell; with that column gone the
+        only anchor left would have been Position, making the detail
+        reachable from one narrow cell instead of anywhere on the row."""
         for col, text in enumerate(values):
             item = QTableWidgetItem(text)
             item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-            if col == 0:
-                item.setToolTip(tooltip)
+            item.setToolTip(tooltip)
             if grayed:
                 item.setForeground(QColor("gray"))
             self.results_table.setItem(row, col, item)
@@ -1201,7 +1211,6 @@ class FitModeController(QObject):
     def update_results_list(self):
         calibrated = self.main_window._calibration_active and self.main_window._calibration is not None
         self.results_table.setHorizontalHeaderLabels([
-            "#",
             "Position (keV)" if calibrated else "Position",
             "Volume",
             "FWHM (keV)" if calibrated else "FWHM",
@@ -1214,7 +1223,6 @@ class FitModeController(QObject):
             return
         for fit_index, result in enumerate(active.fits):
             if isinstance(result, IntegrationResult):
-                fit_label = f"{fit_index + 1}"
                 tooltip = "\n".join([
                     f"fit region: [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]",
                     _integration_tooltip(self.main_window, result),
@@ -1223,7 +1231,6 @@ class FitModeController(QObject):
                 self.results_table.insertRow(row)
                 self._results_row_fit_index.append(fit_index)
                 values = [
-                    fit_label,
                     _unit_switched_value(
                         self.main_window, result.net_centroid, result.net_centroid_err, is_width=False
                     ),
@@ -1237,7 +1244,6 @@ class FitModeController(QObject):
                 self._populate_results_row(row, values, tooltip, grayed=not result.visible)
                 continue
 
-            fit_label = f"{fit_index + 1}"
             shared_tooltip_lines = [
                 f"fit region: [{result.fit_region[0]:.1f}, {result.fit_region[1]:.1f}]",
                 f"region full (no bg subtracted): {result.gross_area:.1f} ± {_err_text(result.gross_area_err, '.1f')}",
@@ -1268,7 +1274,6 @@ class FitModeController(QObject):
                 tooltip = "\n".join(peak_tooltip_lines)
 
                 values = [
-                    fit_label,
                     _unit_switched_value(
                         self.main_window, peak.position, peak.position_err, is_width=False
                     ),

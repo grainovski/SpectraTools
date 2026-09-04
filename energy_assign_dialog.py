@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 import calibration as calibration_module
+from calibration_plot_dialog import CalibrationPlotDialog
 from calibration import CalibrationError
 from energy_assignments import restore
 from histogram_io import ParseError
@@ -112,10 +113,18 @@ class EnergyAssignDialog(QDialog):
     ENERGY_COLUMN = 3
 
     def __init__(self, parent, peaks, quadratic=False, settings=None,
-                 assignments=None):
+                 assignments=None, max_channel=None, export_default_path=None):
         super().__init__(parent)
         self.setWindowTitle("Calibrate from Fitted Peaks")
         self.result_calibration = None
+        #: The live plot needs the channel range to draw the curve over
+        #: and a filename to offer its export under. Both are properties
+        #: of the spectrum, which this dialog otherwise knows nothing
+        #: about; when they are absent no live plot is shown, which is
+        #: what keeps every existing caller and test unaffected.
+        self._max_channel = max_channel
+        self._export_default_path = export_default_path
+        self._live_plot = None
         self._settings = settings
         # Accepts (label, channel) through the full six fields. Older
         # callers and every existing test pass the short form.
@@ -230,7 +239,7 @@ class EnergyAssignDialog(QDialog):
             self._writing = False
         if assignments.source_path and os.path.exists(assignments.source_path):
             self.load_source(assignments.source_path)
-        self._update_suggest_availability()
+        self._assignments_changed()
 
     def _on_clear(self):
         """Empty every energy, drop the source, and mark the stored
@@ -256,7 +265,7 @@ class EnergyAssignDialog(QDialog):
         self.source_label.setText("No source loaded")
         self.cleared = True
         self.status.setText("Cleared all assignments.")
-        self._update_suggest_availability()
+        self._assignments_changed()
 
     # --- reading the table ------------------------------------------------
 
@@ -361,7 +370,7 @@ class EnergyAssignDialog(QDialog):
             f"Cleared {dropped} suggestion(s) from the previous source."
             if dropped else ""
         )
-        self._update_suggest_availability()
+        self._assignments_changed()
         return True
 
     # --- suggestions ------------------------------------------------------
@@ -380,7 +389,7 @@ class EnergyAssignDialog(QDialog):
         # and it counts as an anchor on the next Suggest.
         if row in self._suggested and item.text() != self._suggested[row]:
             self._unmark(row)
-        self._update_suggest_availability()
+        self._assignments_changed()
 
     def _mark(self, row, text):
         item = self.table.item(row, self.ENERGY_COLUMN)
@@ -475,7 +484,7 @@ class EnergyAssignDialog(QDialog):
         }
         for row, energy in accepted.items():
             self._mark(row, repr(energy))
-        self._update_suggest_availability()
+        self._assignments_changed()
 
         # Counted BEFORE marking would be simpler, but the marks are what
         # make a row non-blank, so the two are added back together here.
@@ -504,23 +513,81 @@ class EnergyAssignDialog(QDialog):
 
     # --- accepting --------------------------------------------------------
 
-    def _on_accept(self):
+    def _compute_calibration(self):
+        """(calibration, None) or (None, reason).
+
+        Shared by OK and by the live preview so the plot on screen can
+        never be the result of a different fit from the one OK applies.
+        """
         try:
             channels, energies, errors = self.assignments()
         except ValueError as exc:
-            self.status.setText(str(exc))
-            return
+            return None, str(exc)
         try:
-            self.result_calibration = calibration_module.from_points(
+            return calibration_module.from_points(
                 channels, energies, self.quadratic_checkbox.isChecked(),
                 # from_points falls back to an unweighted fit if any of
                 # these is missing or unusable, so passing them
                 # unconditionally is safe.
                 channel_errors=errors,
-            )
+            ), None
         except CalibrationError as exc:
-            self.status.setText(str(exc))
+            return None, str(exc)
+
+    def _assignments_changed(self):
+        """Called by every path that can change the assignment set."""
+        self._update_suggest_availability()
+        self._refresh_live_plot()
+
+    def _close_live_plot(self):
+        previous = self._live_plot
+        self._live_plot = None
+        if previous is None:
             return
+        try:
+            previous.close()
+            previous.deleteLater()
+        except RuntimeError:
+            pass  # Qt destroyed it already; nothing left to close
+
+    def _refresh_live_plot(self):
+        """Show the calibration as it currently stands.
+
+        Parented to this dialog, so this dialog's own modality does not
+        block it and it is destroyed along with it -- the window
+        main_window opens on OK is a separate, longer-lived one.
+
+        An assignment set that does not yet make a calibration (too few
+        points, or a typo mid-edit) closes the preview rather than
+        leaving a stale curve on screen claiming to describe the table.
+        """
+        if self._max_channel is None:
+            return
+        calibration, _reason = self._compute_calibration()
+        if calibration is None:
+            self._close_live_plot()
+            return
+        points = self.export_points()
+        if self._live_plot is not None:
+            try:
+                self._live_plot.set_data(calibration, points, self.source_lines)
+                return
+            except RuntimeError:
+                # Closed by the user; fall through and build a new one.
+                self._live_plot = None
+        self._live_plot = CalibrationPlotDialog(
+            self, calibration, points, self.source_lines,
+            self._max_channel, self._export_default_path,
+        )
+        self._live_plot.show()
+
+    def _on_accept(self):
+        calibration, reason = self._compute_calibration()
+        if calibration is None:
+            self.status.setText(reason)
+            return
+        self.result_calibration = calibration
+        channels, energies, _errors = self.assignments()
 
         # Residuals are reported rather than only the coefficients: one
         # mistyped energy moves the whole fit and is obvious here while
@@ -531,4 +598,9 @@ class EnergyAssignDialog(QDialog):
             )
         ) if channels else 0.0
         self._worst_residual = worst
+        # The preview belongs to this dialog; main_window opens its own
+        # window once the calibration is actually applied. Closing here
+        # rather than relying on the parent being hidden keeps exactly
+        # one calibration plot on screen at every moment.
+        self._close_live_plot()
         self.accept()

@@ -417,7 +417,12 @@ are separate actions.</p>
 <p><b>The fit opens in its own window</b> showing the assigned points
 with their uncertainties, the calibration curve across the whole
 spectrum, a residual strip, the coefficients with their errors, and the
-reduced chi-squared. <b>Finish and save for CalEnEff...</b> writes a
+reduced chi-squared. It appears as soon as there are enough assignments
+to fit a calibration and <b>redraws after every change</b> -- a typed
+energy, a loaded source, a suggestion accepted -- so a misidentified
+line shows in the residuals while you can still correct it, rather than
+only after the calibration has been applied. Clearing the assignments
+takes it down again. <b>Finish and save for CalEnEff...</b> writes a
 seven-column file for the efficiency-calibration program: channel and
 its error, net area and its error, energy, and relative intensity with
 its error.</p>
@@ -1011,15 +1016,24 @@ intensity uncertainties are both zero, because the efficiency
 uncertainty would come out zero.</p>
 
 <h3>Reading the results columns</h3>
-<p>The Fit Results panel shows <b>#</b>, <b>Position</b>, <b>Volume</b>,
-<b>FWHM</b> and <b>chi^2</b>. Position and FWHM use the compact notation
-of nuclear data tables: <code>352.7217(14)</code> means 352.7217 with an
-uncertainty of 0.0014, the parenthesised digits being the uncertainty in
-the last digits shown. A value with no usable uncertainty, such as a
+<p>The Fit Results panel shows <b>Position</b>, <b>Volume</b>,
+<b>FWHM</b> and <b>chi^2</b>. Each column is sized to what is in it, so
+none is padded while another is clipped.</p>
+<p>All three numeric columns use the compact notation of nuclear data
+tables, where the parenthesised digits are the uncertainty in the last
+digits shown: <code>1332.49(12)</code> means 1332.49 with an
+uncertainty of 0.12. A value with no usable uncertainty, such as a
 position held fixed, is printed alone with no parentheses.</p>
-<p>The fit region is no longer a column. It has moved into the
-row&rsquo;s tooltip, along with the gross and net areas, so hovering
-still shows it.</p>
+<p><b>Position and FWHM are capped at two decimals.</b> Where the
+uncertainty is too small to be written in them it is dropped rather
+than shown as <code>(0)</code>, so a position known to better than
+0.01 reads simply as <code>352.72</code>. Where it does fit, its digits
+are read at that same place: <code>661.66(3)</code>. Volume is not
+capped -- it counts events, where the uncertainty is routinely larger
+than one and the parenthesised digits are the whole of it.</p>
+<p>Neither the fit region nor a row number is a column. The region
+has moved into the tooltip, along with the gross and net areas, and
+hovering anywhere on a row shows it.</p>
 
 <h2>Saving and reloading your work</h2>
 <p><b>File &rarr; Save Fits...</b> writes every fit on the active
