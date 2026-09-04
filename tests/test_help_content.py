@@ -999,3 +999,47 @@ def test_kb_explains_why_the_background_level_is_quoted_at_the_region_middle():
     text = _rendered_text(build_knowledge_database_html())
     assert "almost perfectly anti-correlated with the slope" in text
     assert "converted back to an ordinary line" in text
+
+
+def test_howto_documents_source_file_assignment():
+    """Specific multi-word substrings, matching this file's convention, so
+    a partial revert cannot hide behind generic wording."""
+    html = build_howto_html()
+    assert "Load source..." in html
+    assert "Suggest remaining" in html
+    # The two-anchor requirement and the ambiguity rule are the two facts
+    # a user cannot guess from the UI.
+    assert "closer than half the distance to the runner-up" in html
+    assert "stay blank rather than guessed" in html
+
+
+def test_knowledge_database_documents_the_sou_format_and_matching_rule():
+    html = build_knowledge_database_html()
+    # The four columns, in order, as the file actually carries them.
+    assert "energy in keV" in html
+    assert "relative intensity" in html
+    # The intensity scale is per-file: co56.sou peaks at 100000 and
+    # na24.sou at 1000, so the page must not promise 10000 universally.
+    assert "not comparable between" in html
+    # Why two anchors are needed at all.
+    assert "requires a channel-to-" in html
+    # The rule, and the two consequences that follow from it.
+    assert "closer than half the distance to the" in html
+    assert "is never" in html and "suggested for a second peak" in html
+    assert "neither receives it" in html
+
+
+def test_knowledge_database_warns_that_suggestions_are_not_identifications():
+    """The honest caveat: an unambiguous match can still be the wrong
+    line if the anchors were misidentified."""
+    html = build_knowledge_database_html()
+    assert "not an identification" in html
+    assert "wrong line if the provisional anchors" in html
+
+
+def test_help_documents_that_switching_source_drops_old_guesses():
+    """Behaviour a user cannot see coming, in both pages."""
+    assert "loading a different source file" in build_howto_html()
+    kb = build_knowledge_database_html()
+    assert "Loading a <b>different source file</b> clears" in kb
+    assert "calibrate\nagainst the source you had just rejected" in kb

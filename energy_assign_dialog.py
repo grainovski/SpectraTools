@@ -9,24 +9,44 @@ Modelled on HDTV's "fit position assign" followed by "calibration
 position recalibrate", which is the same loop: attach literature energies
 to peaks you have already fitted, refit the calibration from every
 assignment, and repeat as peaks are added or corrected.
+
+Energies can be typed, or taken from a `.sou` source file (see sou_io):
+load the nuclide, anchor two peaks by hand, and "Suggest remaining" fills
+every other row whose nearest source line is unambiguous. Suggestions
+are ordinary editable cells, tinted and tooltipped so they read as
+guesses until the user has looked at them -- OK uses exactly what the
+table shows, never a hidden list.
 """
 
+import math
+import os
+
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
 )
 
-import math
-
 import calibration as calibration_module
 from calibration import CalibrationError
+from histogram_io import ParseError
+from sou_io import load_sou, match_line
+
+#: Background for a suggested energy cell. Translucent amber: it blends
+#: over whatever the table's own base colour is, so it reads on the dark
+#: theme as well as the light one -- an opaque pastel would vanish into
+#: a light base and glare on a dark one.
+_SUGGESTED_TINT = QColor(255, 170, 0, 70)
 
 
 def _format_uncertainty(value):
@@ -49,11 +69,25 @@ def _format_uncertainty(value):
     return f"{number:.3f}"
 
 
+def _parse_energy(text):
+    """The finite float `text` holds, or None. Lenient on purpose: this
+    decides whether a row COUNTS as an anchor, and a half-typed value
+    should simply not count rather than raise."""
+    try:
+        value = float(text.strip())
+    except ValueError:
+        return None
+    return value if math.isfinite(value) else None
+
+
 class EnergyAssignDialog(QDialog):
     """`result_calibration` is set only after a successful OK.
 
     `peaks` is a list of (label, channel) for every committed peak on the
     active spectrum, in the order the Fit Results panel shows them.
+
+    `settings`, when given, is the app's Settings: the source picker
+    starts in and remembers the same last folder as the spectrum dialogs.
     """
 
     # Shifted right by one when the centroid-uncertainty column was added.
@@ -61,10 +95,11 @@ class EnergyAssignDialog(QDialog):
     # that column could be inserted at all.
     ENERGY_COLUMN = 3
 
-    def __init__(self, parent, peaks, quadratic=False):
+    def __init__(self, parent, peaks, quadratic=False, settings=None):
         super().__init__(parent)
         self.setWindowTitle("Calibrate from Fitted Peaks")
         self.result_calibration = None
+        self._settings = settings
         # Entries are (label, channel) or (label, channel, channel_err).
         # Both accepted: the uncertainty is extra information about a peak,
         # not part of what identifies it, and a caller that has none should
@@ -73,12 +108,39 @@ class EnergyAssignDialog(QDialog):
             (entry[0], entry[1], entry[2] if len(entry) > 2 else None)
             for entry in peaks
         ]
+        #: Lines of the loaded .sou file, or None before one is loaded.
+        self.source_lines = None
+        self._source_name = None
+        #: row -> the text this dialog put there. A row stays a
+        #: suggestion only while its cell still reads exactly that; the
+        #: moment the user edits it, it is theirs (see _on_item_changed).
+        self._suggested = {}
+        #: True while this dialog itself is writing cells, so the
+        #: itemChanged handler does not mistake its own writes for edits.
+        self._writing = False
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
             "Type the known energy for the peaks you can identify and leave "
-            "the rest blank."
+            "the rest blank -- or load a source file, type two energies, and "
+            "let it suggest the rest."
         ))
+
+        source_row = QHBoxLayout()
+        self.load_source_button = QPushButton("Load source...")
+        self.load_source_button.clicked.connect(self._on_load_source_clicked)
+        source_row.addWidget(self.load_source_button)
+        self.source_label = QLabel("No source loaded")
+        source_row.addWidget(self.source_label)
+        source_row.addStretch(1)
+        self.suggest_button = QPushButton("Suggest remaining")
+        self.suggest_button.setEnabled(False)
+        self.suggest_button.setToolTip(
+            "Needs a loaded source and at least two typed energies"
+        )
+        self.suggest_button.clicked.connect(self._on_suggest)
+        source_row.addWidget(self.suggest_button)
+        layout.addLayout(source_row)
 
         self.table = QTableWidget(len(self._peaks), 4)
         self.table.setHorizontalHeaderLabels(
@@ -104,6 +166,7 @@ class EnergyAssignDialog(QDialog):
             self.table.setItem(row, 2, uncertainty)
 
             self.table.setItem(row, self.ENERGY_COLUMN, QTableWidgetItem(""))
+        self.table.itemChanged.connect(self._on_item_changed)
         layout.addWidget(self.table)
 
         self.quadratic_checkbox = QCheckBox("Quadratic (needs 3 or more assignments)")
@@ -121,6 +184,12 @@ class EnergyAssignDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    # --- reading the table ------------------------------------------------
+
+    def _energy_text(self, row):
+        item = self.table.item(row, self.ENERGY_COLUMN)
+        return item.text() if item else ""
+
     def assignments(self):
         """(channels, energies, channel_errors) for the rows that carry an
         energy.
@@ -131,8 +200,7 @@ class EnergyAssignDialog(QDialog):
         """
         channels, energies, errors = [], [], []
         for row, (label, channel, channel_err) in enumerate(self._peaks):
-            item = self.table.item(row, self.ENERGY_COLUMN)
-            text = (item.text() if item else "").strip()
+            text = self._energy_text(row).strip()
             if not text:
                 continue
             try:
@@ -149,6 +217,198 @@ class EnergyAssignDialog(QDialog):
             channels.append(channel)
             errors.append(channel_err)
         return channels, energies, errors
+
+    def suggested_rows(self):
+        """Rows currently holding an untouched suggestion."""
+        return set(self._suggested)
+
+    def _anchor_count(self):
+        return sum(
+            1 for row in range(len(self._peaks))
+            if _parse_energy(self._energy_text(row)) is not None
+        )
+
+    # --- source loading ---------------------------------------------------
+
+    def _on_load_source_clicked(self):
+        directory = self._settings.last_folder() if self._settings else ""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Source", directory, "Source files (*.sou);;All files (*)"
+        )
+        if path:
+            self.load_source(path)
+
+    def load_source(self, path):
+        """Load a .sou file as the source to suggest from. Returns True on
+        success; on failure the message goes to the status line and any
+        previously loaded source is kept."""
+        try:
+            lines = load_sou(path)
+        except ParseError as exc:
+            self.status.setText(str(exc))
+            return False
+        # Guesses made from the PREVIOUS nuclide must not survive into a
+        # new one. Loading a different source is exactly what a user does
+        # after realising they had the wrong nuclide, and leaving those
+        # rows filled would let OK calibrate against the source they just
+        # rejected -- with a tooltip still naming the old file. Only
+        # untouched suggestions go; anything typed or edited is the user's.
+        replaced = self._source_name is not None and self.source_lines is not None
+        dropped = len(self._suggested) if replaced else 0
+        if replaced:
+            self._clear_suggestions()
+
+        self.source_lines = lines
+        self._source_name = os.path.basename(path)
+        self.source_label.setText(f"{self._source_name}: {len(lines)} lines")
+        if self._settings is not None:
+            self._settings.set_last_folder(os.path.dirname(path))
+        self.status.setText(
+            f"Cleared {dropped} suggestion(s) from the previous source."
+            if dropped else ""
+        )
+        self._update_suggest_availability()
+        return True
+
+    # --- suggestions ------------------------------------------------------
+
+    def _update_suggest_availability(self):
+        self.suggest_button.setEnabled(
+            self.source_lines is not None and self._anchor_count() >= 2
+        )
+
+    def _on_item_changed(self, item):
+        if self._writing or item.column() != self.ENERGY_COLUMN:
+            return
+        row = item.row()
+        # An edited suggestion is the user's own value now: it loses the
+        # tint so nothing in the table claims to be a guess when it is not,
+        # and it counts as an anchor on the next Suggest.
+        if row in self._suggested and item.text() != self._suggested[row]:
+            self._unmark(row)
+        self._update_suggest_availability()
+
+    def _mark(self, row, text):
+        item = self.table.item(row, self.ENERGY_COLUMN)
+        self._suggested[row] = text
+        self._writing = True
+        try:
+            item.setText(text)
+            item.setBackground(QBrush(_SUGGESTED_TINT))
+            item.setToolTip(
+                f"Suggested from {self._source_name} -- check before OK"
+            )
+        finally:
+            self._writing = False
+
+    def _unmark(self, row):
+        self._suggested.pop(row, None)
+        item = self.table.item(row, self.ENERGY_COLUMN)
+        self._writing = True
+        try:
+            item.setBackground(QBrush())
+            item.setToolTip("")
+        finally:
+            self._writing = False
+
+    def _clear_suggestions(self):
+        """Blank every suggestion the user has not touched, so a fresh
+        round is computed from their values alone and never from the
+        previous round's guesses."""
+        for row, text in list(self._suggested.items()):
+            item = self.table.item(row, self.ENERGY_COLUMN)
+            self._unmark(row)
+            if item.text() == text:
+                self._writing = True
+                try:
+                    item.setText("")
+                finally:
+                    self._writing = False
+
+    def _on_suggest(self):
+        if self.source_lines is None:
+            self.status.setText("Load a source file first.")
+            return
+        self._clear_suggestions()
+        try:
+            channels, energies, errors = self.assignments()
+        except ValueError as exc:
+            self.status.setText(str(exc))
+            return
+        if len(channels) < 2:
+            self.status.setText(
+                "Type the energies of at least two peaks first; they anchor "
+                "the line the suggestions are read from."
+            )
+            return
+        # A straight line through the anchors is all that is needed to
+        # predict where the other peaks fall. Always linear here, whatever
+        # the checkbox says: two anchors cannot define a quadratic, and the
+        # final fit is a separate step with its own choice.
+        try:
+            provisional = calibration_module.from_points(
+                channels, energies, False, channel_errors=errors
+            )
+        except CalibrationError as exc:
+            self.status.setText(str(exc))
+            return
+
+        # Energies the anchors already claim. A source line matched to a
+        # blank row must not be one of these -- two peaks cannot be the
+        # same line, and if the nearest line is taken, the honest answer is
+        # no suggestion, not the runner-up.
+        taken = {
+            line.energy for line in self.source_lines
+            if any(math.isclose(line.energy, e, rel_tol=1e-9, abs_tol=1e-9)
+                   for e in energies)
+        }
+        proposals = {}
+        for row, (_label, channel, _err) in enumerate(self._peaks):
+            if self._energy_text(row).strip():
+                continue
+            line = match_line(provisional.apply(channel), self.source_lines)
+            if line is None or line.energy in taken:
+                continue
+            proposals[row] = line.energy
+
+        # Two blank rows both nearest to one line is a conflict, not a
+        # tie to break: neither gets it.
+        wanted = {}
+        for energy in proposals.values():
+            wanted[energy] = wanted.get(energy, 0) + 1
+        accepted = {
+            row: energy for row, energy in proposals.items() if wanted[energy] == 1
+        }
+        for row, energy in accepted.items():
+            self._mark(row, repr(energy))
+        self._update_suggest_availability()
+
+        # Counted BEFORE marking would be simpler, but the marks are what
+        # make a row non-blank, so the two are added back together here.
+        still_blank = sum(
+            1 for row in range(len(self._peaks)) if not self._energy_text(row).strip()
+        )
+        candidates = still_blank + len(accepted)
+        if not candidates:
+            self.status.setText("Every peak already has an energy.")
+        elif not accepted:
+            self.status.setText(
+                f"No unambiguous match in {self._source_name} for any of the "
+                f"{candidates} unassigned peaks."
+            )
+        elif still_blank:
+            self.status.setText(
+                f"{len(accepted)} of {candidates} unassigned peaks suggested "
+                f"from {self._source_name} -- review before OK. The other "
+                f"{still_blank} had no unambiguous match."
+            )
+        else:
+            self.status.setText(
+                f"All {len(accepted)} unassigned peaks suggested from "
+                f"{self._source_name} -- review before OK."
+            )
+
+    # --- accepting --------------------------------------------------------
 
     def _on_accept(self):
         try:

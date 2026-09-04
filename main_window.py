@@ -1077,6 +1077,7 @@ class MainWindow(GoToMixin, QMainWindow):
             self, choices,
             quadratic=(self._calibration is not None
                        and self._calibration.kind == "quadratic"),
+            settings=self.settings,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return

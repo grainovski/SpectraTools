@@ -390,6 +390,22 @@ looking perfectly reasonable. A residual much larger than your peaks'
 own position uncertainties means one of the assignments is wrong. Two
 assignments determine a line and three a quadratic; assign more than the
 minimum whenever you can.</p>
+<p><b>Using a source file.</b> Instead of typing every energy from a
+table, press <b>Load source...</b> and pick a <code>.sou</code> file: a
+plain-text list of one nuclide's lines, one per row, as four numbers --
+energy in keV, its error, relative intensity, its error -- with no
+header. Type the energies of <b>two</b> peaks you recognise, then press
+<b>Suggest remaining</b>. A straight line through those two anchors
+predicts where every other peak falls, and each blank row is filled with
+the source line nearest that prediction -- but only when that line is
+clearly nearest, closer than half the distance to the runner-up. Rows
+where two lines compete stay blank rather than guessed, as do rows whose
+nearest line is already taken by an anchor. Suggested cells are tinted
+and carry a tooltip; they are ordinary cells you can edit or clear, and
+OK fits through exactly what the table shows. Pressing Suggest again
+clears the untouched suggestions and recomputes from your own values, and
+so does loading a different source file -- guesses made from one nuclide
+are never carried into another.</p>
 
 <h3>12. Go To an energy or channel</h3>
 <p><kbd>Ctrl+G</kbd>, or <b>View &gt; Go To...</b>, jumps the view to one
@@ -876,6 +892,56 @@ uncertainty is a direct statement of how far you can trust the
 calibration away from your reference points. At exactly the minimum
 number of points there is no scatter to estimate it from, and none is
 reported.</p>
+
+<h3>Assigning energies from a source file</h3>
+<p>A <code>.sou</code> file describes one calibration nuclide's known
+lines. It is plain text with no header: one line per gamma, four
+whitespace-separated numbers each -- <b>energy in keV</b>, the
+uncertainty on that energy, the <b>relative intensity</b>, and its
+uncertainty. The intensity scale is per-file and not comparable between
+files: most sources here normalise the strongest line to 10000, but not
+all do. Only the energies are used for calibration; the other columns
+are read and checked, but nothing is inferred from them.</p>
+<p>Press <b>Load source...</b>, choose the file, then type the energies
+of <b>two</b> peaks you recognise and press <b>Suggest remaining</b>.
+The two anchors define a provisional straight line, that line predicts an
+energy for every other fitted peak, and each blank row is offered the
+source line nearest its prediction.</p>
+<p>Two anchors are needed because of an ordering problem that has no way
+around it: deciding which line a peak <i>is</i> requires a channel-to-
+energy mapping, which is the very thing being determined. Your two
+identifications break that circle. The suggestion line is always a
+straight one even when the Quadratic box is ticked -- two points cannot
+define a curve, and this line only has to be good enough to tell
+neighbouring lines apart, not to be the final answer.</p>
+<p>A suggestion is only offered when the nearest source line is
+<b>unambiguously</b> nearest: closer than half the distance to the
+next-nearest line. Where two lines compete for one peak, the row is left
+blank rather than guessed. This rule has no tunable tolerance and scales
+itself to the source -- a nuclide with two lines a megaelectronvolt apart
+is matched freely, while a dense spectrum such as Eu-152 is matched only
+where the answer is not in doubt. Two rules follow from the same
+principle: a line already claimed by one of your anchors is never
+suggested for a second peak, and when two peaks are both nearest to the
+same line, neither receives it.</p>
+<p>Suggested cells are tinted and carry a tooltip naming the file they
+came from. They are ordinary editable cells -- correct one, clear one,
+or add energies of your own -- and OK fits through exactly what the table
+shows, never through a hidden list. Editing a suggestion makes it yours:
+the tint disappears and it counts as an anchor if you press Suggest
+again, which first clears every untouched suggestion so that a new round
+is computed from your values alone and never from the previous round's
+guesses.</p>
+<p>Loading a <b>different source file</b> clears the untouched
+suggestions too. Switching nuclide is what you do on realising the first
+choice was wrong, and leaving those rows filled would let OK calibrate
+against the source you had just rejected. Anything you typed or corrected
+yourself stays -- it is your value, not a guess -- and the status line
+reports how many guesses were dropped.</p>
+<p>The suggestions are a labour-saving device, not an identification.
+Check the <b>worst residual</b> afterwards exactly as you would for
+energies typed by hand: an unambiguously nearest line can still be the
+wrong line if the provisional anchors were themselves misidentified.</p>
 
 <h2>Saving and reloading your work</h2>
 <p><b>File &rarr; Save Fits...</b> writes every fit on the active
