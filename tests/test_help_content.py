@@ -1046,17 +1046,30 @@ def test_help_documents_that_switching_source_drops_old_guesses():
 
 
 def test_help_documents_the_calibration_workflow():
+    """Fragments unique to the new sections.
+
+    An earlier version asserted "strongest line" and "100", both of which
+    a pre-existing sentence elsewhere already satisfied ("normalise the
+    strongest line to 10000" contains "100"), so the whole CalEnEff
+    section could be deleted with the test still green.
+    """
     howto = build_howto_html()
-    assert "Clear" in howto
-    assert "CalEnEff" in howto
+    assert "Finish and save for CalEnEff" in howto
+    assert "its own width comes back blank" in howto
+
     kb = build_knowledge_database_html()
-    # The three facts a user cannot infer from the UI.
+    # The restore rule, the export, and the chi-squared caveat, each by a
+    # phrase that appears nowhere else on the page.
     assert "within that peak" in kb and "FWHM" in kb
-    assert "strongest line" in kb and "100" in kb
+    assert "normalised to <b>100</b>" in kb
+    assert "efficiency curve" in kb
     assert "unweighted" in kb
+    assert "no degrees of freedom" in kb
 
 
 def test_help_documents_the_new_results_columns():
     kb = build_knowledge_database_html()
-    assert "352.7217(14)" in kb or "(14)" in kb
-    assert "tooltip" in kb.lower()
+    assert "352.7217(14)" in kb
+    # Not the bare word "tooltip" -- three unrelated pre-existing mentions
+    # already satisfy that.
+    assert "gross and net areas" in kb
