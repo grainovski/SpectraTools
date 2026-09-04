@@ -94,8 +94,12 @@ def test_none_error_gives_a_bare_value():
 
 
 def test_error_larger_than_value_is_still_shown():
-    """Unusual but real. Hiding it would be worse than showing it."""
-    assert compact(0.5, 2.0) == "0(20)"
+    """Unusual but real. Hiding it would be worse than showing it.
+
+    sigma 2.0 sets the scale to one decimal, so the value keeps its own
+    decimal too: "0.5(20)", not "0(20)".
+    """
+    assert compact(0.5, 2.0) == "0.5(20)"
 
 
 def test_non_finite_value_is_an_em_dash():
@@ -611,14 +615,19 @@ def test_missing_errors_entirely_is_unweighted():
 
 def test_a_zero_derivative_is_reported_rather_than_dividing_by_zero():
     """A quadratic's vertex has dE/dch == 0, so a point sitting exactly
-    there has no finite energy uncertainty."""
+    there has no finite energy uncertainty.
+
+    FOUR channels, not three: a quadratic has p == 3, so three points
+    would return "no degrees of freedom" before the derivative is ever
+    evaluated, and the test would pass while exercising nothing.
+    """
     cal = Calibration(kind="quadratic", a=0.0, b=1.0, c=-0.005)
     vertex = 100.0  # -b / (2c)
-    channels = [50.0, vertex, 150.0]
+    channels = [50.0, vertex, 150.0, 200.0]
     energies = [cal.apply(c) for c in channels]
-    value, reason = reduced_chi_squared(cal, channels, energies, [0.1, 0.1, 0.1])
+    value, reason = reduced_chi_squared(cal, channels, energies, [0.1] * 4)
     assert value is None
-    assert reason is not None
+    assert "turning point" in reason
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
