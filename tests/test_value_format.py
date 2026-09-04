@@ -36,6 +36,17 @@ def test_rounding_carry_in_the_uncertainty():
     assert compact(5.0, 0.0099) == "5.0000(99)"
 
 
+def test_a_carry_that_crosses_a_power_of_ten_moves_the_decimal_place():
+    """The one branch the other cases never reach.
+
+    9.99 at two significant digits is 10, not 9.9, so the scale shifts
+    from tenths to units and the value must follow it. Without the
+    recompute this would render "352.7(100)", quoting three digits of
+    uncertainty against a value at the wrong precision.
+    """
+    assert compact(352.7217, 9.99) == "353(10)"
+
+
 def test_zero_error_gives_a_bare_value():
     """A position held fixed reports exactly 0.0. Printing '(0)' would
     read as a perfectly known value."""
