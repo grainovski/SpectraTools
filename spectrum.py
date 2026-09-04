@@ -49,6 +49,11 @@ class LoadedSpectrum:
         # matrix_cut.compute_cut_with_variance and
         # spectrum_operations.combined_variance.
         self.variance = variance
+        # What the calibration dialog was last told for this spectrum --
+        # an EnergyAssignments, or None. Kept so refitting does not
+        # discard the user's identifications; see energy_assignments.py.
+        # Session-lived: never written to disk, never saved with fits.
+        self.energy_assignments = None
 
 
 def active_spectrum(spectra):
