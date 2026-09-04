@@ -249,6 +249,10 @@ class EnergyAssignDialog(QDialog):
         self._suggested.clear()
         self.source_lines = None
         self._source_name = None
+        # Without this, the discarded file survives in _source_path: OK
+        # after a Clear then hand-typed energies still stores that path,
+        # and reopening the dialog silently reloads the rejected source.
+        self._source_path = None
         self.source_label.setText("No source loaded")
         self.cleared = True
         self.status.setText("Cleared all assignments.")

@@ -1130,10 +1130,19 @@ class MainWindow(GoToMixin, QMainWindow):
             os.path.dirname(spectrum.path.split("::", 1)[0]),
             f"{stem}_En_Area.txt",
         )
+        # Qt keeps a parented dialog alive after the attribute is rebound,
+        # so without this a second calibration leaves the first window on
+        # screen showing different coefficients and offering to export to
+        # the same filename.
+        previous = getattr(self, "_calibration_plot", None)
+        if previous is not None:
+            previous.close()
+            previous.deleteLater()
         self._calibration_plot = CalibrationPlotDialog(
             self, dialog.result_calibration, points,
             dialog.source_lines, len(spectrum.data) - 1, default_path,
         )
+        self._calibration_plot.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self._calibration_plot.show()
 
     def _save_fits_dialog(self):

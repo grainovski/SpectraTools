@@ -86,6 +86,20 @@ def test_clear_does_not_touch_the_active_calibration(qapp, tmp_path):
     assert window._calibration_active is True
 
 
+def test_clear_forgets_the_source_path_too(qapp, tmp_path):
+    """Clear promises to forget the loaded source. Leaving the path behind
+    meant the discarded nuclide came back on the next visit."""
+    window, active = _window(tmp_path)
+    dialog = EnergyAssignDialog(None, window.fitted_peak_choices())
+    sou = tmp_path / "wrong.sou"
+    sou.write_text("100.0 .01 1000. 10.\n200.0 .01 900. 9.\n", encoding="utf-8")
+    assert dialog.load_source(str(sou))
+    assert dialog.source_path() is not None
+
+    dialog.clear_button.click()
+    assert dialog.source_path() is None
+
+
 def test_calibrating_opens_the_plot_window(qapp, tmp_path, monkeypatch):
     import main_window as module
 
@@ -97,6 +111,8 @@ def test_calibrating_opens_the_plot_window(qapp, tmp_path, monkeypatch):
             opened["args"] = args
         def show(self):
             opened["shown"] = True
+        def setAttribute(self, *args, **kwargs):
+            pass
 
     monkeypatch.setattr(module, "CalibrationPlotDialog", _Spy)
 
