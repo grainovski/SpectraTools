@@ -7,7 +7,6 @@ from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QComboBox,
-    QDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -16,11 +15,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from calibration_dialog import CalibrationDialog
 from fit_mode import FitModeController, is_bare_key_event
 from matrix_cut import compute_projection
 from mtx_io import load_mtx
 from peak_fit import channel_indices
+from calibration_view import CalibrationViewMixin
 from goto_view import GoToMixin
 from spectrum import (
     LIGHT_COLOR_CYCLE, LoadedSpectrum, pan_button_is_active, panned_xlim,
@@ -75,14 +74,6 @@ class MatrixCutState:
         self.bg_regions.append((lo, hi))
         self._pending_bg_click = None
         return True
-
-    def clear_cut(self):
-        self.cut_regions = []
-        self._pending_cut_click = None
-
-    def clear_bg(self):
-        self.bg_regions = []
-        self._pending_bg_click = None
 
 
 class MatrixCutController(QObject):
@@ -187,7 +178,7 @@ class MatrixCutController(QObject):
             self.panel.canvas.draw()
 
 
-class MatrixPanel(GoToMixin, QMainWindow):
+class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
     """A separate top-level window for TV-style matrix gate/cut
     analysis. Loads a matrix and computes both its X and Y
     projections up front (this app has the whole matrix in memory,
@@ -453,22 +444,6 @@ class MatrixPanel(GoToMixin, QMainWindow):
         style_axes(self.axes, self._theme)
         self.canvas.draw()
 
-    def channel_to_display(self, channel):
-        if not self._calibration_active or self._calibration is None:
-            return channel
-        return self._calibration.apply(channel)
-
-    def display_to_channel(self, display_x):
-        if not self._calibration_active or self._calibration is None:
-            return display_x
-        return self._calibration.invert(display_x)
-
-    def _open_calibration_dialog(self):
-        dialog = CalibrationDialog(
-            self, initial=self._calibration, initially_active=self._calibration_active
-        )
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._apply_calibration_change(dialog.result_calibration, dialog.result_active)
 
     def _apply_calibration_change(self, new_calibration, new_active):
         # Delegates to main_window's own _apply_calibration_change rather

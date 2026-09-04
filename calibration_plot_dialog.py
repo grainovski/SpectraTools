@@ -134,9 +134,7 @@ class CalibrationPlotDialog(QDialog):
 
     def export_to(self, path):
         """Write the CalEnEff file. Returns a summary; raises ExportError."""
-        assignments = [(c, ce, area, area_err, energy)
-                       for c, ce, area, area_err, energy in self._points]
-        rows, skipped = build_rows(assignments, self._source_lines)
+        rows, skipped = build_rows(self._points, self._source_lines)
         write_caleneff(path, rows)
         summary = f"Wrote {len(rows)} rows to {os.path.basename(path)}"
         if skipped:

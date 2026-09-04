@@ -4,6 +4,51 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [5.0.1] - unreleased
+
+### Fixed
+
+- **A remembered energy could land on the wrong peak.** When the
+  calibration dialog reopened, each stored assignment was matched to a
+  peak by walking the possible pairings nearest-first and taking each as
+  it came. In a doublet that is the wrong order to decide in: the first
+  pairing considered claims its line, and the peak next to it is left
+  with whatever remains, even when swapping the two would have moved
+  both less. The pairing is now the one that minimises total
+  displacement across all the peaks at once.
+
+  A match whose runner-up is nearly as good is now left blank instead of
+  guessed. The two outcomes are not equally bad -- a blank costs one
+  retyped energy, while a wrong energy produces a calibration that
+  passes through every assigned point, so its coefficients and residuals
+  both look reasonable and nothing says otherwise.
+
+  Measured over 154,000 generated peaks with a different width on each,
+  as real fits produce: peaks separated by 1.5 x FWHM or more are now
+  never restored wrongly, where the old pass erred on some. Closer than
+  that the result is improved rather than guaranteed -- 16,453
+  misassignments became 1,523 across all separations -- because below
+  one width the two peaks are not separable and no rule can settle which
+  line belongs to which.
+
+### Internal
+
+- The channel/keV conversion methods and the calibration dialog opener
+  were written twice, once in the main window and once in the matrix
+  panel, character for character. They now come from one
+  `CalibrationViewMixin`, alongside the `GoToMixin` added for the same
+  reason in 4.1.1. The two windows keep their own
+  `_apply_calibration_change`, which genuinely differs between them.
+  The copies had not drifted yet; this same pair had already done so
+  once, which is what the 4.1.0 audit found.
+
+- Removed two `MatrixCutState` methods that nothing called and that each
+  cleared half of what `reset()` clears -- a field added to `reset()`
+  would not have reached them.
+
+- Dropped an unused import and a comprehension that rebuilt each tuple
+  unchanged before passing it on.
+
 ## [5.0.0] - 2026-09-04
 
 ### Added

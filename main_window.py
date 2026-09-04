@@ -34,8 +34,8 @@ from PySide6.QtWidgets import (
 )
 
 from calibration import turning_point
-from calibration_dialog import CalibrationDialog
 from calibration_plot_dialog import CalibrationPlotDialog
+from calibration_view import CalibrationViewMixin
 from goto_view import GoToMixin
 from combine_dialog import CombineDialog
 from energy_assignments import EnergyAssignments
@@ -299,7 +299,7 @@ class _MatrixLoadWorker(QThread):
         self.loaded.emit(matrix)
 
 
-class MainWindow(GoToMixin, QMainWindow):
+class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SpectraTools")
@@ -601,31 +601,6 @@ class MainWindow(GoToMixin, QMainWindow):
             panel._refresh_theme()
             for heatmap_window in panel._heatmap_windows:
                 heatmap_window._refresh_theme(theme)
-
-    def channel_to_display(self, channel):
-        """Converts a channel number (or numpy array of channel numbers)
-        to whatever's on the x-axis right now: the same value if no
-        calibration is active, or its calibrated keV equivalent if one
-        is. Every place that draws an x-coordinate routes through this."""
-        if not self._calibration_active or self._calibration is None:
-            return channel
-        return self._calibration.apply(channel)
-
-    def display_to_channel(self, display_x):
-        """Inverse of channel_to_display -- converts an x-axis
-        coordinate (channel or keV, whichever is currently displayed)
-        back to a channel number. Every place that reads a click/hover
-        x-coordinate routes through this."""
-        if not self._calibration_active or self._calibration is None:
-            return display_x
-        return self._calibration.invert(display_x)
-
-    def _open_calibration_dialog(self):
-        dialog = CalibrationDialog(
-            self, initial=self._calibration, initially_active=self._calibration_active
-        )
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._apply_calibration_change(dialog.result_calibration, dialog.result_active)
 
     def _apply_calibration_change(self, new_calibration, new_active):
         """Applies a new calibration/active state and replots, keeping

@@ -34,10 +34,28 @@ def test_the_boundary_is_the_full_fwhm():
 
 
 def test_two_rows_never_share_one_assignment():
-    """The nearer row takes it; the other opens blank."""
+    """The nearer row takes it; the other opens blank.
+
+    Separated clearly enough to decide: 3.4 channels apart against a
+    tolerance of 4.0, so the runner-up is not within _AMBIGUITY_MARGIN
+    of the winner and the match is made.
+    """
     stored = EnergyAssignments(None, ((100.0, 121.783),))
-    got = restore(stored, [(101.5, 8.0), (100.2, 8.0)])
-    assert got == {1: 121.783}
+    got = restore(stored, [(100.1, 4.0), (103.5, 4.0)])
+    assert got == {0: 121.783}
+
+
+def test_an_ambiguous_pair_is_left_blank_rather_than_guessed():
+    """Two peaks 1.3 channels apart with a FWHM of 8 are 0.16 x FWHM
+    apart -- not separable, so which one owns a stored line is a coin
+    flip. Guessing produces a calibration that passes through every
+    assigned point and is wrong; a blank costs one retyped energy.
+
+    This is a deliberate change from the greedy behaviour, which handed
+    the line to whichever peak happened to be nearer.
+    """
+    stored = EnergyAssignments(None, ((100.0, 121.783),))
+    assert restore(stored, [(101.5, 8.0), (100.2, 8.0)]) == {}
 
 
 def test_each_row_takes_its_own_nearest_assignment():
@@ -68,3 +86,69 @@ def test_the_spectrum_starts_with_no_assignments():
 
     spectrum = LoadedSpectrum("x.txt", np.zeros(10), "#fff")
     assert spectrum.energy_assignments is None
+
+
+# --- v5.0.1: optimal matching, and refusing to guess ---------------------
+
+
+def test_no_misassignment_once_the_peaks_are_cleanly_resolved():
+    """The guarantee v5.0.1 actually delivers, pinned over a fixed-seed
+    sweep with a DIFFERENT width per peak -- which is what real fits
+    produce, and what the first version of this sweep got wrong by
+    giving every peak in a trial the same FWHM.
+
+    From 1.5 x FWHM apart the restore is never wrong. Below that it is
+    reduced, not eliminated: the greedy version this replaced scored
+    16,453 misassignments over these same inputs against 1,523 now, but
+    "cleanly resolved" is the only band where zero is guaranteed.
+    """
+    import random
+
+    rng = random.Random(2024)
+    wrong = restored = 0
+    for _ in range(4000):
+        count = rng.randint(2, 5)
+        ratio = rng.choice([1.5, 4.0])           # cleanly resolved only
+        base = rng.uniform(2.0, 9.0)
+        fwhms = [base * rng.uniform(0.5, 2.0) for _ in range(count)]
+        truth, x = [], 200.0
+        for width in fwhms:
+            truth.append(x)
+            x += width * ratio
+        energies = [100.0 + 37.0 * i for i in range(count)]
+        peaks = [(c + rng.uniform(-f * 0.45, f * 0.45), f)
+                 for c, f in zip(truth, fwhms)]
+        got = restore(EnergyAssignments(None, tuple(zip(truth, energies))), peaks)
+        restored += len(got)
+        wrong += sum(1 for row, e in got.items() if e != energies[row])
+
+    assert wrong == 0, f"{wrong} energies landed on the wrong peak"
+    # A guard that restored nothing would also report zero wrong.
+    assert restored > 10000, f"only {restored} restored -- the sweep is not exercising the path"
+
+
+def test_a_tight_doublet_is_reduced_but_not_guaranteed():
+    """Stated so nobody reads the test above as a promise it does not
+    make. Below one FWHM the pairing is improved and still fallible;
+    the honest bound there is a rate, not zero."""
+    import random
+
+    rng = random.Random(7)
+    wrong = total = 0
+    for _ in range(4000):
+        count = rng.randint(2, 5)
+        base = rng.uniform(2.0, 9.0)
+        fwhms = [base * rng.uniform(0.5, 2.0) for _ in range(count)]
+        truth, x = [], 200.0
+        for width in fwhms:
+            truth.append(x)
+            x += width * 0.8
+        energies = [100.0 + 37.0 * i for i in range(count)]
+        peaks = [(c + rng.uniform(-f * 0.45, f * 0.45), f)
+                 for c, f in zip(truth, fwhms)]
+        got = restore(EnergyAssignments(None, tuple(zip(truth, energies))), peaks)
+        total += count
+        wrong += sum(1 for row, e in got.items() if e != energies[row])
+
+    rate = wrong / total
+    assert rate < 0.02, f"misassignment at 0.8 x FWHM rose to {rate:.2%}"

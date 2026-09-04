@@ -14,7 +14,6 @@ would fold the background into the efficiency curve.
 """
 
 import math
-import os
 from dataclasses import dataclass
 
 #: The strongest line in a source is normalised to this. .sou intensities
