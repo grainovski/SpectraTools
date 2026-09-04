@@ -1103,13 +1103,18 @@ class MainWindow(GoToMixin, QMainWindow):
             self._show_calibration_plot(active, dialog)
 
     def _store_energy_assignments(self, spectrum, dialog):
-        """Remember what the dialog was told, so a refit does not throw
-        it away. Clear erases the record rather than leaving the old one
-        in place."""
-        if dialog.cleared:
+        """Remember what the dialog was told, so a refit does not throw it
+        away.
+
+        Derived from the table's live contents rather than from the Clear
+        button's flag: Clear followed by fresh energies is the ordinary way
+        to start over, and a flag that only ever latches True would erase
+        exactly the assignments the user had just retyped.
+        """
+        channels, energies, _errors = dialog.assignments()
+        if not channels:
             spectrum.energy_assignments = None
             return
-        channels, energies, _errors = dialog.assignments()
         spectrum.energy_assignments = EnergyAssignments(
             source_path=dialog.source_path(),
             pairs=tuple(zip(channels, energies)),

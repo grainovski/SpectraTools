@@ -107,3 +107,27 @@ def test_calibrating_opens_the_plot_window(qapp, tmp_path, monkeypatch):
     window._show_calibration_plot(active, dialog)
 
     assert opened.get("shown") is True
+
+
+def test_clearing_then_retyping_keeps_the_new_assignments(qapp, tmp_path):
+    """Clear exists so the user can start over. An earlier version latched
+    a `cleared` flag on and never reset it, so the freshly typed energies
+    were computed into a calibration and then thrown away.
+    """
+    window, active = _window(tmp_path)
+    dialog = EnergyAssignDialog(None, window.fitted_peak_choices())
+    dialog.table.item(0, ENERGY).setText("300")
+    dialog.table.item(1, ENERGY).setText("840")
+    dialog._on_accept()
+    window._store_energy_assignments(active, dialog)
+    assert active.energy_assignments is not None
+
+    dialog.clear_button.click()
+    assert dialog.cleared is True
+    dialog.table.item(0, ENERGY).setText("310")
+    dialog.table.item(1, ENERGY).setText("850")
+    dialog._on_accept()
+    window._store_energy_assignments(active, dialog)
+
+    assert active.energy_assignments is not None
+    assert [e for _c, e in active.energy_assignments.pairs] == [310.0, 850.0]
