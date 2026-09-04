@@ -35,8 +35,10 @@ from PySide6.QtWidgets import (
 
 from calibration import turning_point
 from calibration_dialog import CalibrationDialog
+from calibration_plot_dialog import CalibrationPlotDialog
 from goto_view import GoToMixin
 from combine_dialog import CombineDialog
+from energy_assignments import EnergyAssignments
 from factor_dialog import FactorDialog
 from fit_mode import FitModeController
 from help_content import (
@@ -1037,13 +1039,21 @@ class MainWindow(GoToMixin, QMainWindow):
             self.settings.set_last_folder(os.path.dirname(path))
 
     def fitted_peak_choices(self):
-        """(label, channel, channel_err) for every committed peak on the
-        active spectrum, in Fit Results order.
+        """(label, channel, channel_err, fwhm, area, area_err) for every
+        committed peak on the active spectrum, in Fit Results order.
 
         The uncertainty travels with the channel so the calibration can be
         weighted by it -- an unweighted fit lets a barely-visible line pull
         exactly as hard as the strongest peak in the spectrum, and the two
         routinely differ in precision by an order of magnitude.
+
+        FWHM rides along so a restored assignment can be matched back to
+        the peak it came from after a refit nudges the centroid (see
+        energy_assignments.restore). Area is peak.area/area_err -- the
+        NET, background-subtracted value, not full_area -- because the
+        calibration plot hands these to CalEnEff, which divides counts by
+        intensity to get efficiency; a gross area would fold the
+        background into that curve.
 
         Always in CHANNELS, even when a calibration is already active: the
         user is assigning energies in order to determine the calibration,
@@ -1063,7 +1073,7 @@ class MainWindow(GoToMixin, QMainWindow):
             for peak_index, peak in enumerate(getattr(result, "peaks", []) or [], start=1):
                 choices.append(
                     (f"Fit {fit_index}, peak {peak_index}", peak.position,
-                     peak.position_err)
+                     peak.position_err, peak.fwhm, peak.area, peak.area_err)
                 )
         return choices
 
@@ -1073,30 +1083,53 @@ class MainWindow(GoToMixin, QMainWindow):
         choices = self.fitted_peak_choices()
         if not choices:
             return
+        # Fetched once and reused below: _apply_calibration_change does not
+        # touch which spectrum is active, so a second lookup after it would
+        # only ever repeat this same answer.
+        active = active_spectrum(self.spectra)
         dialog = EnergyAssignDialog(
             self, choices,
             quadratic=(self._calibration is not None
                        and self._calibration.kind == "quadratic"),
             settings=self.settings,
+            assignments=active.energy_assignments if active else None,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         calibration = dialog.result_calibration
         self._apply_calibration_change(calibration, True)
-        worst = getattr(dialog, "_worst_residual", None)
-        message = f"Calibrated from fitted peaks: {calibration.kind}"
-        if worst is not None:
-            # The residual is the number that says whether to believe it;
-            # the coefficients alone look equally plausible either way.
-            message += f", worst residual {worst:.3g} keV"
-        if calibration.coefficient_errors:
-            # Only present when the fit had more points than it needed --
-            # at exactly the minimum it interpolates and has nothing to
-            # say about itself. The slope is the coefficient that matters
-            # for anything read far from the assigned lines.
-            slope_err = calibration.coefficient_errors[1]
-            message += f", slope {calibration.b:.6g} ± {slope_err:.3g} keV/ch"
-        self.fit_controller._show_status_message(message, 8000)
+        if active is not None:
+            self._store_energy_assignments(active, dialog)
+            self._show_calibration_plot(active, dialog)
+
+    def _store_energy_assignments(self, spectrum, dialog):
+        """Remember what the dialog was told, so a refit does not throw
+        it away. Clear erases the record rather than leaving the old one
+        in place."""
+        if dialog.cleared:
+            spectrum.energy_assignments = None
+            return
+        channels, energies, _errors = dialog.assignments()
+        spectrum.energy_assignments = EnergyAssignments(
+            source_path=dialog.source_path(),
+            pairs=tuple(zip(channels, energies)),
+        )
+
+    def _show_calibration_plot(self, spectrum, dialog):
+        """The coefficients alone look equally plausible whether or not
+        a line was misidentified; the plot's residual strip is where
+        that shows."""
+        points = dialog.export_points()
+        stem = os.path.splitext(os.path.basename(spectrum.path.split("::", 1)[0]))[0]
+        default_path = os.path.join(
+            os.path.dirname(spectrum.path.split("::", 1)[0]),
+            f"{stem}_En_Area.txt",
+        )
+        self._calibration_plot = CalibrationPlotDialog(
+            self, dialog.result_calibration, points,
+            dialog.source_lines, len(spectrum.data) - 1, default_path,
+        )
+        self._calibration_plot.show()
 
     def _save_fits_dialog(self):
         active = active_spectrum(self.spectra)

@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
 
 import calibration as calibration_module
 from calibration import CalibrationError
-from energy_assignments import EnergyAssignments, restore
+from energy_assignments import restore
 from histogram_io import ParseError
 from sou_io import load_sou, match_line
 
@@ -123,6 +123,7 @@ class EnergyAssignDialog(QDialog):
         #: Lines of the loaded .sou file, or None before one is loaded.
         self.source_lines = None
         self._source_name = None
+        self._source_path = None
         #: row -> the text this dialog put there. A row stays a
         #: suggestion only while its cell still reads exactly that; the
         #: moment the user edits it, it is theirs (see _on_item_changed).
@@ -287,6 +288,25 @@ class EnergyAssignDialog(QDialog):
             errors.append(peak.channel_err)
         return channels, energies, errors
 
+    def source_path(self):
+        """The loaded .sou path, or None. Stored so reopening the dialog
+        can load the same source again."""
+        return getattr(self, "_source_path", None)
+
+    def export_points(self):
+        """(channel, channel_err, area, area_err, energy) per assigned
+        row, for the plot window and the CalEnEff export."""
+        points = []
+        for row, peak in enumerate(self._peaks):
+            text = self._energy_text(row).strip()
+            if not text:
+                continue
+            points.append((
+                peak.channel, peak.channel_err or 0.0,
+                peak.area, peak.area_err, float(text),
+            ))
+        return points
+
     def suggested_rows(self):
         """Rows currently holding an untouched suggestion."""
         return set(self._suggested)
@@ -329,6 +349,7 @@ class EnergyAssignDialog(QDialog):
 
         self.source_lines = lines
         self._source_name = os.path.basename(path)
+        self._source_path = path
         self.source_label.setText(f"{self._source_name}: {len(lines)} lines")
         if self._settings is not None:
             self._settings.set_last_folder(os.path.dirname(path))

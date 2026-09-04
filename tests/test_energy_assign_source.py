@@ -284,9 +284,11 @@ def test_main_window_gives_the_dialog_its_settings(qapp, tmp_path, monkeypatch):
     real = module.EnergyAssignDialog
 
     class _Spy(real):
-        def __init__(self, parent, peaks, quadratic=False, settings=None):
+        def __init__(self, parent, peaks, quadratic=False, settings=None,
+                     assignments=None):
             seen["settings"] = settings
-            super().__init__(parent, peaks, quadratic=quadratic, settings=settings)
+            super().__init__(parent, peaks, quadratic=quadratic, settings=settings,
+                              assignments=assignments)
 
         def exec(self):
             return QDialog.DialogCode.Rejected

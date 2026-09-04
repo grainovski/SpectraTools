@@ -171,8 +171,11 @@ def test_calibrating_from_peaks_applies_the_result(qapp, tmp_path, monkeypatch):
 def test_fitted_peak_choices_carry_the_centroid_uncertainty(qapp, tmp_path):
     main_window, active = _window_with_two_fits(tmp_path)
     choices = main_window.fitted_peak_choices()
-    assert all(len(choice) == 3 for choice in choices)
-    for _label, _channel, error in choices:
+    # Widened by the calibration-workflow task to also carry FWHM and net
+    # area (restore-matching and the CalEnEff export); the centroid
+    # uncertainty this test covers is still the third element.
+    assert all(len(choice) == 6 for choice in choices)
+    for _label, _channel, error, _fwhm, _area, _area_err in choices:
         assert error is not None
         assert error > 0.0
 
