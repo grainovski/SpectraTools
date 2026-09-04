@@ -406,6 +406,21 @@ OK fits through exactly what the table shows. Pressing Suggest again
 clears the untouched suggestions and recomputes from your own values, and
 so does loading a different source file -- guesses made from one nuclide
 are never carried into another.</p>
+<p><b>Your assignments are remembered.</b> Everything you type stays with
+that spectrum for the session, so refitting and reopening the dialog
+brings it back rather than making you retype it. A peak whose centroid
+moved further than its own width comes back blank, because past that
+distance it is a different peak. <b>Clear</b> forgets every assignment
+and the loaded source. It deliberately leaves the active calibration
+alone: discarding your identifications and un-calibrating the spectrum
+are separate actions.</p>
+<p><b>The fit opens in its own window</b> showing the assigned points
+with their uncertainties, the calibration curve across the whole
+spectrum, a residual strip, the coefficients with their errors, and the
+reduced chi-squared. <b>Finish and save for CalEnEff...</b> writes a
+seven-column file for the efficiency-calibration program: channel and
+its error, net area and its error, energy, and relative intensity with
+its error.</p>
 
 <h3>12. Go To an energy or channel</h3>
 <p><kbd>Ctrl+G</kbd>, or <b>View &gt; Go To...</b>, jumps the view to one
@@ -942,6 +957,69 @@ reports how many guesses were dropped.</p>
 Check the <b>worst residual</b> afterwards exactly as you would for
 energies typed by hand: an unambiguously nearest line can still be the
 wrong line if the provisional anchors were themselves misidentified.</p>
+
+<h3>What the dialog remembers</h3>
+<p>Assignments are stored per spectrum for the session. They are not
+written to disk and do not travel with Save Fits. When the dialog
+reopens, each row takes the stored energy whose channel is nearest,
+provided it lies <b>within that peak&rsquo;s own FWHM</b>. A peak that
+shifted by more than its width between fits is treated as a different
+peak and opens blank. A peak whose FWHM the fit could not determine
+falls back to a much narrower tolerance of one channel, so only a
+centroid that barely moved is still treated as the same peak. Restoring
+an energy onto the wrong peak would produce a calibration whose
+coefficients and residuals both look reasonable while being wrong, which
+is the failure this rule exists to prevent. No two rows can claim the
+same stored assignment: the nearer one takes it.</p>
+
+<h3>Reduced chi-squared, and when there is none</h3>
+<p>The plot window divides each point&rsquo;s residual by that
+point&rsquo;s energy uncertainty, obtained from its channel uncertainty
+through the calibration&rsquo;s local slope dE/dch, squares and sums
+them, and divides by n&minus;p. <i>p</i> is 2 for a line and 3 for a
+quadratic.</p>
+<p>It is reported as <b>undefined</b> in four cases, three of them
+naming their reason. When any centroid uncertainty is unusable the
+calibration was fitted <b>unweighted</b>, so the weights a chi-squared
+would divide by are arbitrary and the value would look like a goodness
+of fit while meaning nothing. When there are exactly as many points as
+parameters there are <b>no degrees of freedom</b> and the fit passes
+through them exactly. When a point sits on a quadratic&rsquo;s turning
+point, dE/dch is zero there, so its channel uncertainty maps to no
+energy uncertainty at all. The fourth case gives no reason at all: if
+the computed value itself is not a finite number, a bare
+<b>undefined</b> is reported on its own.</p>
+
+<h3>The CalEnEff export</h3>
+<p><b>Finish and save for CalEnEff...</b> writes seven
+whitespace-separated columns with no header, all uncertainties
+<b>absolute</b>: channel, its error, net area, its error, energy in keV,
+relative intensity in percent, and its error.</p>
+<p>The first four come from the fit and the last three from the source
+file. <b>N is the net area</b>, background subtracted, because CalEnEff
+computes efficiency as N divided by I: a gross area would fold the
+background into the efficiency curve.</p>
+<p>Source files carry intensities on no common scale, so the strongest
+line in the loaded source is normalised to <b>100</b> and every other
+line scaled by the same factor. Because efficiency is a ratio to I, a
+constant factor rescales the whole curve without changing its shape, and
+the relative uncertainties are unaffected.</p>
+<p>A peak whose energy you typed by hand has no intensity, so it cannot
+be exported and is <b>skipped</b>, with the count reported. Writing a
+zero instead would be worse: CalEnEff rejects rows whose net-area and
+intensity uncertainties are both zero, because the efficiency
+uncertainty would come out zero.</p>
+
+<h3>Reading the results columns</h3>
+<p>The Fit Results panel shows <b>#</b>, <b>Position</b>, <b>Volume</b>,
+<b>FWHM</b> and <b>chi^2</b>. Position and FWHM use the compact notation
+of nuclear data tables: <code>352.7217(14)</code> means 352.7217 with an
+uncertainty of 0.0014, the parenthesised digits being the uncertainty in
+the last digits shown. A value with no usable uncertainty, such as a
+position held fixed, is printed alone with no parentheses.</p>
+<p>The fit region is no longer a column. It has moved into the
+row&rsquo;s tooltip, along with the gross and net areas, so hovering
+still shows it.</p>
 
 <h2>Saving and reloading your work</h2>
 <p><b>File &rarr; Save Fits...</b> writes every fit on the active

@@ -1043,3 +1043,20 @@ def test_help_documents_that_switching_source_drops_old_guesses():
     kb = build_knowledge_database_html()
     assert "Loading a <b>different source file</b> clears" in kb
     assert "calibrate\nagainst the source you had just rejected" in kb
+
+
+def test_help_documents_the_calibration_workflow():
+    howto = build_howto_html()
+    assert "Clear" in howto
+    assert "CalEnEff" in howto
+    kb = build_knowledge_database_html()
+    # The three facts a user cannot infer from the UI.
+    assert "within that peak" in kb and "FWHM" in kb
+    assert "strongest line" in kb and "100" in kb
+    assert "unweighted" in kb
+
+
+def test_help_documents_the_new_results_columns():
+    kb = build_knowledge_database_html()
+    assert "352.7217(14)" in kb or "(14)" in kb
+    assert "tooltip" in kb.lower()
