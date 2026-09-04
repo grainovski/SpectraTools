@@ -88,3 +88,17 @@ def test_bare_value_of_zero_error_is_not_over_rounded():
     """With no usable uncertainty there is nothing to set the precision,
     so fall back to a readable fixed number of decimals."""
     assert compact(1234.5, 0.0) == "1234.5"
+
+
+def test_uncertainty_of_a_hundred_or_more_is_not_understated():
+    """The Volume column shows peak areas, where a Poisson-like error
+    passes 100 at around ten thousand counts. An earlier version divided
+    by the quantum instead of the printed decimal place and rendered
+    170 as "(17)", understating every large peak's area error tenfold.
+    """
+    assert compact(20000.0, 170.0) == "20000(170)"
+    assert compact(100000.0, 380.0) == "100000(380)"
+
+
+def test_a_very_large_uncertainty_keeps_its_magnitude():
+    assert compact(2000000.0, 1697.0) == "2000000(1700)"

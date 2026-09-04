@@ -76,5 +76,9 @@ def compact(value, error):
             quantum = 10.0 ** exponent
             sigma_rounded = round(sigma / quantum) * quantum
 
-    digits = int(round(sigma_rounded / quantum))
+    # In units of the LAST PRINTED decimal place, which is 10**-decimals.
+    # That equals `quantum` only while exponent <= 0; once sigma reaches 100
+    # the max(0, ...) clamp above pins decimals at zero while quantum keeps
+    # growing, and dividing by quantum then reported 170 as "(17)".
+    digits = int(round(sigma_rounded * (10.0 ** decimals)))
     return f"{number:.{decimals}f}({digits})"
