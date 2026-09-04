@@ -20,6 +20,7 @@ table shows, never a hidden list.
 
 import math
 import os
+from dataclasses import dataclass
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
@@ -39,6 +40,7 @@ from PySide6.QtWidgets import (
 
 import calibration as calibration_module
 from calibration import CalibrationError
+from energy_assignments import EnergyAssignments, restore
 from histogram_io import ParseError
 from sou_io import load_sou, match_line
 
@@ -80,6 +82,20 @@ def _parse_energy(text):
     return value if math.isfinite(value) else None
 
 
+@dataclass(frozen=True)
+class _PeakRow:
+    """One dialog row's peak. A record rather than a widening tuple:
+    callers pass anything from (label, channel) to the full six fields,
+    and every field beyond the first two is optional, so positional
+    unpacking at each use site would be a standing bug."""
+    label: str
+    channel: float
+    channel_err: float = None
+    fwhm: float = None
+    area: float = 0.0
+    area_err: float = 0.0
+
+
 class EnergyAssignDialog(QDialog):
     """`result_calibration` is set only after a successful OK.
 
@@ -95,19 +111,15 @@ class EnergyAssignDialog(QDialog):
     # that column could be inserted at all.
     ENERGY_COLUMN = 3
 
-    def __init__(self, parent, peaks, quadratic=False, settings=None):
+    def __init__(self, parent, peaks, quadratic=False, settings=None,
+                 assignments=None):
         super().__init__(parent)
         self.setWindowTitle("Calibrate from Fitted Peaks")
         self.result_calibration = None
         self._settings = settings
-        # Entries are (label, channel) or (label, channel, channel_err).
-        # Both accepted: the uncertainty is extra information about a peak,
-        # not part of what identifies it, and a caller that has none should
-        # not have to invent one.
-        self._peaks = [
-            (entry[0], entry[1], entry[2] if len(entry) > 2 else None)
-            for entry in peaks
-        ]
+        # Accepts (label, channel) through the full six fields. Older
+        # callers and every existing test pass the short form.
+        self._peaks = [_PeakRow(*entry[:6]) for entry in peaks]
         #: Lines of the loaded .sou file, or None before one is loaded.
         self.source_lines = None
         self._source_name = None
@@ -118,6 +130,9 @@ class EnergyAssignDialog(QDialog):
         #: True while this dialog itself is writing cells, so the
         #: itemChanged handler does not mistake its own writes for edits.
         self._writing = False
+        #: Set by Clear so the caller knows to erase the spectrum's
+        #: stored record, not merely to skip writing a new one.
+        self.cleared = False
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
@@ -130,6 +145,13 @@ class EnergyAssignDialog(QDialog):
         self.load_source_button = QPushButton("Load source...")
         self.load_source_button.clicked.connect(self._on_load_source_clicked)
         source_row.addWidget(self.load_source_button)
+        self.clear_button = QPushButton("Clear")
+        self.clear_button.setToolTip(
+            "Forget every assigned energy and the loaded source for this "
+            "spectrum. Does not change the active calibration."
+        )
+        self.clear_button.clicked.connect(self._on_clear)
+        source_row.addWidget(self.clear_button)
         self.source_label = QLabel("No source loaded")
         source_row.addWidget(self.source_label)
         source_row.addStretch(1)
@@ -149,19 +171,19 @@ class EnergyAssignDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
         )
-        for row, (label, channel, channel_err) in enumerate(self._peaks):
-            name = QTableWidgetItem(label)
+        for row, peak in enumerate(self._peaks):
+            name = QTableWidgetItem(peak.label)
             name.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.table.setItem(row, 0, name)
 
-            position = QTableWidgetItem(f"{channel:.3f}")
+            position = QTableWidgetItem(f"{peak.channel:.3f}")
             position.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.table.setItem(row, 1, position)
 
             # Shown, not just used: it is the reason one row deserves more
             # weight than another, and seeing a peak with a large
             # uncertainty explains a calibration that leans away from it.
-            uncertainty = QTableWidgetItem(_format_uncertainty(channel_err))
+            uncertainty = QTableWidgetItem(_format_uncertainty(peak.channel_err))
             uncertainty.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.table.setItem(row, 2, uncertainty)
 
@@ -184,6 +206,53 @@ class EnergyAssignDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+        # Deferred to the end of construction: restoring calls load_source(),
+        # which reports through self.status -- a widget that does not exist
+        # until every row above it has run.
+        if assignments is not None:
+            self._restore_assignments(assignments)
+
+    def _restore_assignments(self, assignments):
+        """Refill the table from a previous visit.
+
+        Matching is by channel within each peak's own FWHM, so a refit
+        that nudged a centroid keeps its energy while a peak that moved
+        further than its own width opens blank rather than inheriting
+        an identification that belonged to something else.
+        """
+        peaks = [(peak.channel, peak.fwhm) for peak in self._peaks]
+        self._writing = True
+        try:
+            for row, energy in restore(assignments, peaks).items():
+                self.table.item(row, self.ENERGY_COLUMN).setText(repr(energy))
+        finally:
+            self._writing = False
+        if assignments.source_path and os.path.exists(assignments.source_path):
+            self.load_source(assignments.source_path)
+        self._update_suggest_availability()
+
+    def _on_clear(self):
+        """Empty every energy, drop the source, and mark the stored
+        record for deletion. Deliberately does NOT touch the active
+        calibration: discarding the identifications and un-calibrating
+        the spectrum are different actions."""
+        self._writing = True
+        try:
+            for row in range(len(self._peaks)):
+                item = self.table.item(row, self.ENERGY_COLUMN)
+                item.setText("")
+                item.setBackground(QBrush())
+                item.setToolTip("")
+        finally:
+            self._writing = False
+        self._suggested.clear()
+        self.source_lines = None
+        self._source_name = None
+        self.source_label.setText("No source loaded")
+        self.cleared = True
+        self.status.setText("Cleared all assignments.")
+        self._update_suggest_availability()
+
     # --- reading the table ------------------------------------------------
 
     def _energy_text(self, row):
@@ -199,23 +268,23 @@ class EnergyAssignDialog(QDialog):
         calibration quietly fitted to fewer points than the user thinks.
         """
         channels, energies, errors = [], [], []
-        for row, (label, channel, channel_err) in enumerate(self._peaks):
+        for row, peak in enumerate(self._peaks):
             text = self._energy_text(row).strip()
             if not text:
                 continue
             try:
                 value = float(text)
             except ValueError:
-                raise ValueError(f"{label}: {text!r} is not a number") from None
+                raise ValueError(f"{peak.label}: {text!r} is not a number") from None
             # float() alone accepts "nan"/"inf", which from_points would
             # only reject later with a message about the whole fit's
             # coefficients -- name the offending row here instead, exactly
             # like an unparseable entry.
             if not math.isfinite(value):
-                raise ValueError(f"{label}: {text!r} is not a finite energy") from None
+                raise ValueError(f"{peak.label}: {text!r} is not a finite energy") from None
             energies.append(value)
-            channels.append(channel)
-            errors.append(channel_err)
+            channels.append(peak.channel)
+            errors.append(peak.channel_err)
         return channels, energies, errors
 
     def suggested_rows(self):
@@ -363,10 +432,10 @@ class EnergyAssignDialog(QDialog):
                    for e in energies)
         }
         proposals = {}
-        for row, (_label, channel, _err) in enumerate(self._peaks):
+        for row, peak in enumerate(self._peaks):
             if self._energy_text(row).strip():
                 continue
-            line = match_line(provisional.apply(channel), self.source_lines)
+            line = match_line(provisional.apply(peak.channel), self.source_lines)
             if line is None or line.energy in taken:
                 continue
             proposals[row] = line.energy
