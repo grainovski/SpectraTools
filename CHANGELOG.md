@@ -4,7 +4,7 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
-## [5.1.0] - unreleased
+## [5.1.0] - 2026-09-05
 
 ### Added
 
