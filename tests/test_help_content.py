@@ -1099,7 +1099,25 @@ def test_help_documents_the_include_exclude_tick():
     howto = build_howto_html()
     assert "unticking it leaves that point out" in howto
     assert "hollow marker" in howto
-    assert "still written there" in howto      # the CalEnEff exception
+    # Two different answers for two different things, and the page has to
+    # give both: the export offered from this dialog writes an excluded
+    # point, and the refit an automatic run makes does not.
+    assert "excluded point anyway" in howto
+    assert "leaves it out" in howto
+
+
+def test_help_says_the_residual_strip_is_scaled_to_the_fit():
+    howto = build_howto_html()
+    assert "scaled to the points the fit was made" in howto
+    assert "outside the strip" in howto
+
+
+def test_help_says_an_unticked_line_is_not_refitted():
+    howto = build_howto_html()
+    assert "visibly present and" in howto
+    assert "still ticked is refitted" in howto
+    assert "left out of this pass" in howto
+    assert "still claims its own peak" in howto
 
 # ---------------------------------------------------------------------------
 # v5.1.0: automatic calibration. Rendered text or short single-line

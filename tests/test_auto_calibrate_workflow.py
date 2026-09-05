@@ -298,9 +298,11 @@ def test_the_variance_of_a_derived_spectrum_reaches_the_fits(qapp, tmp_path, mon
 # --- after OK: the refit for CalEnEff ----------------------------------
 
 
-def _run_and_accept(window, monkeypatch, source_path):
+def _run_and_accept(window, monkeypatch, source_path, before_accept=None):
     """Drive both dialogs and ACCEPT the assign dialog, as a user happy
-    with the plot does. Returns (automatic dialog, assign dialog)."""
+    with the plot does. `before_accept` is handed the assign dialog first,
+    for a user who unticks a row before pressing OK. Returns (automatic
+    dialog, assign dialog)."""
     auto_dialogs, assign_dialogs = [], []
 
     def fake_exec(self):
@@ -318,6 +320,8 @@ def _run_and_accept(window, monkeypatch, source_path):
             assign_dialogs.append(self)
 
         def exec(self):
+            if before_accept is not None:
+                before_accept(self)
             self._on_accept()
             return (QDialog.DialogCode.Accepted if self.result_calibration is not None
                     else QDialog.DialogCode.Rejected)
@@ -370,3 +374,44 @@ def test_cancelling_the_review_keeps_the_first_pass_and_refits_nothing(qapp, tmp
     assert active.fits == outcome.results
     assert window._calibration is None
     assert active.energy_assignments.pairs == tuple(outcome.pairs)
+
+
+def test_a_row_unticked_before_ok_is_left_out_of_the_refit(qapp, tmp_path, monkeypatch):
+    """The tick decides two things now: whether the point anchors the
+    energy fit, and whether its area is measured for CalEnEff."""
+    source = _write_sou(tmp_path, EIGHT_LINES, "eight.sou")
+    window, active = _window(tmp_path, source)
+
+    dropped = []
+
+    def untick_the_third(dialog):
+        for row in range(dialog.table.rowCount()):
+            text = dialog.table.item(row, ENERGY).text().strip()
+            if text and abs(float(text) - 344.2785) < 1e-3:
+                dialog.table.item(row, EnergyAssignDialog.INCLUDE_COLUMN)\
+                    .setCheckState(Qt.CheckState.Unchecked)
+                dropped.append(float(text))
+                return
+
+    _auto, assign = _run_and_accept(window, monkeypatch, source,
+                                    before_accept=untick_the_third)
+    assert dropped == [344.2785], "the row to untick was never found"
+    assert assign.result_calibration is not None
+
+    energies = [e for _c, e in active.energy_assignments.pairs]
+    assert not any(abs(e - 344.2785) < 1e-6 for e in energies), \
+        "the unticked line was refitted anyway"
+    assert any(abs(e - 121.7817) < 1e-6 for e in energies), "nothing was refitted"
+    assert 344.2785 in tuple(active.energy_assignments.excluded)
+    assert "left unticked in the calibration" in window.statusBar().currentMessage()
+    plot = window._calibration_plot
+    assert all(abs(p[4] - 344.2785) > 1e-6 for p in plot._points)
+
+
+def test_with_nothing_unticked_that_line_is_refitted(qapp, tmp_path, monkeypatch):
+    """CONTROL for the test above."""
+    source = _write_sou(tmp_path, EIGHT_LINES, "eight.sou")
+    window, active = _window(tmp_path, source)
+    _auto, _assign = _run_and_accept(window, monkeypatch, source)
+    energies = [e for _c, e in active.energy_assignments.pairs]
+    assert any(abs(e - 344.2785) < 1e-6 for e in energies)

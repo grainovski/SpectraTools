@@ -245,3 +245,56 @@ def test_nothing_can_be_picked_off_a_residual_strip_with_no_calibration(qapp):
     dialog.set_data(None, _points(), _lines(), reason="too few points")
     _click(dialog, dialog.residual_axes, 0.5, 0.5)
     assert dialog.picked_index() is None
+
+
+
+# --- the residual strip is scaled to the fit, not to what was left out --
+
+
+def _outlier_points():
+    """Three points on the line and one far off it."""
+    return [(100.0, 0.05, 9000.0, 95.0, 120.1),
+            (300.0, 0.08, 4000.0, 63.0, 340.2),
+            (500.0, 0.06, 2000.0, 45.0, 559.9),
+            (700.0, 0.06, 1000.0, 30.0, 830.0)]
+
+
+def test_an_excluded_outlier_does_not_set_the_residual_scale(qapp):
+    """Its residual is fifty keV against a tenth of one; letting it set
+    the scale squashed every remaining point onto the zero line, which is
+    the one thing the strip exists to show."""
+    cal = Calibration(kind="linear", a=10.0, b=1.1)
+    dialog = _dialog(qapp, calibration=cal, points=_outlier_points())
+    dialog.set_data(cal, _outlier_points(), _lines(), excluded=(830.0,))
+    low, high = dialog.residual_axes.get_ylim()
+    assert high < 1.0, "the excluded point still set the scale"
+    assert low < -0.1 <= 0.2 < high, "an included residual fell outside the view"
+
+
+def test_with_the_outlier_included_the_scale_does_stretch_to_it(qapp):
+    """CONTROL: same points, nothing excluded. Without this the test
+    above would pass on a plot that never scaled to anything."""
+    cal = Calibration(kind="linear", a=10.0, b=1.1)
+    dialog = _dialog(qapp, calibration=cal, points=_outlier_points())
+    _low, high = dialog.residual_axes.get_ylim()
+    assert high > 40.0
+
+
+def test_the_excluded_point_is_still_drawn_and_still_pickable(qapp):
+    """Out of the residual view is not out of the window: it stays on
+    the curve above, where clicking it names it and its residual."""
+    cal = Calibration(kind="linear", a=10.0, b=1.1)
+    dialog = _dialog(qapp, calibration=cal, points=_outlier_points())
+    dialog.set_data(cal, _outlier_points(), _lines(), excluded=(830.0,))
+    _click(dialog, dialog.axes, 700.0, 830.0)
+    assert dialog.picked_index() == 3
+    assert "excluded" in dialog.picked_label.text()
+
+
+def test_one_point_on_the_line_still_gets_a_usable_scale(qapp):
+    """A single residual, or a fit passing exactly through every point,
+    gives a zero span; the strip must not collapse to nothing."""
+    cal = Calibration(kind="linear", a=10.0, b=1.1)
+    dialog = _dialog(qapp, calibration=cal, points=_outlier_points()[:1])
+    low, high = dialog.residual_axes.get_ylim()
+    assert high > low

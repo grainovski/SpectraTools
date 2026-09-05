@@ -1187,13 +1187,20 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         beside the new ones: they were the same peaks, and a spectrum
         carrying two fits of every line would export every efficiency
         point twice. Fits made by hand before the run are untouched.
+
+        A point the user unticked in the review is left out of this pass
+        as well. Unticking here means the area does not belong on the
+        efficiency curve, and the whole purpose of the refit is to
+        measure areas for that curve.
         """
         import auto_calibrate
 
+        remembered = active.energy_assignments
+        unticked = tuple(remembered.excluded) if remembered is not None else ()
         refit = auto_calibrate.refit_source_lines(
             channel_indices(len(active.data)), active.data, dialog.source_lines,
             calibration, sensitivity=dialog.sensitivity.value(),
-            variance=getattr(active, "variance", None),
+            variance=getattr(active, "variance", None), excluded=unticked,
         )
         superseded = {id(result) for result in outcome.results}
         active.fits[:] = [f for f in active.fits if id(f) not in superseded]
@@ -1205,6 +1212,9 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self._plot_data(preserve_view=True)
         active.energy_assignments = EnergyAssignments(
             source_path=dialog.source_path(), pairs=tuple(refit.pairs),
+            # Kept though none of these lines is now on the spectrum:
+            # the user's decision outlives the fits it was made about.
+            excluded=unticked,
         )
         points = [
             (result.peaks[0].position, result.peaks[0].position_err or 0.0,

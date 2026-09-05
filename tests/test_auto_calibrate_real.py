@@ -176,3 +176,80 @@ def test_refit_with_no_peaks_reports_every_line_invisible():
     text = refit.summary("co56.sou")
     assert "0 lines of co56.sou refitted" in text
     assert "with no visible peak" in text
+
+
+# --- points the user unticked stay out of the refit ---------------------
+
+
+def _refit(counts, lines, excluded=()):
+    cal = C.Calibration(kind="linear", a=0.0, b=0.6249)
+    return auto_calibrate.refit_source_lines(
+        channel_indices(len(counts)), counts, lines, cal, excluded=excluded)
+
+
+def _accounted(refit, lines):
+    return (refit.outside + refit.invisible + refit.blended + refit.skipped
+            + refit.failed + refit.runaway + refit.excluded
+            + len(refit.results)) == len(lines)
+
+
+def test_an_unticked_line_is_not_refitted_and_not_exported(eu152):
+    """Unticking in an automatic run means the area does not sit on the
+    efficiency curve, and the refit exists to measure areas for exactly
+    that curve. Exporting it anyway would feed CalEnEff the one number
+    the run had already judged wrong."""
+    counts, lines, _outcome = eu152
+    kept = _refit(counts, lines)
+    dropped = _refit(counts, lines, excluded=(344.2785,))
+
+    assert any(abs(e - 344.2785) < 1e-6 for _c, e in kept.pairs)
+    assert not any(abs(e - 344.2785) < 1e-6 for _c, e in dropped.pairs)
+    assert len(dropped.results) == len(kept.results) - 1
+    assert dropped.excluded == 1
+    assert _accounted(dropped, lines)
+    assert "1 left unticked in the calibration" in dropped.summary("eu152.sou")
+
+
+def test_a_rounded_energy_still_names_its_line(eu152):
+    """The cell may hold what the user typed rather than the line's own
+    value to seven figures."""
+    counts, lines, _outcome = eu152
+    refit = _refit(counts, lines, excluded=(344.28, 1408.01))
+    assert refit.excluded == 2
+    for energy in (344.2785, 1408.013):
+        assert not any(abs(e - energy) < 1e-6 for _c, e in refit.pairs)
+
+
+def test_an_energy_belonging_to_no_line_excludes_nothing(eu152):
+    """CONTROL: the matching is by nearest line within a tolerance, so a
+    value from nowhere must leave the refit untouched rather than take
+    whichever line happens to be closest."""
+    counts, lines, _outcome = eu152
+    kept = _refit(counts, lines)
+    stray = _refit(counts, lines, excluded=(999.0,))
+    assert stray.excluded == 0
+    assert len(stray.results) == len(kept.results)
+
+
+def test_an_unticked_line_still_claims_its_peak(eu152):
+    """963.37 and 964.06 keV are one peak at this resolution and the
+    stronger of them owns it. Unticking the stronger must not hand the
+    peak -- and its whole area -- to the weaker."""
+    counts, lines, _outcome = eu152
+    refit = _refit(counts, lines, excluded=(964.057,))
+    assert not any(abs(e - 964.057) < 1e-6 for _c, e in refit.pairs)
+    assert not any(abs(e - 963.367) < 1e-6 for _c, e in refit.pairs)
+    assert _accounted(refit, lines)
+
+
+def test_every_line_unticked_leaves_a_spectrum_with_no_peaks_accounted_for():
+    flat = np.full(500, 30.0)
+    lines = load_sou(os.path.join(FIXTURES, "co56.sou"))
+    cal = C.Calibration(kind="linear", a=0.0, b=10.0)
+    refit = auto_calibrate.refit_source_lines(
+        channel_indices(500), flat, lines, cal,
+        excluded=[line.energy for line in lines])
+    assert refit.results == []
+    assert refit.excluded == len(lines)
+    assert refit.invisible == 0
+    assert _accounted(refit, lines)

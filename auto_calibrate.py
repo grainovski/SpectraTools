@@ -157,6 +157,18 @@ _MAX_OFFSET = 500.0
 #: would export a wrong area under this line's intensity.
 REFIT_SEARCH_FWHM = 0.5
 
+#: How near an unticked energy has to be to a source line to be taken as
+#: that line, in keV.
+#:
+#: The energies come back from the calibration dialog as the user left
+#: them: normally the line's own value to full precision, since that is
+#: what the automatic pass and Suggest put in the cell, but a hand-typed
+#: row may be a rounded reading of it. Three tenths of a keV covers a
+#: couple of decimal places and is still under half the closest spacing
+#: in the sample sources -- 0.69 keV, between the 963.37 and 964.06 keV
+#: lines of Eu-152 -- so it cannot reach a neighbouring line by mistake.
+EXCLUDED_MATCH_KEV = 0.3
+
 
 class MatchResult:
     """What the search concluded.
@@ -700,16 +712,17 @@ class RefitOutcome:
     a clear background, `failed` to converge, `runaway` when the fit
     converged on something other than the peak it was seeded on -- too
     wide, displaced, or with no positive area -- which is dropped rather
-    than exported as a measurement of that line.
+    than exported as a measurement of that line, and `excluded` when the
+    user unticked it in the calibration dialog.
     """
 
     __slots__ = ("results", "pairs", "outside", "invisible", "blended",
-                 "skipped", "failed", "runaway")
+                 "skipped", "failed", "runaway", "excluded")
 
     def __init__(self):
         self.results, self.pairs = [], []
         self.outside = self.invisible = self.blended = 0
-        self.skipped = self.failed = self.runaway = 0
+        self.skipped = self.failed = self.runaway = self.excluded = 0
 
     def summary(self, source_name):
         parts = [f"{_plural(len(self.results), 'line')} of {source_name} refitted for CalEnEff"]
@@ -718,14 +731,28 @@ class RefitOutcome:
                             (self.blended, "blended into a stronger neighbour"),
                             (self.skipped, "without a clear background"),
                             (self.failed, "that would not fit"),
-                            (self.runaway, "whose fit ran onto a neighbour or the background")):
+                            (self.runaway, "whose fit ran onto a neighbour or the background"),
+                            (self.excluded, "left unticked in the calibration")):
             if count:
                 parts.append(f"{count} {what}")
         return "; ".join(parts) + "."
 
 
+def _unticked(lines, excluded):
+    """The energies of `lines` the user unticked, matched to the nearest
+    line within EXCLUDED_MATCH_KEV. An excluded energy that matches no
+    line is ignored rather than guessed at."""
+    chosen = set()
+    for value in excluded or ():
+        nearest = min(lines, key=lambda line: abs(line.energy - value), default=None)
+        if nearest is not None and abs(nearest.energy - value) <= EXCLUDED_MATCH_KEV:
+            chosen.add(nearest.energy)
+    return chosen
+
+
 def refit_source_lines(x, counts, lines, calibration,
-                       sensitivity=peak_search.DEFAULT_SENSITIVITY, variance=None):
+                       sensitivity=peak_search.DEFAULT_SENSITIVITY, variance=None,
+                       excluded=()):
     """Fit, individually, every source line that is visibly present.
 
     The calibration says where each line should be; a found photopeak
@@ -736,15 +763,24 @@ def refit_source_lines(x, counts, lines, calibration,
     already claimed by a stronger line are counted, not fitted -- an area
     fitted where there is no peak is a number, not a measurement, and it
     would sit on the efficiency curve as if it were one.
+
+    `excluded` are the energies the user unticked in the calibration
+    dialog. They are not fitted and not exported: the reason a point is
+    unticked in an automatic run is that its area does not sit on the
+    efficiency curve the others trace, which is exactly the number
+    CalEnEff would be fed. An unticked line still claims its peak, so a
+    weaker line blended into it does not inherit the peak's whole area.
     """
     from peak_fit import FitError, fit_peaks
 
     outcome = RefitOutcome()
+    unticked = _unticked(lines, excluded)
     counts = np.asarray(counts, dtype=float)
     found = peak_search.search(counts, sensitivity)
     photopeaks, _broad = peak_search.reject_broad(found)
     if not photopeaks:
-        outcome.invisible = len(lines)
+        outcome.invisible = len(lines) - len(unticked)
+        outcome.excluded = len(unticked)
         return outcome
     photopeaks.sort(key=lambda p: p.channel)
     centres = np.array([p.channel for p in photopeaks])
@@ -770,6 +806,9 @@ def refit_source_lines(x, counts, lines, calibration,
         candidates = claims[k]
         line = max(candidates, key=lambda l: l.intensity)
         outcome.blended += len(candidates) - 1
+        if line.energy in unticked:
+            outcome.excluded += 1
+            continue
         region = peak_search.regions(photopeaks[k], counts, found)
         if region is None:
             outcome.skipped += 1

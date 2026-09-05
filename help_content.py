@@ -414,11 +414,16 @@ residual strip is for: when one point sits far off the line, untick it
 and watch the fit and the residuals redraw without it. The excluded
 point is still drawn, as a hollow marker, and its residual against the
 new fit is still shown, so you can see what you rejected and change your
-mind. <b>Suggest remaining</b> ignores unticked points too, since
-suggesting is itself an energy fit and a suspect anchor would place every
-other line wrongly. The CalEnEff export is the exception: an excluded
-point is still written there, because its area and intensity are
-unaffected by a doubt about the energy fit.</p>
+mind. The residual strip is scaled to the points the fit was made
+through, so a point excluded for sitting far off the line no longer
+squashes the rest onto the zero line; it stays on the curve above, and
+may fall outside the strip's view. <b>Suggest remaining</b> ignores
+unticked points too, since suggesting is itself an energy fit and a
+suspect anchor would place every other line wrongly. <b>Finish and save
+for CalEnEff...</b> here writes the excluded point anyway, because a
+doubt about where a line sits in energy says nothing about its area.
+The refit an automatic calibration runs is different and leaves it out;
+see &quot;12. Automatic calibration&quot;.</p>
 <p><b>Your assignments are remembered.</b> Everything you type stays with
 that spectrum for the session, so refitting and reopening the dialog
 brings it back rather than making you retype it -- and so does the
@@ -489,10 +494,14 @@ but out of the fit until you say otherwise. Check the residual strip in
 the live plot, untick any point that sits off the line, switch between
 linear and quadratic and watch the plot follow, and press OK to apply
 the calibration exactly as in "11. Calibrating from fitted peaks".</li>
-<li>On OK, <b>every line of the source that is visibly present is
-refitted</b>, one at a time, and those fits replace the ones from the
-identification pass -- one clean area per line, which is the input
-CalEnEff needs. The calibration plot then opens on the refitted points,
+<li>On OK, <b>every line of the source that is visibly present and
+still ticked is refitted</b>, one at a time, and those fits replace the
+ones from the identification pass -- one clean area per line, which is
+the input CalEnEff needs. A point you unticked is left out of this pass
+as well: unticking it in an automatic run means its area does not sit on
+the efficiency curve, and an area is exactly what the refit measures.
+An unticked line still claims its own peak, so a weaker line blended
+into it does not inherit the peak's whole area. The calibration plot then opens on the refitted points,
 and <b>Finish and save for CalEnEff...</b> writes them. Lines the
 calibration places outside the spectrum, lines with nothing above the
 noise where they should be, and lines blended into a stronger neighbour

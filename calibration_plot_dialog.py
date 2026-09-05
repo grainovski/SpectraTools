@@ -171,6 +171,15 @@ class CalibrationPlotDialog(QDialog):
                     [p[4] - calibration.apply(p[0]) for p in left],
                     fmt="o", capsize=3, markerfacecolor="none",
                 )
+            # Scaled to the points the fit was made through, not to the
+            # ones left out of it. An excluded point is usually excluded
+            # for being far off the line, and letting it set the scale
+            # squashed every remaining residual into the middle of the
+            # strip -- which is the one thing this strip exists to show.
+            # The excluded point is still drawn; it is simply allowed to
+            # fall outside the view, and the plot still names it when
+            # clicked on the curve above.
+            self._scale_residuals(residuals)
         else:
             self.residual_axes.text(
                 0.5, 0.5, reason or "no calibration to compare against",
@@ -191,6 +200,17 @@ class CalibrationPlotDialog(QDialog):
             self.summary_label.setText(
                 f"no calibration: {reason}" if reason else "no calibration yet"
             )
+
+    def _scale_residuals(self, residuals):
+        """Fit the residual strip's y axis around `residuals` alone."""
+        if not residuals:
+            return
+        low, high = min(residuals), max(residuals)
+        margin = 0.1 * (high - low)
+        if not (margin > 0.0):
+            # One point, or a fit passing exactly through all of them.
+            margin = max(0.1 * abs(high), 1e-3)
+        self.residual_axes.set_ylim(low - margin, high + margin)
 
     # --- picking a point --------------------------------------------------
 

@@ -115,6 +115,23 @@ when individual pieces of work happened.
   to be found in the table by counting. Clicking empty space clears the
   ring and the selection.
 
+- **A point unticked in the calibration dialog is now left out of the
+  CalEnEff refit too, and the residual strip is scaled to the points the
+  fit was made through.** In an automatic run a point is unticked
+  because its area does not sit on the efficiency curve the others
+  trace, and the refit exists to measure areas for that curve; refitting
+  it anyway fed CalEnEff the one number the run had already judged
+  wrong. It is counted in the status line rather than silently dropped,
+  and it still claims its own peak, so a weaker line blended into it
+  cannot inherit the peak's whole area.
+
+  The residual strip used to scale to every point drawn, excluded ones
+  included. A point excluded for sitting far off the line therefore set
+  the scale and squashed every remaining residual onto zero -- the one
+  thing the strip exists to show. The excluded point is still drawn and
+  still named when clicked; it is simply allowed to fall outside the
+  strip's view.
+
 ### Changed
 
 - **The calibration plot follows the kind of fit and stays open.**
