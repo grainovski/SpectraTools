@@ -313,3 +313,42 @@ def test_cancelling_the_load_leaves_the_spectrum_alone(qapp, tmp_path, monkeypat
 
     main_window._load_fits_dialog()
     assert len(active.fits) == 1, "cancelling must not append anything"
+def test_a_stepped_fit_round_trips_its_step(tmp_path):
+    original = _fit(enable_step=True, fit_background=True)
+    assert original.step_fraction is not None
+    path = tmp_path / "step.json"
+    fit_persist.save(path, [original], "s.txt")
+    restored, _ = fit_persist.load(path)
+
+    assert restored[0].step_fraction == pytest.approx(original.step_fraction)
+    assert restored[0].step_fraction_err == pytest.approx(original.step_fraction_err)
+
+
+def test_a_fit_with_no_step_keeps_none_rather_than_nan(tmp_path):
+    """Same distinction the tail draws: None says the fit had no step at
+    all, which is not the same as a step the fit could not determine."""
+    original = _fit()
+    assert original.step_fraction is None
+    path = tmp_path / "nostep.json"
+    fit_persist.save(path, [original], "s.txt")
+    restored, _ = fit_persist.load(path)
+    assert restored[0].step_fraction is None
+    assert restored[0].step_fraction_err is None
+
+
+def test_a_file_written_before_the_step_existed_still_loads(tmp_path):
+    """Every fits file in anyone's hands predates the step. The key is
+    simply absent from those records and must read back as None, not
+    raise and not become a zero step."""
+    original = _fit()
+    path = tmp_path / "old.json"
+    fit_persist.save(path, [original], "s.txt")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    for record in document["fits"]:
+        record.pop("step_fraction", None)
+        record.pop("step_fraction_err", None)
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    restored, _ = fit_persist.load(path)
+    assert restored[0].step_fraction is None
+    assert restored[0].peaks[0].area == pytest.approx(original.peaks[0].area)
