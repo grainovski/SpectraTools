@@ -10,7 +10,9 @@ Two peaks paired with two source lines fix a straight line exactly. Every
 such pairing is tried; each one predicts an energy for every other peak;
 a peak whose prediction lands on a real line within the spectrum's
 resolution is an inlier. The pairing with the most inliers wins, ties
-broken by the tighter residual.
+broken by the tighter residual -- and then the winner has to pass a
+second, independent test: the peak areas it implies must follow a
+detector efficiency curve (see efficiency_scatter).
 
 Only the STRONGEST peaks and lines are used to propose the pairing, since
 trying every combination of everything is needless -- the anchors only
@@ -27,6 +29,7 @@ import math
 import numpy as np
 
 import peak_search
+from peak_search import expected_widths  # noqa: F401  (re-exported; it lived here first)
 
 #: Strongest peaks and lines considered when PROPOSING a pairing. The
 #: cost is quadratic in each, and 10 x 15 is 4725 candidate lines --
@@ -43,25 +46,29 @@ ANCHOR_LINES = 15
 #: does not collect inliers by accident.
 INLIER_FWHM = 0.5
 
-#: A peak whose fitted width exceeds this multiple of the width expected
+#: A fitted peak whose width exceeds this multiple of the width expected
 #: at its channel is set aside: not an anchor, not an inlier, never
-#: assigned. Real widths scatter a few tens of percent about the trend;
-#: the fits this exists for were ten times it. Three rather than two
-#: because widths are shared within a fit: the real half of a doublet
-#: whose other half ran away inherits its partner's width, and at twice
-#: the trend it was being thrown out along with the junk, while the junk
-#: itself never came in under nine.
+#: assigned, never exported. Real single-peak widths scatter between a
+#: quarter and 1.8 times the trend on a real Eu-152 spectrum; a fit that
+#: has slid onto a neighbour or absorbed background comes back at 2.3
+#: times it and more, and the runaways this first existed for were ten
+#: times it. Two separates them with room on both sides.
 #:
-#: The failure this guards, seen on every synthetic spectrum the matcher
-#: was developed on: one to three assignments per spectrum wrong by 10 to
-#: 18 keV, each a fit component that had run away to a width of 120-150
-#: channels, absorbing background in a crowded region. The inlier
-#: tolerance used to be that peak's OWN fitted width, so a bad fit bought
-#: itself a tolerance of 20 keV and was matched to a line that far away.
-#: Now the tolerance comes from the resolution the spectrum as a whole
-#: establishes (see expected_widths), and a width this far outside it
-#: disqualifies the peak altogether.
-WIDTH_OUTLIER_RATIO = 3.0
+#: This was three while nearby peaks were fitted together, because the
+#: real half of a doublet whose other half ran away inherited its
+#: partner's width. Every fit is now a single peak, so nothing
+#: legitimately inherits a width -- and three let through two fits on the
+#: real spectrum, one of them 674.64 keV fitted 6.3 channels off its line
+#: at 2.6 times the expected width, that would have reached CalEnEff as
+#: measurements.
+WIDTH_OUTLIER_RATIO = 2.0
+
+#: A refitted centroid this many expected widths from the found peak it
+#: was seeded on has not fitted that peak: it has slid onto a neighbour.
+#: The 674.64 keV case above landed on the 678.62 keV peak six channels
+#: away, inside a fit window that had been clipped to keep it out -- a
+#: window bounds the data fitted, not where the centroid may go.
+REFIT_MAX_SHIFT_FWHM = 1.0
 
 #: Fewer inliers than this is not a calibration, it is a coincidence.
 #: Three points can be fitted by a quadratic exactly, so four is the
@@ -70,8 +77,8 @@ MIN_INLIERS = 4
 
 #: A rival solution whose gain differs by more than this is a genuinely
 #: DIFFERENT calibration, not a refinement of the winner. If such a rival
-#: explains as many peaks, the evidence does not choose between them and
-#: the match is refused.
+#: explains as many peaks and the efficiency test cannot separate them,
+#: the evidence does not choose and the match is refused.
 #:
 #: This is the failure this guard exists for, seen while developing it: a
 #: spectrum yielding only four peaks was "matched" with all four
@@ -104,11 +111,44 @@ MIN_CONFIRMATIONS = 2
 STRONG_PEAKS_CHECKED = 5
 STRONG_PEAKS_REQUIRED = 3
 
+#: The efficiency test. For a correct assignment, area / intensity is
+#: the detector's full-energy-peak efficiency at that energy times a
+#: constant, and an HPGe efficiency curve is smooth -- a quadratic in
+#: log-log is the standard parametrisation and follows the low-energy
+#: turnover as well as the power-law fall above it. For a WRONG
+#: assignment the intensities belong to other lines and the ratios
+#: scatter by orders of magnitude.
+#:
+#: Measured on a real Eu-152 spectrum: the 32 correct assignments
+#: scatter about the curve by 0.12 dex (a factor 1.3); shifting every
+#: assignment to the neighbouring line gives 0.76 dex (a factor 5.7).
+#: The limit below is a factor of ~2.8, three times the real scatter and
+#: less than half the wrong one.
+EFFICIENCY_MAX_SCATTER = 0.45
+#: A point this many scatters from the curve is SUSPECT -- a wrong line,
+#: a misfitted area, or a genuine doublet -- and is handed back for the
+#: user to see hollow on the plot rather than silently included in the
+#: fit. Never tighter than 0.3 dex (a factor 2), so a tightly consistent
+#: spectrum does not flag its own noise.
+EFFICIENCY_SUSPECT_SIGMA = 3.0
+EFFICIENCY_SUSPECT_FLOOR = 0.3
+#: Fewer points than this and the curve is not constrained enough to
+#: judge anything; the test is skipped, not failed.
+EFFICIENCY_MIN_POINTS = 5
+
 #: Sanity bounds on the provisional straight line. A gain outside this
 #: range or an offset this large is not a spectrometer, it is a pairing
 #: that happens to be arithmetically consistent.
 _MIN_GAIN, _MAX_GAIN = 1e-3, 1e3
 _MAX_OFFSET = 500.0
+
+#: The refit pass looks for a found peak within this many expected
+#: widths of where the calibration says a source line should be. Half a
+#: width: the calibration is already good to a fraction of a channel
+#: (0.12 keV rms on the real Eu-152 spectrum, a fifth of a channel), so
+#: a peak further off than that is a different peak, and claiming it
+#: would export a wrong area under this line's intensity.
+REFIT_SEARCH_FWHM = 0.5
 
 
 class MatchResult:
@@ -117,16 +157,18 @@ class MatchResult:
     `pairs` is [(peak index, energy)] -- indices into the peaks list as
     given. `reason` is set only when the search failed, and says why in
     words meant for the status line. `unusable` counts the peaks set
-    aside before matching for an implausible width or area; they are
-    never assigned, and the status line should say so rather than let
-    them pass as merely unidentified.
+    aside before matching for an implausible width or area. `suspect` is
+    the subset of `pairs` whose area does not sit on the efficiency curve
+    the others define; `efficiency_scatter` is that curve's residual rms
+    in dex, or None when there were too few points to fit one.
     """
 
     __slots__ = ("pairs", "gain", "offset", "rms", "reason", "considered",
-                 "unusable")
+                 "unusable", "suspect", "efficiency_scatter")
 
     def __init__(self, pairs=(), gain=0.0, offset=0.0, rms=float("inf"),
-                 reason=None, considered=0, unusable=0):
+                 reason=None, considered=0, unusable=0, suspect=(),
+                 efficiency_scatter=None):
         self.pairs = list(pairs)
         self.gain = gain
         self.offset = offset
@@ -134,6 +176,8 @@ class MatchResult:
         self.reason = reason
         self.considered = considered
         self.unusable = unusable
+        self.suspect = list(suspect)
+        self.efficiency_scatter = efficiency_scatter
 
     @property
     def ok(self):
@@ -154,56 +198,8 @@ def _strongest(values, count):
     return sorted(int(i) for i in keep)
 
 
-def expected_widths(channels, fwhms):
-    """The FWHM a well-fitted peak should have at each channel, from a
-    robust straight line through the fitted widths.
-
-    Resolution worsens with energy, so one width for the whole spectrum
-    would be too loose at the bottom and too tight at the top -- on the
-    spectra this was developed on the widths span a factor of seven from
-    end to end, so a flat median would have put the lowest peaks at a
-    third of it and the highest at nearly twice, where the outlier test
-    would have thrown them out. A straight line is the right shape over
-    that range.
-
-    The line is Siegel's repeated median rather than least squares,
-    because the widths this exists to set aside -- runaway components ten
-    times too wide -- are precisely the points that would pull a
-    least-squares line towards themselves. It survives up to half the
-    peaks being junk; Theil-Sen's one third is not enough at four or five
-    peaks, where a single outlier is already a quarter of them.
-
-    Falls back to the median width when there are too few usable widths
-    to define a slope, and never returns less than a fifth of the median,
-    so a line steep enough to cross zero cannot leave a peak with no
-    tolerance at all. A fifth and not a half: the lowest peaks of a real
-    spectrum sit at a third of the median width, and a floor above them
-    would loosen exactly the tolerances that need to be tightest. NaN
-    where a channel is not finite, and everywhere when no width is
-    usable.
-    """
-    channels = np.asarray(channels, dtype=float)
-    fwhms = np.asarray(fwhms, dtype=float)
-    good = np.isfinite(channels) & np.isfinite(fwhms) & (fwhms > 0.0)
-    if not np.any(good):
-        return np.full(channels.shape, np.nan)
-    c, w = channels[good], fwhms[good]
-    median = float(np.median(w))
-    if c.size < 3 or np.ptp(c) == 0.0:
-        return np.full(channels.shape, median)
-
-    dc = c[:, None] - c[None, :]
-    dw = w[:, None] - w[None, :]
-    with np.errstate(divide="ignore", invalid="ignore"):
-        slopes = np.where(dc != 0.0, dw / dc, np.nan)
-    row_medians = [np.nanmedian(row) for row in slopes if np.any(np.isfinite(row))]
-    slope = float(np.median(row_medians))
-    intercept = float(np.median(w - slope * c))
-    return np.maximum(intercept + slope * channels, 0.2 * median)
-
-
 def _usable(fwhms, weights, expected):
-    """Which peaks may take part at all.
+    """Which fitted peaks may take part at all.
 
     A width the fit could not determine, a width far outside the trend,
     or a weight that is not positive -- a fitted area that came out
@@ -247,14 +243,40 @@ def _inliers(channels, tolerances, energies, gain, offset):
     return pairs, rms
 
 
+def efficiency_scatter(energies, areas, intensities):
+    """(rms in dex, per-point residuals in dex) of log10(area/intensity)
+    about a quadratic in log10(energy) -- or (None, None) with fewer than
+    EFFICIENCY_MIN_POINTS usable points.
+
+    This is what makes a set of assignments physically consistent rather
+    than merely arithmetically consistent: the ratios must trace one
+    smooth efficiency curve. Points with a non-positive energy, area or
+    intensity are left out of the fit and get NaN residuals.
+    """
+    e = np.asarray(energies, dtype=float)
+    a = np.asarray(areas, dtype=float)
+    i = np.asarray(intensities, dtype=float)
+    ok = np.isfinite(e) & np.isfinite(a) & np.isfinite(i) & (e > 0) & (a > 0) & (i > 0)
+    residuals = np.full(e.shape, np.nan)
+    if int(ok.sum()) < EFFICIENCY_MIN_POINTS:
+        return None, residuals
+    x = np.log10(e[ok])
+    y = np.log10(a[ok] / i[ok])
+    degree = 2 if ok.sum() >= 6 else 1
+    coefficients = np.polyfit(x, y, degree)
+    residuals[ok] = y - np.polyval(coefficients, x)
+    return float(np.sqrt(np.mean(residuals[ok] ** 2))), residuals
+
+
 def match(peak_channels, peak_fwhms, peak_weights, line_energies,
           line_intensities=None, inlier_fwhm=INLIER_FWHM):
     """Assign source lines to peaks with no prior calibration.
 
-    `peak_weights` ranks peaks for anchor selection -- area or height.
-    A peak whose weight is not positive is never assigned; see _usable.
-    `line_intensities` does the same for lines; without it the first
-    ANCHOR_LINES are used.
+    `peak_weights` ranks peaks for anchor selection and, being the fitted
+    areas, feeds the efficiency test. A peak whose weight is not positive
+    is never assigned; see _usable. `line_intensities` rank the lines
+    and feed the efficiency test too; without them the first
+    ANCHOR_LINES are used and the efficiency test is skipped.
 
     Returns a MatchResult. Failure is reported, never guessed at: a
     calibration built on a wrong pairing looks entirely reasonable, since
@@ -290,12 +312,14 @@ def match(peak_channels, peak_fwhms, peak_weights, line_energies,
 
     anchor_p = [i for i in _strongest(np.where(usable, weights, -np.inf), ANCHOR_PEAKS)
                 if usable[i]]
+    intensity_of = None
     if line_intensities is None:
         anchor_l = list(range(min(ANCHOR_LINES, energies.size)))
     else:
         order = np.argsort(np.asarray(line_energies, dtype=float))
         sorted_int = np.asarray(line_intensities, dtype=float)[order]
         anchor_l = _strongest(sorted_int, ANCHOR_LINES)
+        intensity_of = dict(zip(energies.tolist(), sorted_int.tolist()))
 
     best = MatchResult(reason="no consistent assignment was found")
     # Best solution whose gain is incompatible with the winner's, kept so
@@ -354,6 +378,16 @@ def match(peak_channels, peak_fwhms, peak_weights, line_energies,
                     f"to the source; the spectrum may not be this nuclide, or "
                     f"too few of its lines were found"),
             considered=considered, unusable=unusable)
+
+    def scatter_of(result):
+        if intensity_of is None or not result.pairs:
+            return None, None
+        idx = [k for k, _e in result.pairs]
+        e = [en for _k, en in result.pairs]
+        return efficiency_scatter(e, weights[idx], [intensity_of[en] for en in e])
+
+    best_scatter, best_residuals = scatter_of(best)
+
     # Over every peak, usable or not: a strong peak set aside for its
     # width still counts against the match, since the ratio below
     # already allows for a couple of them.
@@ -366,13 +400,40 @@ def match(peak_channels, peak_fwhms, peak_weights, line_energies,
                     f"could be identified; the spectrum does not look like this "
                     f"source"),
             considered=considered, unusable=unusable)
+
     if len(rival.pairs) >= len(best.pairs):
-        return MatchResult(
-            reason=(f"two different calibrations explain the spectrum equally "
-                    f"well ({len(best.pairs)} peaks each, gains "
-                    f"{best.gain:.4g} and {rival.gain:.4g} keV/channel); "
-                    f"assign two peaks by hand to settle it"),
-            considered=considered, unusable=unusable)
+        # Equal counts. The efficiency test is independent evidence: if
+        # one candidate's areas trace an efficiency curve and the other's
+        # do not, that one is right. If neither is clearly better, refuse.
+        rival_scatter, _r = scatter_of(rival)
+        decided = False
+        if best_scatter is not None and rival_scatter is not None:
+            if best_scatter < 0.5 * rival_scatter:
+                decided = True
+            elif rival_scatter < 0.5 * best_scatter:
+                best, best_scatter, best_residuals = rival, rival_scatter, _r
+                best.considered, best.unusable = considered, unusable
+                decided = True
+        if not decided:
+            return MatchResult(
+                reason=(f"two different calibrations explain the spectrum equally "
+                        f"well ({len(best.pairs)} peaks each, gains "
+                        f"{best.gain:.4g} and {rival.gain:.4g} keV/channel); "
+                        f"assign two peaks by hand to settle it"),
+                considered=considered, unusable=unusable)
+
+    if best_scatter is not None:
+        if best_scatter > EFFICIENCY_MAX_SCATTER:
+            return MatchResult(
+                reason=(f"the peak areas do not follow a detector efficiency curve "
+                        f"under this assignment (scatter a factor of "
+                        f"{10 ** best_scatter:.1f} about the curve); the lines are "
+                        f"probably paired wrongly"),
+                considered=considered, unusable=unusable)
+        limit = max(EFFICIENCY_SUSPECT_SIGMA * best_scatter, EFFICIENCY_SUSPECT_FLOOR)
+        best.suspect = [pair for pair, r in zip(best.pairs, best_residuals)
+                        if np.isfinite(r) and abs(r) > limit]
+        best.efficiency_scatter = best_scatter
     return best
 
 
@@ -382,61 +443,74 @@ def match(peak_channels, peak_fwhms, peak_weights, line_energies,
 class AutoFitOutcome:
     """What the automatic fitting pass produced.
 
-    `results` are FitResults ready to commit to a spectrum, in channel
-    order. `peaks` is (result index, PeakResult) flattened in the same
-    order, which is what the matcher and the calibration dialog see.
-    `attempted`/`failed` are for the status line: a fit that will not
-    converge is normal in a crowded spectrum and must not stop the rest.
+    `results` are FitResults ready to commit to a spectrum, one per
+    fitted peak, in channel order. `peaks` is (result index, PeakResult)
+    in the same order, which is what the matcher and the calibration
+    dialog see. `broad` counts the found peaks set aside as not being
+    photopeaks; `skipped` the photopeaks that had no clear background on
+    both sides; `failed` the fits that did not converge. None of those
+    stops the rest.
     """
 
-    __slots__ = ("results", "peaks", "attempted", "failed", "skipped_edge")
+    __slots__ = ("results", "peaks", "attempted", "failed", "skipped", "broad")
 
-    def __init__(self, results, peaks, attempted, failed, skipped_edge):
+    def __init__(self, results, peaks, attempted, failed, skipped, broad):
         self.results = results
         self.peaks = peaks
         self.attempted = attempted
         self.failed = failed
-        self.skipped_edge = skipped_edge
+        self.skipped = skipped
+        self.broad = broad
+
+
+def _fit_one(x, y, peak, found, variance):
+    """(FitResult or None, reason) for one peak fitted on its own, with
+    its own markers: a fit window around it alone and two background
+    windows read from flat, peak-free stretches beside it."""
+    from peak_fit import FitError, fit_peaks
+
+    region = peak_search.regions(peak, y, found)
+    if region is None:
+        return None, "skipped"
+    bg_left, bg_right, fit_region, positions = region
+    try:
+        return fit_peaks(x, y, bg_left, bg_right, fit_region, positions,
+                         variance=variance), None
+    except (FitError, ValueError, RuntimeError):
+        return None, "failed"
 
 
 def fit_found_peaks(x, y, found, link_widths=True, variance=None):
-    """Fit every group of found peaks, skipping what will not fit.
+    """Fit every photopeak among `found`, one at a time.
 
-    Groups rather than individual peaks: a doublet fitted as two separate
-    single peaks gets both centroids and both areas wrong, because each
-    fit treats the other peak's tail as background. peak_search.group
-    decides what belongs together.
+    Individual fits, each with its own markers -- that is what the user
+    does by hand, and it keeps one bad neighbour from spoiling a good
+    peak. Broad features are set aside first and never fitted, but they
+    stay in the list every fit is told about, so no fit window reaches
+    into one and no background is read from one.
 
-    A group whose fit raises is dropped and counted, never allowed to
-    abort the pass -- one unconvergeable multiplet in a crowded region
-    should not cost the user every other peak in the spectrum.
-
-    `variance` is the spectrum's propagated per-channel variance, or None
-    for counts read from a file, exactly as the interactive Fit passes
-    it: a matrix cut or an Add/Subtract result is not Poisson in its own
-    counts, and fitting it as though it were misweights every channel.
+    A fit that raises is dropped and counted, never allowed to abort the
+    pass. `link_widths` is accepted for the caller's convenience and has
+    no effect on a single-peak fit. `variance` is the spectrum's
+    propagated per-channel variance, or None for counts read from a
+    file, exactly as the interactive Fit passes it.
     """
-    from peak_fit import FitError, fit_peaks
-
+    peaks_to_fit, broad = peak_search.reject_broad(found)
     results, peaks = [], []
-    attempted = failed = skipped_edge = 0
-    for cluster in peak_search.group(found):
-        region = peak_search.regions(cluster, len(y))
-        if region is None:
-            skipped_edge += 1
+    attempted = failed = skipped = 0
+    for peak in sorted(peaks_to_fit, key=lambda p: p.channel):
+        result, reason = _fit_one(x, y, peak, found, variance)
+        if reason == "skipped":
+            skipped += 1
             continue
-        bg_left, bg_right, fit_region, positions = region
         attempted += 1
-        try:
-            result = fit_peaks(x, y, bg_left, bg_right, fit_region, positions,
-                               link_widths=link_widths, variance=variance)
-        except (FitError, ValueError, RuntimeError):
+        if result is None:
             failed += 1
             continue
         results.append(result)
-        for peak in result.peaks:
-            peaks.append((len(results) - 1, peak))
-    return AutoFitOutcome(results, peaks, attempted, failed, skipped_edge)
+        for fitted in result.peaks:
+            peaks.append((len(results) - 1, fitted))
+    return AutoFitOutcome(results, peaks, attempted, failed, skipped, len(broad))
 
 
 # ------------------------------------------------------------ the whole run
@@ -479,16 +553,29 @@ class AutoCalibration:
         peaks = self.peaks
         return [(peaks[k].position, energy) for k, energy in self.match.pairs]
 
+    @property
+    def suspect_energies(self):
+        """Energies of the assignments the efficiency test doubts. The
+        dialog opens with these UNTICKED and hollow on the plot: still
+        assigned, so the user sees what was doubted and why, but out of
+        the fit until they decide otherwise."""
+        return tuple(energy for _k, energy in self.match.suspect)
+
     def summary(self, existing_fits, source_name):
         """One line for the status bar, honest about every count: what
-        was found, what could not be fitted, what was identified, and
-        that nothing already on the spectrum was touched."""
+        was found, what was set aside, what could not be fitted, what was
+        identified, and that nothing already on the spectrum was
+        touched."""
         fits = self.fits
-        text = (f"{len(self.found)} peaks found; fits: {fits.attempted} attempted, "
-                f"{fits.failed} failed, {fits.skipped_edge} skipped at the edge; "
+        text = (f"{len(self.found)} peaks found, {fits.broad} broad features set aside; "
+                f"fits: {fits.attempted} attempted, {fits.failed} failed, "
+                f"{fits.skipped} skipped for want of a clear background; "
                 f"{len(self.peaks)} peaks fitted, ")
         if self.match.ok:
             text += f"{len(self.match.pairs)} identified in {source_name}"
+            if self.match.suspect:
+                text += (f", {len(self.match.suspect)} of them left out of the fit as "
+                         f"suspect (area off the efficiency curve)")
         else:
             text += f"none identified: {self.match.reason}"
         # Set aside is not the same as unidentified, and a user counting
@@ -515,7 +602,7 @@ def calibrate(x, counts, lines, sensitivity=peak_search.DEFAULT_SENSITIVITY,
     """
     found = peak_search.search(counts, sensitivity)
     if not found:
-        return AutoCalibration(found, AutoFitOutcome([], [], 0, 0, 0), MatchResult(
+        return AutoCalibration(found, AutoFitOutcome([], [], 0, 0, 0, 0), MatchResult(
             reason="no peaks were found at this sensitivity; lower it"))
     fits = fit_found_peaks(x, counts, found, link_widths=link_widths,
                            variance=variance)
@@ -528,3 +615,116 @@ def calibrate(x, counts, lines, sensitivity=peak_search.DEFAULT_SENSITIVITY,
                    [line.energy for line in lines],
                    [line.intensity for line in lines])
     return AutoCalibration(found, fits, result)
+
+
+# --------------------------------------------- the refit for CalEnEff
+
+
+class RefitOutcome:
+    """What refitting the source's lines produced, once the calibration
+    is known.
+
+    `results` are one FitResult per line fitted; `pairs` the matching
+    [(fitted channel, energy)]. The counts say what happened to every
+    other line: `outside` the spectrum's range, `invisible` with no found
+    peak where the calibration puts it, `blended` into a stronger line
+    that the same found peak already accounts for, `skipped` for want of
+    a clear background, `failed` to converge, `runaway` when the fit
+    converged on something other than the peak it was seeded on -- too
+    wide, displaced, or with no positive area -- which is dropped rather
+    than exported as a measurement of that line.
+    """
+
+    __slots__ = ("results", "pairs", "outside", "invisible", "blended",
+                 "skipped", "failed", "runaway")
+
+    def __init__(self):
+        self.results, self.pairs = [], []
+        self.outside = self.invisible = self.blended = 0
+        self.skipped = self.failed = self.runaway = 0
+
+    def summary(self, source_name):
+        parts = [f"{_plural(len(self.results), 'line')} of {source_name} refitted for CalEnEff"]
+        for count, what in ((self.outside, "outside the spectrum"),
+                            (self.invisible, "with no visible peak"),
+                            (self.blended, "blended into a stronger neighbour"),
+                            (self.skipped, "without a clear background"),
+                            (self.failed, "that would not fit"),
+                            (self.runaway, "whose fit ran onto a neighbour or the background")):
+            if count:
+                parts.append(f"{count} {what}")
+        return "; ".join(parts) + "."
+
+
+def refit_source_lines(x, counts, lines, calibration,
+                       sensitivity=peak_search.DEFAULT_SENSITIVITY, variance=None):
+    """Fit, individually, every source line that is visibly present.
+
+    The calibration says where each line should be; a found photopeak
+    within REFIT_SEARCH_FWHM of that is fitted on its own with its own
+    markers, seeded at the found centroid rather than the predicted one.
+    Lines the calibration puts outside the spectrum, lines with nothing
+    above the noise where they should be, and lines that land on a peak
+    already claimed by a stronger line are counted, not fitted -- an area
+    fitted where there is no peak is a number, not a measurement, and it
+    would sit on the efficiency curve as if it were one.
+    """
+    from peak_fit import FitError, fit_peaks
+
+    outcome = RefitOutcome()
+    counts = np.asarray(counts, dtype=float)
+    found = peak_search.search(counts, sensitivity)
+    photopeaks, _broad = peak_search.reject_broad(found)
+    if not photopeaks:
+        outcome.invisible = len(lines)
+        return outcome
+    photopeaks.sort(key=lambda p: p.channel)
+    centres = np.array([p.channel for p in photopeaks])
+    widths = expected_widths(centres, [p.fwhm for p in photopeaks])
+
+    claims = {}
+    for line in lines:
+        try:
+            channel = float(calibration.invert(line.energy))
+        except Exception:
+            outcome.outside += 1
+            continue
+        if not math.isfinite(channel) or channel < 0 or channel > counts.size - 1:
+            outcome.outside += 1
+            continue
+        k = int(np.argmin(np.abs(centres - channel)))
+        if abs(centres[k] - channel) > REFIT_SEARCH_FWHM * widths[k]:
+            outcome.invisible += 1
+            continue
+        claims.setdefault(k, []).append(line)
+
+    for k in sorted(claims):
+        candidates = claims[k]
+        line = max(candidates, key=lambda l: l.intensity)
+        outcome.blended += len(candidates) - 1
+        region = peak_search.regions(photopeaks[k], counts, found)
+        if region is None:
+            outcome.skipped += 1
+            continue
+        bg_left, bg_right, fit_region, positions = region
+        try:
+            result = fit_peaks(x, counts, bg_left, bg_right, fit_region, positions,
+                               variance=variance)
+        except (FitError, ValueError, RuntimeError):
+            outcome.failed += 1
+            continue
+        # The same judgement the identification pass applies before it
+        # trusts a fit, applied here before a fit is exported: a width far
+        # off the trend, a centroid that left the peak it was seeded on,
+        # or a non-positive area is a fit of something else.
+        fitted = result.peaks[0]
+        expected = float(widths[k])
+        if (not math.isfinite(fitted.fwhm) or fitted.fwhm > WIDTH_OUTLIER_RATIO * expected
+                or not math.isfinite(fitted.position)
+                or abs(fitted.position - photopeaks[k].channel) > REFIT_MAX_SHIFT_FWHM * expected
+                or not (fitted.area > 0.0)):
+            outcome.runaway += 1
+            continue
+        outcome.results.append(result)
+        outcome.pairs.append((fitted.position, line.energy))
+    return outcome

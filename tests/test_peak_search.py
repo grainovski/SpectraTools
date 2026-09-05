@@ -8,7 +8,15 @@ The spectrum is synthetic with the answer known, so "found" and
 import numpy as np
 import pytest
 
-from peak_search import DEFAULT_SENSITIVITY, FoundPeak, group, regions, search
+import os
+
+from peak_search import (
+    DEFAULT_SENSITIVITY, FoundPeak, background_window, fit_window, flatness,
+    regions, reject_broad, search,
+)
+from spe_io import load_spe
+
+FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 
 #: (centre, amplitude) of the eight lines, Eu-152-like in their spread of
 #: strengths: the weakest is forty times below the strongest.
@@ -130,69 +138,163 @@ def test_repr_reads_as_a_peak():
     assert "600.00" in text and "5.10" in text and "12.5" in text
 
 
-# --- grouping ----------------------------------------------------------
+# --- broad features ----------------------------------------------------
 
 
-def _peak(channel, fwhm):
-    return FoundPeak(channel=channel, fwhm=fwhm, prominence=100.0,
+def _peak(channel, fwhm, prominence=100.0):
+    return FoundPeak(channel=channel, fwhm=fwhm, prominence=prominence,
                      significance=20.0, height=200.0)
 
 
-def test_peaks_within_three_widths_are_grouped_and_others_are_not():
-    groups = group([_peak(100.0, 5.0), _peak(112.0, 5.0), _peak(200.0, 5.0)])
-    assert [[p.channel for p in g] for g in groups] == [[100.0, 112.0], [200.0]]
+def test_a_feature_far_wider_than_the_trend_is_not_a_photopeak():
+    """Channel 187 of the real Eu-152 spectrum: a Compton feature 4.6
+    times the width of every real peak around it, which used to be
+    grouped with the 121.78 keV line eight channels away and ruin its
+    fit. It is set aside, and marked so the windows still avoid it."""
+    found = [_peak(c, 5.0) for c in (120.0, 140.0, 195.0, 390.0, 550.0)]
+    found.append(_peak(187.0, 22.7))
+    peaks, broad = reject_broad(found)
+    assert [p.channel for p in broad] == [187.0]
+    assert all(p.broad for p in broad)
+    assert not any(p.broad for p in peaks)
+    assert len(peaks) == 5
 
 
-def test_grouping_chains_through_a_multiplet():
-    groups = group([_peak(100.0, 5.0), _peak(112.0, 5.0), _peak(124.0, 5.0)])
-    assert [[p.channel for p in g] for g in groups] == [[100.0, 112.0, 124.0]]
+def test_real_peaks_within_the_trend_are_all_kept():
+    found = [_peak(c, 4.0 + 0.001 * c) for c in range(100, 4000, 300)]
+    peaks, broad = reject_broad(found)
+    assert broad == []
+    assert len(peaks) == len(found)
 
 
-def test_the_wider_peak_decides_the_reach():
-    """Ten channels apart: inside three widths of a 5-wide peak, outside
-    three widths of a 2-wide one. The wider of the pair is what sets
-    whether their tails overlap."""
-    assert len(group([_peak(100.0, 2.0), _peak(110.0, 5.0)])) == 1
-    assert len(group([_peak(100.0, 2.0), _peak(110.0, 2.0)])) == 2
+def test_too_few_candidates_to_judge_keeps_everything():
+    peaks, broad = reject_broad([_peak(100.0, 5.0), _peak(200.0, 50.0)])
+    assert len(peaks) == 2
+    assert broad == []
 
 
-def test_grouping_sorts_by_channel_and_handles_nothing():
-    groups = group([_peak(300.0, 4.0), _peak(100.0, 4.0)])
-    assert [[p.channel for p in g] for g in groups] == [[100.0], [300.0]]
-    assert group([]) == []
+def test_the_real_eu152_spectrum_keeps_channel_195_and_rejects_187():
+    """The bug report itself, at the search level."""
+    counts = np.asarray(load_spe(os.path.join(FIXTURES, "eu152_real.spe")), dtype=float)
+    peaks, broad = reject_broad(search(counts))
+    assert any(abs(p.channel - 195) < 1 for p in peaks)
+    assert any(abs(p.channel - 187) < 1 for p in broad)
+    assert 5 <= len(broad) <= 12
 
 
-# --- regions -----------------------------------------------------------
+# --- fit windows -------------------------------------------------------
 
 
-def test_regions_are_laid_out_in_widths_around_a_single_peak():
-    bg_left, bg_right, fit_region, positions = regions([_peak(500.0, 4.0)], 1000)
-    assert bg_left == (500.0 - 26.0, 500.0 - 16.0)
-    assert bg_right == (500.0 + 16.0, 500.0 + 26.0)
-    assert fit_region == (500.0 - 12.0, 500.0 + 12.0)
-    assert positions == [500.0]
+def test_fit_window_is_three_widths_each_side_when_alone():
+    peak = _peak(500.0, 4.0)
+    assert fit_window(peak, [peak]) == (488.0, 512.0)
 
 
-def test_regions_span_a_whole_group_using_its_widest_member():
-    bg_left, bg_right, fit_region, positions = regions(
-        [_peak(500.0, 4.0), _peak(530.0, 6.0)], 1000
-    )
-    assert fit_region == (500.0 - 18.0, 530.0 + 18.0)
-    assert bg_left == (500.0 - 39.0, 500.0 - 24.0)
-    assert bg_right == (530.0 + 24.0, 530.0 + 39.0)
-    assert positions == [500.0, 530.0]
+def test_fit_window_is_clipped_at_the_midpoint_to_a_neighbour():
+    """A neighbour inside the window would be absorbed into this peak's
+    area; the window stops halfway to it, on both sides symmetrically."""
+    peak, other = _peak(500.0, 4.0), _peak(510.0, 4.0)
+    assert fit_window(peak, [peak, other]) == (488.0, 505.0)
+    assert fit_window(other, [peak, other]) == (505.0, 522.0)
 
 
-def test_a_group_too_near_either_edge_is_refused():
-    """A background region clipped to the spectrum edge would fit its
-    slope to almost nothing; refusing is the honest answer."""
-    assert regions([_peak(20.0, 4.0)], 1000) is None
-    assert regions([_peak(26.0, 4.0)], 1000) is not None
-    assert regions([_peak(980.0, 4.0)], 1000) is None
-    assert regions([_peak(973.0, 4.0)], 1000) is not None
+def test_fit_window_never_narrows_below_the_floor():
+    """A neighbour almost on top of the peak would clip the window to
+    nothing; the floor keeps enough of the peak to fit at all."""
+    peak, other = _peak(500.0, 4.0), _peak(502.0, 4.0)
+    lo, hi = fit_window(peak, [peak, other])
+    assert hi == pytest.approx(500.0 + 1.2 * 4.0)
+    assert lo == 488.0
 
 
-def test_regions_of_the_found_peaks_all_have_room_on_the_synthetic_spectrum():
+# --- background windows ------------------------------------------------
+
+
+def _flat_spectrum(n=2000, level=400.0, seed=0):
+    return np.random.default_rng(seed).poisson(level, n).astype(float)
+
+
+def test_flatness_is_about_one_for_poisson_noise_and_large_for_a_peak():
+    counts = _flat_spectrum()
+    quiet = flatness(counts, 800, 830)
+    counts[1010:1020] += 3000.0
+    bumpy = flatness(counts, 1000, 1030)
+    assert 0.3 < quiet < 2.5
+    assert bumpy > 10 * quiet
+
+
+def test_background_windows_avoid_every_found_peak_and_sit_beyond_the_fit_window():
+    counts = _flat_spectrum()
+    peak = _peak(1000.0, 4.0)
+    neighbour = _peak(1022.0, 4.0)      # exactly where the nearest right window would go
+    found = [peak, neighbour]
+    left = background_window(counts, peak, -1, found)
+    right = background_window(counts, peak, +1, found)
+    assert left is not None and right is not None
+    assert left[1] <= 1000.0 - 3.25 * 4.0
+    assert right[0] >= 1000.0 + 3.25 * 4.0
+    # clear of the neighbour by one and a half of ITS width
+    assert right[0] >= 1022.0 + 1.5 * 4.0
+
+
+def test_the_nearest_flat_window_is_taken():
+    counts = _flat_spectrum()
+    peak = _peak(1000.0, 4.0)
+    right = background_window(counts, peak, +1, [peak])
+    assert right[0] == pytest.approx(1000.0 + 3.25 * 4.0)
+    assert right[1] - right[0] == pytest.approx(1.5 * 4.0)
+
+
+def test_a_bump_in_the_nearest_window_pushes_the_search_outward():
+    """Structure the search did not flag as a peak: the window is not
+    flat, so the search moves on past it."""
+    counts = _flat_spectrum()
+    counts[1014:1020] += 2000.0          # inside the first candidate window
+    peak = _peak(1000.0, 4.0)
+    right = background_window(counts, peak, +1, [peak])
+    assert right[0] > 1020.0
+
+
+def test_no_room_before_the_edge_gives_no_window():
+    counts = _flat_spectrum(n=60)
+    assert background_window(counts, _peak(12.0, 4.0), -1, []) is None
+
+
+def test_a_crowded_neighbourhood_falls_back_to_avoiding_only_what_matters():
+    """Weak peaks every seven channels leave nothing clear of every found
+    peak within reach. The fallback ignores neighbours below a twentieth
+    of this peak's prominence -- but never a broad feature."""
+    counts = _flat_spectrum()
+    peak = _peak(1000.0, 4.0, prominence=10000.0)
+    weak = [_peak(float(c), 4.0, prominence=50.0)
+            for c in range(880, 1130, 7) if abs(c - 1000) > 8]
+    assert background_window(counts, peak, +1, [peak] + weak) is not None
+
+    broad = _peak(1030.0, 20.0, prominence=50.0)
+    broad.broad = True
+    right = background_window(counts, peak, +1, [peak] + weak + [broad])
+    assert right is not None
+    assert right[0] >= 1030.0 + 1.5 * 20.0
+
+
+def test_regions_refuse_a_peak_with_no_background_on_one_side():
+    counts = _flat_spectrum(n=200)
+    assert regions(_peak(10.0, 4.0), counts, []) is None
+    counts = _flat_spectrum()
+    assert regions(_peak(1000.0, 4.0), counts, []) is not None
+
+
+def test_regions_fit_one_position_only():
+    counts = _flat_spectrum()
+    peak = _peak(1000.0, 4.0)
+    _l, _r, fit_region, positions = regions(peak, counts, [peak, _peak(1100.0, 4.0)])
+    assert positions == [1000.0]
+    assert fit_region == (988.0, 1012.0)
+
+
+def test_every_photopeak_of_the_synthetic_spectrum_gets_regions():
     counts = _spectrum()
     found = search(counts)
-    assert all(regions(g, len(counts)) is not None for g in group(found))
+    peaks, _broad = reject_broad(found)
+    assert peaks
+    assert all(regions(p, counts, found) is not None for p in peaks)

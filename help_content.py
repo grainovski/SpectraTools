@@ -461,16 +461,31 @@ stand above the continuum around it. The count of peaks found updates
 as you change it -- lower it if a line you can see is missing, raise it
 if noise is being counted. The default of 5 finds the lines a person
 would point at.</li>
-<li>Press <b>Run</b>. Every group of found peaks is fitted -- peaks
-closer than three widths are fitted together as one multiplet -- and
-the fits are added to Fit Results. <b>Fits already on the spectrum are
-kept</b>: the new ones are appended after them, and the status bar says
-how many were there before.</li>
+<li>Press <b>Run</b>. Candidates far wider than the spectrum's own peaks
+-- Compton edges, backscatter bumps -- are set aside as not being
+photopeaks. Every other peak is fitted <b>on its own, with its own
+markers</b>: a fit window around it alone, stopping halfway to any
+neighbour, and two background windows searched for on flat stretches
+where no peak was found. The fits are added to Fit Results. <b>Fits
+already on the spectrum are kept</b>: the new ones are appended after
+them, and the status bar says how many were there before.</li>
 <li>The Calibrate from Fitted Peaks dialog then opens with the source
-loaded and every identified peak's energy already filled in. Check the
-residual strip in the live plot, untick any point that sits off the
-line, and press OK to apply the calibration exactly as in "11.
-Calibrating from fitted peaks".</li>
+loaded and every identified peak's energy already filled in. A point
+whose area does not sit on the efficiency curve the others trace is
+<b>already unticked</b> and hollow on the plot -- assigned and visible,
+but out of the fit until you say otherwise. Check the residual strip in
+the live plot, untick any point that sits off the line, switch between
+linear and quadratic and watch the plot follow, and press OK to apply
+the calibration exactly as in "11. Calibrating from fitted peaks".</li>
+<li>On OK, <b>every line of the source that is visibly present is
+refitted</b>, one at a time, and those fits replace the ones from the
+identification pass -- one clean area per line, which is the input
+CalEnEff needs. The calibration plot then opens on the refitted points,
+and <b>Finish and save for CalEnEff...</b> writes them. Lines the
+calibration places outside the spectrum, lines with nothing above the
+noise where they should be, and lines blended into a stronger neighbour
+are counted in the status bar rather than fitted: an area fitted where
+there is no peak would sit on the efficiency curve as if it were one.</li>
 </ol>
 <p>The identification is either confident or refused; it never guesses.
 When no confident assignment exists -- the spectrum is not this nuclide,
@@ -478,10 +493,10 @@ too few of its lines were found, or two different calibrations explain
 it equally well -- the status bar and the dialog say why, and the dialog
 opens with the peaks fitted but unassigned. Type the energies of two
 peaks you recognise and press <b>Suggest remaining</b>, exactly as you
-would with hand-fitted peaks. The status line also reports peaks that
-were found but could not be fitted, groups skipped for lying too close
-to the spectrum edge for a background region, and fits set aside for an
-implausible width or a negative area.</p>
+would with hand-fitted peaks. The status line also reports candidates
+set aside as broad features, peaks that were found but could not be
+fitted, peaks skipped for want of a clear background on both sides, and
+fits set aside for an implausible width or a negative area.</p>
 <p>A peak fitted twice -- once by hand before the run, once by the
 automatic pass -- appears twice in the table, and the energy goes to the
 automatic copy. Running again appends a second set of fits;
@@ -1061,6 +1076,37 @@ assignment that leaves most of them unexplained has found a coincidence
 among the weak ones. The last two guards were each added after watching
 the matcher produce a confident, self-consistent and entirely wrong
 calibration without them.</p>
+<p><b>The areas have to agree too.</b> For a correct assignment each
+peak's area divided by its line's intensity is the detector's
+efficiency at that energy times one constant for the whole spectrum,
+and an HPGe efficiency curve is smooth -- a quadratic in log-log
+follows both the turnover at low energy and the power-law fall above
+it. For a wrong assignment the intensities belong to other lines and
+the ratios scatter by orders of magnitude: on a real Eu-152 spectrum
+the right pairing scatters about that curve by a factor of 1.3, and
+shifting every line to its neighbour gives a factor of 5.7. So the
+winner must also pass this test. It is refused if its areas scatter by
+more than a factor of about 2.8; a tie between two pairings explaining
+equally many peaks is broken by it; and a single point more than three
+scatters off the curve is flagged as suspect and opens unticked -- a
+wrong line, a misfitted area or an unresolved doublet, for you to judge
+with it hollow on the plot.</p>
+<p><b>Each peak is fitted alone.</b> Nearby peaks were at first fitted
+together as one multiplet, and on a real Eu-152 spectrum that chained
+the strongest line in it, 121.78 keV, to a broad Compton feature eight
+channels away whose spurious width gave the group a 68-channel reach;
+the four-peak fit produced nothing usable and the strongest line went
+unassigned. Now a candidate wider than twice the width expected at its
+channel is set aside before anything is fitted, and every other peak is
+fitted on its own: a fit window of three widths either side that stops
+halfway to any neighbour, and two background windows of one and a half
+widths each, searched for outward from the peak on stretches that keep
+clear of every other found peak -- broad features included -- and are
+flat by a straight-line chi-squared. Only in a spectrum too crowded for
+any such stretch within reach does the search relax to avoiding just
+the neighbours large enough to bias the reading; a peak with no honest
+background on both sides is skipped and counted rather than fitted
+against something that is not one.</p>
 <p>The peaks themselves come from a search on a lightly smoothed copy
 of the counts: a candidate is anything standing more than the chosen
 number of standard deviations above the continuum around it, measured

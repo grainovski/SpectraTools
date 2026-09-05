@@ -215,6 +215,11 @@ class EnergyAssignDialog(QDialog):
 
         self.quadratic_checkbox = QCheckBox("Quadratic (needs 3 or more assignments)")
         self.quadratic_checkbox.setChecked(quadratic)
+        # The kind of fit is as much a part of the assignment set as the
+        # points are: the live plot must follow it. Unwired, the only way
+        # to see the quadratic was to press OK, which applied it and
+        # closed everything.
+        self.quadratic_checkbox.toggled.connect(lambda _on: self._assignments_changed())
         layout.addWidget(self.quadratic_checkbox)
 
         self.status = QLabel("")
@@ -646,22 +651,26 @@ class EnergyAssignDialog(QDialog):
         block it and it is destroyed along with it -- the window
         main_window opens on OK is a separate, longer-lived one.
 
-        An assignment set that does not yet make a calibration (too few
-        points, or a typo mid-edit) closes the preview rather than
-        leaving a stale curve on screen claiming to describe the table.
+        Once open, the window stays open for as long as this dialog does.
+        An assignment set that does not make a calibration at the moment
+        -- too few points for the kind chosen, or a typo mid-edit -- is
+        drawn as points without a curve, with the reason in place of the
+        coefficients. It used to close the window instead, which on
+        switching linear to quadratic with two points looked like the
+        plot had crashed, and drove the user to OK as the only way to see
+        the quadratic drawn.
         """
         if self._max_channel is None:
             return
-        calibration, _reason = self._compute_calibration()
-        if calibration is None:
-            self._close_live_plot()
-            return
+        calibration, reason = self._compute_calibration()
         points = self.export_points()
+        if not points and self._live_plot is None:
+            return  # nothing to draw yet; the first point opens the window
         excluded = self.excluded_energies()
         if self._live_plot is not None:
             try:
                 self._live_plot.set_data(calibration, points, self.source_lines,
-                                         excluded=excluded)
+                                         excluded=excluded, reason=reason)
                 return
             except RuntimeError:
                 # Closed by the user; fall through and build a new one.
@@ -669,6 +678,7 @@ class EnergyAssignDialog(QDialog):
         self._live_plot = CalibrationPlotDialog(
             self, calibration, points, self.source_lines,
             self._max_channel, self._export_default_path, excluded=excluded,
+            reason=reason,
         )
         self._live_plot.show()
 

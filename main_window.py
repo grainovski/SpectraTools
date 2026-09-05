@@ -1081,15 +1081,18 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             active, choices, active.energy_assignments if active else None
         )
 
-    def _assign_energies(self, active, choices, assignments, status=None):
+    def _assign_energies(self, active, choices, assignments, status=None,
+                         show_plot=True):
         """Open the Calibrate from Fitted Peaks dialog on `choices`,
-        prefilled from `assignments`, and apply what comes back.
+        prefilled from `assignments`, and apply what comes back. Returns
+        the applied Calibration, or None if the dialog was cancelled.
 
         Shared by the manual entry point and the automatic one, which
         differ only in where the assignments come from -- the dialog, its
         live plot, the ticks and the stored record are the same either
         way. `status` is a first line for the dialog's status label; the
-        automatic run puts its summary there.
+        automatic run puts its summary there. `show_plot=False` lets the
+        automatic run open the plot itself, on the refit that follows.
         """
         from energy_assign_dialog import EnergyAssignDialog
 
@@ -1109,12 +1112,17 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         if status:
             dialog.status.setText(status)
         if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
+            return None
         calibration = dialog.result_calibration
         self._apply_calibration_change(calibration, True)
         if active is not None:
             self._store_energy_assignments(active, dialog)
-            self._show_calibration_plot(active, dialog)
+            if show_plot:
+                self._show_calibration_plot(
+                    active, calibration, dialog.export_points(),
+                    dialog.source_lines, dialog.excluded_energies(),
+                )
+        return calibration
 
     def _open_auto_calibrate_dialog(self):
         """Find, fit and identify the peaks of the active spectrum, then
@@ -1154,14 +1162,57 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # Stored now rather than only on OK, so cancelling the review does
         # not throw the identifications away -- running again would append
         # a second copy of every fit. A refused match stores the source
-        # alone, which is still worth remembering.
+        # alone, which is still worth remembering. Points the efficiency
+        # test doubts open UNTICKED: assigned and visible, hollow on the
+        # plot, but out of the fit until the user says otherwise.
         active.energy_assignments = EnergyAssignments(
-            source_path=dialog.source_path(), pairs=tuple(outcome.pairs)
+            source_path=dialog.source_path(), pairs=tuple(outcome.pairs),
+            excluded=outcome.suspect_energies,
         )
-        self._assign_energies(
+        calibration = self._assign_energies(
             active, self.fitted_peak_choices(), active.energy_assignments,
-            status=summary,
+            status=summary, show_plot=False,
         )
+        if calibration is None or dialog.source_lines is None:
+            return
+        self._refit_for_caleneff(active, dialog, outcome, calibration)
+
+    def _refit_for_caleneff(self, active, dialog, outcome, calibration):
+        """With the calibration applied, fit every source line that is
+        visibly present, one at a time, and make THOSE the fits on the
+        spectrum -- the input CalEnEff needs is one clean area per line
+        of the source.
+
+        The fits from the identification pass are replaced, not kept
+        beside the new ones: they were the same peaks, and a spectrum
+        carrying two fits of every line would export every efficiency
+        point twice. Fits made by hand before the run are untouched.
+        """
+        import auto_calibrate
+
+        refit = auto_calibrate.refit_source_lines(
+            channel_indices(len(active.data)), active.data, dialog.source_lines,
+            calibration, sensitivity=dialog.sensitivity.value(),
+            variance=getattr(active, "variance", None),
+        )
+        superseded = {id(result) for result in outcome.results}
+        active.fits[:] = [f for f in active.fits if id(f) not in superseded]
+        stamp = datetime.now().isoformat(timespec="seconds")
+        for result in refit.results:
+            result.timestamp = stamp
+            self.fit_controller._commit_result(active, result)
+        self.fit_controller.update_results_list()
+        self._plot_data(preserve_view=True)
+        active.energy_assignments = EnergyAssignments(
+            source_path=dialog.source_path(), pairs=tuple(refit.pairs),
+        )
+        points = [
+            (result.peaks[0].position, result.peaks[0].position_err or 0.0,
+             result.peaks[0].area, result.peaks[0].area_err, energy)
+            for result, (_channel, energy) in zip(refit.results, refit.pairs)
+        ]
+        self._show_calibration_plot(active, calibration, points, dialog.source_lines, ())
+        self.fit_controller._show_status_message(refit.summary(dialog.source_name()), 10000)
 
     def _store_energy_assignments(self, spectrum, dialog):
         """Remember what the dialog was told, so a refit does not throw it
@@ -1194,11 +1245,11 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         stem = os.path.splitext(os.path.basename(source))[0]
         return os.path.join(os.path.dirname(source), f"{stem}_En_Area.txt")
 
-    def _show_calibration_plot(self, spectrum, dialog):
+    def _show_calibration_plot(self, spectrum, calibration, points, source_lines,
+                               excluded):
         """The coefficients alone look equally plausible whether or not
         a line was misidentified; the plot's residual strip is where
         that shows."""
-        points = dialog.export_points()
         default_path = self._caleneff_default_path(spectrum)
         # Qt keeps a parented dialog alive after the attribute is rebound,
         # so without this a second calibration leaves the first window on
@@ -1209,9 +1260,8 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             previous.close()
             previous.deleteLater()
         self._calibration_plot = CalibrationPlotDialog(
-            self, dialog.result_calibration, points,
-            dialog.source_lines, len(spectrum.data) - 1, default_path,
-            excluded=dialog.excluded_energies(),
+            self, calibration, points, source_lines,
+            len(spectrum.data) - 1, default_path, excluded=excluded,
         )
         self._calibration_plot.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self._calibration_plot.show()

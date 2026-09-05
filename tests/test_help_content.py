@@ -1153,3 +1153,21 @@ def test_howto_cross_references_survived_the_renumbering():
     assert '"15. Matrix analysis"' in kb
     assert '"14. Matrix analysis"' not in kb
 
+
+
+def test_help_documents_individual_fits_and_the_efficiency_test():
+    """Short single-line fragments -- the HTML is wrapped."""
+    howto = build_howto_html()
+    assert "on its own, with its own" in howto
+    assert "already unticked" in howto
+    assert "refitted" in howto
+    kb = build_knowledge_database_html()
+    assert "The areas have to agree too" in kb
+    assert "Each peak is fitted alone" in kb
+    assert "a factor of 5.7" in kb
+
+
+def test_help_no_longer_describes_grouped_fits():
+    howto = build_howto_html()
+    assert "fitted together as one multiplet" not in howto
+    assert "groups skipped" not in howto

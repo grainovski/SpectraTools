@@ -293,3 +293,80 @@ def test_the_variance_of_a_derived_spectrum_reaches_the_fits(qapp, tmp_path, mon
     _run(window, monkeypatch, source)
     assert len(seen) == 1
     assert seen[0] is active.variance
+
+
+# --- after OK: the refit for CalEnEff ----------------------------------
+
+
+def _run_and_accept(window, monkeypatch, source_path):
+    """Drive both dialogs and ACCEPT the assign dialog, as a user happy
+    with the plot does. Returns (automatic dialog, assign dialog)."""
+    auto_dialogs, assign_dialogs = [], []
+
+    def fake_exec(self):
+        auto_dialogs.append(self)
+        self.load_source(source_path)
+        self._on_run()
+        return (QDialog.DialogCode.Accepted if self.outcome is not None
+                else QDialog.DialogCode.Rejected)
+
+    monkeypatch.setattr(auto_module.AutoCalibrateDialog, "exec", fake_exec)
+
+    class _Accept(assign_module.EnergyAssignDialog):
+        def __init__(self, parent, peaks, **kwargs):
+            super().__init__(parent, peaks, **kwargs)
+            assign_dialogs.append(self)
+
+        def exec(self):
+            self._on_accept()
+            return (QDialog.DialogCode.Accepted if self.result_calibration is not None
+                    else QDialog.DialogCode.Rejected)
+
+    monkeypatch.setattr(assign_module, "EnergyAssignDialog", _Accept)
+    window._open_auto_calibrate_dialog()
+    return auto_dialogs[0], assign_dialogs[0]
+
+
+def test_ok_refits_every_visible_line_and_replaces_the_first_pass(qapp, tmp_path, monkeypatch):
+    """What CalEnEff needs is one clean fit per source line. After OK the
+    identification pass's fits are replaced by a refit at every visible
+    line; a fit made by hand beforehand is untouched."""
+    source = _write_sou(tmp_path, EIGHT_LINES, "eight.sou")
+    window, active = _window(tmp_path, source)
+    hand = _hand_fit(active, (121.7817 - 12.5) / 0.40)
+    active.fits.append(hand)
+
+    auto, assign = _run_and_accept(window, monkeypatch, source)
+    outcome = auto.outcome
+    assert outcome.match.ok, outcome.match.reason
+    assert assign.result_calibration is not None
+
+    assert active.fits[0] is hand
+    first_pass = {id(result) for result in outcome.results}
+    assert not any(id(f) in first_pass for f in active.fits), "first-pass fits were kept"
+    refit = active.fits[1:]
+    assert len(refit) >= 6
+    assert all(len(r.peaks) == 1 and r.timestamp for r in refit)
+
+    stored = active.energy_assignments
+    assert stored.source_path == source
+    assert len(stored.pairs) == len(refit)
+    energies = sorted(e for _c, e in stored.pairs)
+    assert all(any(abs(e - line) < 1e-6 for line, _i in EIGHT_LINES) for e in energies)
+    assert len(set(energies)) == len(energies)
+
+    assert window._calibration is not None and window._calibration_active
+    plot = window._calibration_plot
+    assert plot is not None
+    assert len(plot._points) == len(refit)
+    assert "refitted for CalEnEff" in window.statusBar().currentMessage()
+
+
+def test_cancelling_the_review_keeps_the_first_pass_and_refits_nothing(qapp, tmp_path, monkeypatch):
+    source = _write_sou(tmp_path, EIGHT_LINES, "eight.sou")
+    window, active = _window(tmp_path, source)
+    auto_dialogs, _assign = _run(window, monkeypatch, source)   # _run REJECTS the review
+    outcome = auto_dialogs[0].outcome
+    assert active.fits == outcome.results
+    assert window._calibration is None
+    assert active.energy_assignments.pairs == tuple(outcome.pairs)

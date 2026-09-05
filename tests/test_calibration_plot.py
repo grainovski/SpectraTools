@@ -106,3 +106,45 @@ def test_export_with_nothing_exportable_raises(qapp, tmp_path):
     dialog = _dialog(qapp, lines=[])
     with pytest.raises(ExportError):
         dialog.export_to(str(tmp_path / "out.txt"))
+
+
+# --- v5.1.0: drawn with no calibration yet ------------------------------
+
+
+def _curve_lines(dialog):
+    return [line for line in dialog.axes.lines if line.get_label() == "calibration"]
+
+
+def test_without_a_calibration_the_points_are_drawn_but_no_curve(qapp):
+    """Two points under a quadratic, or a typo mid-edit: the window used
+    to close, which looked like a crash. Now the points stay and the
+    summary says why there is no line through them."""
+    dialog = CalibrationPlotDialog(
+        None, None, _points(), _lines(), max_channel=1024,
+        default_path="out.txt", reason="two points cannot fix a quadratic",
+    )
+    assert len(dialog.axes.containers) >= 1          # the points are there
+    assert _curve_lines(dialog) == []                 # no curve
+    text = dialog.summary_label.text().lower()
+    assert "no calibration" in text
+    assert "quadratic" in text
+
+
+def test_set_data_moves_between_a_fit_and_none_without_rebuilding(qapp):
+    dialog = _dialog(qapp)
+    assert _curve_lines(dialog)
+    dialog.set_data(None, _points(), _lines(), reason="typo mid-edit")
+    assert _curve_lines(dialog) == []
+    assert "typo mid-edit" in dialog.summary_label.text()
+    dialog.set_data(Calibration(kind="linear", a=10.0, b=1.1), _points(), _lines())
+    assert _curve_lines(dialog)
+    assert "linear calibration" in dialog.summary_label.text()
+
+
+def test_no_points_at_all_is_drawn_as_an_empty_plot(qapp):
+    """Clear empties the table; the window stays with nothing in it
+    rather than going away."""
+    dialog = _dialog(qapp)
+    dialog.set_data(None, [], _lines(), reason="no assignments")
+    assert _curve_lines(dialog) == []
+    assert "no assignments" in dialog.summary_label.text()

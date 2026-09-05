@@ -120,9 +120,15 @@ def test_calibrating_opens_the_plot_window(qapp, tmp_path, monkeypatch):
     dialog.table.item(0, ENERGY).setText("300")
     dialog.table.item(1, ENERGY).setText("840")
     dialog._on_accept()
-    window._show_calibration_plot(active, dialog)
+    window._show_calibration_plot(
+        active, dialog.result_calibration, dialog.export_points(),
+        dialog.source_lines, dialog.excluded_energies(),
+    )
 
     assert opened.get("shown") is True
+    # what was handed to the window: the calibration and the two points
+    assert opened["args"][1] is dialog.result_calibration
+    assert len(opened["args"][2]) == 2
 
 
 def test_clearing_then_retyping_keeps_the_new_assignments(qapp, tmp_path):
@@ -162,20 +168,23 @@ def _live_dialog(window, tmp_path, **kwargs):
     )
 
 
-def test_the_plot_appears_as_soon_as_the_points_make_a_calibration(qapp, tmp_path):
+def test_the_plot_opens_with_the_first_point_and_fits_from_the_second(qapp, tmp_path):
     """Not only on OK: the residual strip is what shows a misidentified
     line, and it is worth nothing after the calibration is already
-    applied."""
+    applied. One point opens the window, drawn without a curve; the
+    second gives it a line. The same window throughout."""
     window, _ = _window(tmp_path)
     dialog = _live_dialog(window, tmp_path)
     assert dialog._live_plot is None, "nothing assigned yet"
 
     dialog.table.item(0, ENERGY).setText("300")
-    assert dialog._live_plot is None, "one point cannot fix a line"
+    plot = dialog._live_plot
+    assert plot is not None and plot.isVisible()
+    assert plot._calibration is None, "one point cannot fix a line"
 
     dialog.table.item(1, ENERGY).setText("840")
-    assert dialog._live_plot is not None
-    assert dialog._live_plot.isVisible()
+    assert dialog._live_plot is plot
+    assert plot._calibration is not None
 
 
 def test_editing_a_point_redraws_the_same_window(qapp, tmp_path):
@@ -205,17 +214,22 @@ def test_editing_a_point_actually_changes_the_curve(qapp, tmp_path):
     assert after != pytest.approx(before), "the slope did not follow the edit"
 
 
-def test_clear_takes_the_plot_down(qapp, tmp_path):
-    """A curve left on screen after Clear would claim to describe a table
-    that is now empty."""
+def test_clear_empties_the_plot_but_leaves_it_open(qapp, tmp_path):
+    """The window stays for as long as the dialog does -- closing it made
+    the user think the plot had crashed. After Clear it shows no points
+    and no curve, and says so, rather than a stale curve for an empty
+    table."""
     window, _ = _window(tmp_path)
     dialog = _live_dialog(window, tmp_path)
     dialog.table.item(0, ENERGY).setText("300")
     dialog.table.item(1, ENERGY).setText("840")
-    assert dialog._live_plot is not None
+    plot = dialog._live_plot
+    assert plot is not None and plot._calibration is not None
 
     dialog._on_clear()
-    assert dialog._live_plot is None
+    assert dialog._live_plot is plot, "Clear took the plot down"
+    assert plot._points == []
+    assert plot._calibration is None
 
 
 def test_restored_assignments_bring_the_plot_straight_back(qapp, tmp_path):
@@ -358,9 +372,13 @@ def test_unticking_refreshes_the_live_plot(qapp, tmp_path):
     before = dialog._live_plot._calibration.b
 
     _untick(dialog, 1)
-    # One point cannot fit a line, so the preview comes down rather than
-    # showing a curve that no longer describes the table.
-    assert dialog._live_plot is None or dialog._live_plot._calibration.b != before
+    # One point cannot fit a line: the window stays, drawn without a
+    # curve, rather than showing one that no longer describes the table.
+    plot = dialog._live_plot
+    assert plot is not None, "unticking closed the plot"
+    assert plot._calibration is None
+    assert len(plot._points) == 2, "both points still drawn, the unticked one hollow"
+    assert before is not None
 
 
 def test_suggest_will_not_anchor_on_an_excluded_point(qapp, tmp_path):
@@ -374,3 +392,43 @@ def test_suggest_will_not_anchor_on_an_excluded_point(qapp, tmp_path):
     _untick(dialog, 1)
     assert dialog._anchor_count() == 1
     assert not dialog.suggest_button.isEnabled()
+
+
+# --- v5.1.0: the live plot follows the kind of fit and never closes ------
+
+
+def test_switching_linear_to_quadratic_redraws_the_plot_in_place(qapp, tmp_path):
+    """Switching kind used to do nothing until OK -- which applied the
+    fit and closed everything, so the only way to see the quadratic was
+    to lose the dialog."""
+    window, _ = _window(tmp_path, centres=(150.0, 300.0, 420.0))
+    dialog = _live_dialog(window, tmp_path)
+    for row, energy in enumerate(("300", "600", "840")):
+        dialog.table.item(row, ENERGY).setText(energy)
+    plot = dialog._live_plot
+    assert plot is not None and plot._calibration.kind == "linear"
+
+    dialog.quadratic_checkbox.setChecked(True)
+    assert dialog._live_plot is plot, "the window was rebuilt, not redrawn"
+    assert plot._calibration.kind == "quadratic"
+    dialog.quadratic_checkbox.setChecked(False)
+    assert plot._calibration.kind == "linear"
+
+
+def test_quadratic_with_two_points_keeps_the_plot_open_and_says_why(qapp, tmp_path):
+    window, _ = _window(tmp_path)
+    dialog = _live_dialog(window, tmp_path)
+    dialog.table.item(0, ENERGY).setText("300")
+    dialog.table.item(1, ENERGY).setText("840")
+    plot = dialog._live_plot
+    assert plot._calibration is not None
+
+    dialog.quadratic_checkbox.setChecked(True)
+    assert dialog._live_plot is plot, "the plot closed"
+    assert plot._calibration is None
+    assert "no calibration" in plot.summary_label.text().lower()
+    assert len(plot._points) == 2, "the points are still drawn"
+
+    dialog.quadratic_checkbox.setChecked(False)
+    assert plot._calibration is not None
+    assert plot._calibration.kind == "linear"

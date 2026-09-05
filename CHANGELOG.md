@@ -40,11 +40,45 @@ when individual pieces of work happened.
   spectrum, before this was found. Such components are now set aside
   and counted in the status line.
 
+  Each peak is fitted on its own, with its own markers. Nearby peaks
+  were first fitted together as a multiplet, and on a real Eu-152
+  spectrum that chained the strongest line in it -- 121.78 keV -- to a
+  broad Compton feature eight channels away and lost it entirely.
+  Candidates far wider than the spectrum's own peaks are now set aside
+  before fitting, the fit window stops halfway to any neighbour, and the
+  two background windows are searched for on flat stretches clear of
+  every found peak, relaxing only in a spectrum too crowded to offer one.
+
+  The areas must trace one efficiency curve as well. Area over intensity
+  is the detector's efficiency times a constant, and an HPGe efficiency
+  curve is smooth; under a wrong pairing the ratios scatter by orders of
+  magnitude -- a factor 1.3 against 5.7 on the real Eu-152 spectrum. The
+  winner is refused if they scatter too widely, a tie between two
+  pairings is broken by it, and a point more than three scatters off the
+  curve opens UNTICKED: assigned and hollow on the plot, but out of the
+  fit until you decide.
+
+  On OK, every source line that is visibly present is refitted, one at a
+  time, and those fits replace the identification pass's -- one clean
+  area per line, which is the input CalEnEff needs. The plot opens on
+  the refitted points. Lines outside the spectrum, with no visible peak,
+  or blended into a stronger neighbour are counted, not fitted.
+
   Fits already on the spectrum are always kept; the automatic fits are
   appended after them and the status bar says how many were there. The
   peak search's sensitivity, in standard deviations above the local
   continuum, has a sensible default and a control in the dialog whose
   count of peaks found updates as it is changed.
+
+### Changed
+
+- **The calibration plot follows the kind of fit and stays open.**
+  Switching linear to quadratic now redraws the live plot in place. It
+  used to do nothing until OK, which applied the fit and closed every
+  window, so the only way to see the quadratic drawn was to lose the
+  dialog. And when the points do not make a fit at the moment -- two
+  points under a quadratic, a typo mid-edit -- the plot shows them
+  without a curve and says why, instead of closing.
 
 ### Fixed
 

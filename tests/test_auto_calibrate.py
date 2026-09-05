@@ -251,14 +251,20 @@ def _eight_line_spectrum():
     return x, rng.poisson(clean).astype(float), centres
 
 
-def test_fit_found_peaks_fits_every_group_and_reports_the_counts():
+def test_fit_found_peaks_fits_every_photopeak_on_its_own():
+    """One fit per peak, each with its own markers -- what a person does
+    by hand. Grouping neighbours was dropped after it chained the
+    strongest line of a real Eu-152 spectrum to a broad Compton feature
+    and lost it (see test_auto_calibrate_real.py)."""
     x, y, centres = _eight_line_spectrum()
     found = peak_search.search(y)
     outcome = auto_calibrate.fit_found_peaks(x, y, found)
-    assert outcome.attempted == len(peak_search.group(found))
+    photopeaks, _broad = peak_search.reject_broad(found)
+    assert outcome.attempted == len(photopeaks)
     assert outcome.failed == 0
-    assert outcome.skipped_edge == 0
+    assert outcome.skipped == 0
     assert len(outcome.results) == outcome.attempted
+    assert all(len(result.peaks) == 1 for result in outcome.results)
     fitted = sorted(p.position for _i, p in outcome.peaks)
     assert fitted == pytest.approx(centres, abs=0.5)
     # (result index, peak) pairs must index the results they came from.
@@ -266,14 +272,15 @@ def test_fit_found_peaks_fits_every_group_and_reports_the_counts():
         assert peak in outcome.results[index].peaks
 
 
-def test_fit_found_peaks_skips_a_group_too_near_the_edge():
+def test_fit_found_peaks_skips_a_peak_with_no_background_room_at_the_edge():
     x, y, _centres = _eight_line_spectrum()
     found = peak_search.search(y)
     found.append(peak_search.FoundPeak(channel=15.0, fwhm=4.0, prominence=500.0,
                                        significance=20.0, height=600.0))
     outcome = auto_calibrate.fit_found_peaks(x, y, found)
-    assert outcome.skipped_edge == 1
-    assert outcome.attempted == len(peak_search.group(found)) - 1
+    assert outcome.skipped == 1
+    photopeaks, _broad = peak_search.reject_broad(found)
+    assert outcome.attempted == len(photopeaks) - 1
 
 
 def test_one_failing_fit_does_not_abort_the_rest(monkeypatch):
@@ -363,13 +370,17 @@ def test_summary_reports_every_count_the_status_line_needs():
     assert f"{len(outcome.found)} peaks found" in text
     assert f"{outcome.fits.attempted} attempted" in text
     assert f"{outcome.fits.failed} failed" in text
-    assert f"{outcome.fits.skipped_edge} skipped at the edge" in text
+    assert f"{outcome.fits.broad} broad features set aside" in text
+    assert f"{outcome.fits.skipped} skipped for want of a clear background" in text
     assert f"{len(outcome.match.pairs)} identified in eu152.sou" in text
     assert "2 fits already on the spectrum were kept" in text
-    # This spectrum has two runaway fit components; they are reported as
-    # set aside, not folded into "unidentified".
-    assert outcome.match.unusable > 0
-    assert f"{outcome.match.unusable} set aside" in text
+    # A peak set aside for its width is reported as such, not folded into
+    # "unidentified" -- when there is one; with individual fits there may
+    # be none. Likewise a point the efficiency test doubts.
+    if outcome.match.unusable:
+        assert f"{outcome.match.unusable} set aside for an implausible" in text
+    if outcome.match.suspect:
+        assert f"{len(outcome.match.suspect)} of them left out of the fit as suspect" in text
 
     refused = auto_calibrate.calibrate(x, counts, load_sou(fixture_sou("ba133.sou")))
     text = refused.summary(existing_fits=0, source_name="ba133.sou")

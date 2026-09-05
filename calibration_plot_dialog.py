@@ -35,7 +35,7 @@ class CalibrationPlotDialog(QDialog):
     from, used only by the export."""
 
     def __init__(self, parent, calibration, points, source_lines,
-                 max_channel, default_path, excluded=()):
+                 max_channel, default_path, excluded=(), reason=None):
         super().__init__(parent)
         self.setWindowTitle("Energy Calibration")
         self._default_path = default_path
@@ -68,10 +68,11 @@ class CalibrationPlotDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        self.set_data(calibration, points, source_lines, excluded=excluded)
+        self.set_data(calibration, points, source_lines, excluded=excluded,
+                      reason=reason)
 
     def set_data(self, calibration, points, source_lines, max_channel=None,
-                 excluded=()):
+                 excluded=(), reason=None):
         """Redraw for a new calibration without rebuilding the window.
 
         The Calibrate dialog's live preview refreshes after every change
@@ -79,6 +80,13 @@ class CalibrationPlotDialog(QDialog):
         would raise it to the front and take focus away from the table
         the user is still typing into, so the same window is redrawn
         instead.
+
+        `calibration` may be None -- too few points for the chosen kind,
+        or a typo mid-edit. The points are still drawn, without a curve
+        or residuals, and `reason` replaces the coefficients in the
+        summary. The window stays: closing it whenever the fit was
+        momentarily impossible made switching linear to quadratic with
+        two points look like the plot had crashed.
         """
         self._calibration = calibration
         self._points = list(points)
@@ -114,27 +122,39 @@ class CalibrationPlotDialog(QDialog):
                 xerr=[p[1] for p in left], fmt="o", capsize=3,
                 markerfacecolor="none", label="excluded from the fit",
             )
-        upper = max(self._max_channel, max(channels) if channels else 0)
-        grid = np.linspace(0.0, float(upper), _CURVE_SAMPLES)
-        self.axes.plot(grid, calibration.apply(grid), "-", label="calibration")
         self.axes.set_ylabel("Energy (keV)")
-        self.axes.legend(loc="best")
-
-        residuals = [e - calibration.apply(c) for c, e in zip(channels, energies)]
-        self.residual_axes.axhline(0.0, linewidth=0.8)
-        self.residual_axes.errorbar(channels, residuals, fmt="o", capsize=3)
-        if left:
-            self.residual_axes.errorbar(
-                [p[0] for p in left],
-                [p[4] - calibration.apply(p[0]) for p in left],
-                fmt="o", capsize=3, markerfacecolor="none",
+        if calibration is not None:
+            upper = max(self._max_channel, max(channels) if channels else 0)
+            grid = np.linspace(0.0, float(upper), _CURVE_SAMPLES)
+            self.axes.plot(grid, calibration.apply(grid), "-", label="calibration")
+            residuals = [e - calibration.apply(c) for c, e in zip(channels, energies)]
+            self.residual_axes.axhline(0.0, linewidth=0.8)
+            self.residual_axes.errorbar(channels, residuals, fmt="o", capsize=3)
+            if left:
+                self.residual_axes.errorbar(
+                    [p[0] for p in left],
+                    [p[4] - calibration.apply(p[0]) for p in left],
+                    fmt="o", capsize=3, markerfacecolor="none",
+                )
+        else:
+            self.residual_axes.text(
+                0.5, 0.5, reason or "no calibration to compare against",
+                ha="center", va="center", transform=self.residual_axes.transAxes,
             )
+            self.residual_axes.set_yticks([])
+        if used or left:
+            self.axes.legend(loc="best")
         self.residual_axes.set_xlabel("Channel")
         self.residual_axes.set_ylabel("Residual (keV)")
         self._figure.tight_layout()
         self.canvas.draw_idle()
 
-        self.summary_label.setText(self._summary_text(channels, energies, errors))
+        if calibration is not None:
+            self.summary_label.setText(self._summary_text(channels, energies, errors))
+        else:
+            self.summary_label.setText(
+                f"no calibration: {reason}" if reason else "no calibration yet"
+            )
 
     def _summary_text(self, channels, energies, errors):
         cal = self._calibration
