@@ -6,7 +6,7 @@ in git, and the release toolchain is external. This is the full list, in the
 order it is worth doing.
 
 Written when moving from the machine that produced v4.1.0 (2026-08-19);
-refreshed after v5.2.0 (2026-09-05).
+refreshed after v5.2.1 (2026-09-05).
 
 For the migration procedure itself — what to package up on the machine you
 are leaving, and the much shorter path for a machine that has had this
@@ -22,7 +22,7 @@ cd SpectraTools
 ```
 
 That brings the application, the tests, the packaging scripts, the docs, and
-all 26 tags (`v1.0.0` … `v5.2.0`). The repository is the source of truth for
+all 27 tags (`v1.0.0` … `v5.2.1`). The repository is the source of truth for
 everything under version control.
 
 **`master` is not always the released state.** Work is sometimes committed
@@ -88,7 +88,7 @@ Verify:
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expect **1503 passed, 0 failed** (as of v5.2.0). A smaller number that
+Expect **1517 passed, 0 failed** (as of v5.2.1). A smaller number that
 still passes is the failure to watch for: a missing optional dependency
 makes pytest skip whole files rather than error, so read the count, not
 the colour. No test needs deselecting
@@ -162,7 +162,7 @@ pruned locally once verified recoverable, so only the current and previous
 release are usually present. Every published build is on GitHub:
 
 ```bash
-gh release download v5.2.0 --dir releases/v5.2.0
+gh release download v5.2.1 --dir releases/v5.2.1
 ```
 
 `gh` needs `gh auth login` on the new machine; the device-authorisation step
