@@ -49,6 +49,42 @@ when individual pieces of work happened.
   two background windows are searched for on flat stretches clear of
   every found peak, relaxing only in a spectrum too crowded to offer one.
 
+  Three things about that had to be measured on a real spectrum rather
+  than reasoned about, because between them they cost five lines of a
+  real Eu-152 run: 344.28, 367.79, 411.12, 416.02 and 443.97 keV, the
+  first of them the cleanest strong line in the spectrum.
+
+  A broad feature was kept clear of by its own measured width, and a
+  Compton structure at channel 643 measured 56 channels wide. That
+  blanked out 169 channels: six peaks below it could find no background
+  on their right and three above it none on their left, and nine
+  photopeaks went unfitted. A broad feature is now kept clear of by the
+  width a photopeak has at that channel, and the flatness test -- which
+  is what actually detects a window sitting on structure -- decides the
+  rest.
+
+  The fit window had a floor under its clipping, measured in a width
+  read off a smoothed copy that comes out up to twice the fitted width.
+  A close neighbour therefore did not narrow the window but widened it
+  back over the neighbour, and the fit ran there: five peaks were lost
+  that way, 416.02 keV among them, eight channels from a line twenty
+  times stronger. The clip now always wins, and a window clipped to
+  nothing gives a fit that fails and is dropped rather than a confident
+  wrong answer.
+
+  And a fit that ends up somewhere other than the peak it started from,
+  or on a peak another fit already caught, is now dropped instead of
+  committed. Ten of that spectrum's 67 fits did one or the other --
+  components up to eighteen times the width of its real peaks, three of
+  them with a negative area -- and kept, they are peaks in Fit Results
+  that are not in the spectrum, which the matcher is then free to name.
+
+  Together: peaks skipped for want of a clear background fell from 11 to
+  1, lines identified from 26 to 33, and lines exported for CalEnEff
+  from 26 to 33, at the same quality -- 0.11 keV rms about the fitted
+  line against 0.12 before, and areas scattering by a factor of 1.11
+  about the efficiency curve against 1.10 before.
+
   The areas must trace one efficiency curve as well. Area over intensity
   is the detector's efficiency times a constant, and an HPGe efficiency
   curve is smooth; under a wrong pairing the ratios scatter by orders of
@@ -69,6 +105,15 @@ when individual pieces of work happened.
   peak search's sensitivity, in standard deviations above the local
   continuum, has a sensible default and a control in the dialog whose
   count of peaks found updates as it is changed.
+
+- **Click a point on the calibration plot to find out which one it is.**
+  Clicking a point on the curve or on the residual strip rings it on
+  both, names it under the plot -- channel, energy, and its residual --
+  and selects its row in the Calibrate dialog's table. The residual
+  strip is where a misidentified line shows up, and until now it did not
+  say which line each point was, so the outlier furthest from zero had
+  to be found in the table by counting. Clicking empty space clears the
+  ring and the selection.
 
 ### Changed
 

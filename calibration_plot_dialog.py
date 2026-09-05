@@ -6,11 +6,13 @@ up, which is why this window exists at all rather than a message box
 reporting a and b.
 """
 
+import math
 import os
 
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -28,11 +30,26 @@ from value_format import compact
 #: a curve rather than a polyline at any zoom the dialog offers.
 _CURVE_SAMPLES = 400
 
+#: How near a click has to land, in screen pixels, to count as picking a
+#: point. Measured on screen and not in data units because the axes are
+#: channels against keV: a distance in data units would be meaningless
+#: in one direction or the other. Generous enough to hit a marker
+#: without aiming, small enough that a click on empty space clears the
+#: pick instead of grabbing whatever was nearest.
+_PICK_RADIUS_PX = 12.0
+
 
 class CalibrationPlotDialog(QDialog):
     """`points` is (channel, channel_err, area, area_err, energy) per
     assigned peak. `source_lines` are the .sou lines they were assigned
     from, used only by the export."""
+
+    #: Index into the `points` this window was last drawn with, when the
+    #: user clicks one of them on either axes; -1 when a click lands on
+    #: none. The Calibrate dialog uses it to select the matching row, so
+    #: a point read off the residual strip can be found in the table
+    #: without counting rows.
+    pointPicked = Signal(int)
 
     def __init__(self, parent, calibration, points, source_lines,
                  max_channel, default_path, excluded=(), reason=None):
@@ -40,6 +57,13 @@ class CalibrationPlotDialog(QDialog):
         self.setWindowTitle("Energy Calibration")
         self._default_path = default_path
         self._max_channel = max_channel
+        # Remembered by channel, not by position in the list: the list
+        # is rebuilt on every keystroke in the Calibrate dialog's table,
+        # and clearing one row's energy shifts every index after it. A
+        # ring that quietly moved to a different peak would be worse than
+        # no ring at all.
+        self._picked_channel = None
+        self._picked_artists = []
 
         layout = QVBoxLayout(self)
 
@@ -58,6 +82,16 @@ class CalibrationPlotDialog(QDialog):
             self.summary_label.textInteractionFlags()
         )
         layout.addWidget(self.summary_label)
+
+        # Which point was clicked, in words. The ring on the plot says
+        # where it is; this says what it is, and is the only feedback
+        # visible when the Calibrate dialog's table is behind this
+        # window.
+        self.picked_label = QLabel()
+        self.picked_label.setWordWrap(True)
+        layout.addWidget(self.picked_label)
+
+        self.canvas.mpl_connect("button_press_event", self._on_click)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         self.finish_button = buttons.addButton(
@@ -111,6 +145,7 @@ class CalibrationPlotDialog(QDialog):
 
         self.axes.clear()
         self.residual_axes.clear()
+        self._picked_artists = []       # the clear() above took them with it
 
         self.axes.errorbar(
             channels, energies, xerr=errors, fmt="o", capsize=3,
@@ -147,6 +182,7 @@ class CalibrationPlotDialog(QDialog):
         self.residual_axes.set_xlabel("Channel")
         self.residual_axes.set_ylabel("Residual (keV)")
         self._figure.tight_layout()
+        self._draw_pick()
         self.canvas.draw_idle()
 
         if calibration is not None:
@@ -155,6 +191,78 @@ class CalibrationPlotDialog(QDialog):
             self.summary_label.setText(
                 f"no calibration: {reason}" if reason else "no calibration yet"
             )
+
+    # --- picking a point --------------------------------------------------
+
+    def _pickable(self, axes):
+        """[(index, x, y)] of every point drawn in `axes`, excluded ones
+        included -- an excluded point is exactly the one a user wants to
+        find in the table."""
+        if axes is self.axes:
+            return [(i, p[0], p[4]) for i, p in enumerate(self._points)]
+        if axes is self.residual_axes and self._calibration is not None:
+            return [(i, p[0], p[4] - float(self._calibration.apply(p[0])))
+                    for i, p in enumerate(self._points)]
+        return []
+
+    def _on_click(self, event):
+        """Pick the point nearest the click, on either axes."""
+        if event.button != 1 or event.inaxes is None:
+            return
+        if self._figure.canvas.widgetlock.locked():
+            return          # a pan or zoom is in progress; not a pick
+        nearest, distance = None, _PICK_RADIUS_PX
+        for index, x, y in self._pickable(event.inaxes):
+            px, py = event.inaxes.transData.transform((x, y))
+            gap = math.hypot(px - event.x, py - event.y)
+            if gap <= distance:
+                nearest, distance = index, gap
+        self._picked_channel = (None if nearest is None
+                                else self._points[nearest][0])
+        self._draw_pick()
+        self.canvas.draw_idle()
+        self.pointPicked.emit(-1 if nearest is None else nearest)
+
+    def picked_index(self):
+        """Index of the picked point among the ones now drawn, or None
+        when nothing is picked or the point it was has gone."""
+        if self._picked_channel is None:
+            return None
+        for index, point in enumerate(self._points):
+            if abs(point[0] - self._picked_channel) < 1e-9:
+                return index
+        return None
+
+    def _draw_pick(self):
+        """Ring the picked point on both axes and describe it below."""
+        for artist in self._picked_artists:
+            try:
+                artist.remove()
+            except (ValueError, NotImplementedError):
+                pass
+        self._picked_artists = []
+        picked = self.picked_index()
+        if picked is None:
+            self.picked_label.setText("")
+            return
+        for axes in (self.axes, self.residual_axes):
+            for index, x, y in self._pickable(axes):
+                if index == picked:
+                    self._picked_artists.extend(axes.plot(
+                        [x], [y], "o", markersize=13, markerfacecolor="none",
+                        markeredgewidth=2.0, color="tab:red", zorder=5,
+                    ))
+        self.picked_label.setText(self._picked_text(picked))
+
+    def _picked_text(self, picked):
+        channel, channel_err, _area, _area_err, energy = self._points[picked]
+        text = f"picked: channel {compact(channel, channel_err)} = {energy:g} keV"
+        if self._calibration is not None:
+            text += (f", residual "
+                     f"{energy - float(self._calibration.apply(channel)):+.4g} keV")
+        if any(abs(energy - e) < 1e-9 for e in self._excluded):
+            text += " (excluded from the fit)"
+        return text
 
     def _summary_text(self, channels, energies, errors):
         cal = self._calibration

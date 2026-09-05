@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
@@ -387,17 +388,24 @@ class EnergyAssignDialog(QDialog):
         can load the same source again."""
         return getattr(self, "_source_path", None)
 
+    def rows_with_energy(self):
+        """The rows export_points reports, in that order -- so the Nth
+        point drawn on the plot belongs to the Nth row here. The plot
+        names a clicked point by its index, and this is what turns that
+        back into a row."""
+        return [row for row in range(len(self._peaks))
+                if self._energy_text(row).strip()]
+
     def export_points(self):
         """(channel, channel_err, area, area_err, energy) per assigned
         row, for the plot window and the CalEnEff export."""
         points = []
-        for row, peak in enumerate(self._peaks):
-            text = self._energy_text(row).strip()
-            if not text:
-                continue
+        for row in self.rows_with_energy():
+            peak = self._peaks[row]
             points.append((
                 peak.channel, peak.channel_err or 0.0,
-                peak.area, peak.area_err, float(text),
+                peak.area, peak.area_err,
+                float(self._energy_text(row).strip()),
             ))
         return points
 
@@ -680,7 +688,33 @@ class EnergyAssignDialog(QDialog):
             self._max_channel, self._export_default_path, excluded=excluded,
             reason=reason,
         )
+        self._live_plot.pointPicked.connect(self._on_point_picked)
         self._live_plot.show()
+
+    def _on_point_picked(self, index):
+        """Select the row behind the point clicked on the plot.
+
+        A point on the residual strip is the one thing in this dialog
+        that cannot be traced back to a row by eye: the strip is ordered
+        by channel and the interesting point is usually the one furthest
+        from zero, with nothing on it to say which line it is. Clicking
+        it selects and scrolls to its row, which is where the energy can
+        be corrected or the point unticked.
+
+        A click on empty space arrives as -1 and clears the selection,
+        so the highlight never outlives the pick that made it.
+        """
+        rows = self.rows_with_energy()
+        if index < 0 or index >= len(rows):
+            self.table.clearSelection()
+            return
+        row = rows[index]
+        self.table.setCurrentCell(row, self.ENERGY_COLUMN)
+        self.table.selectRow(row)
+        item = self.table.item(row, self.ENERGY_COLUMN)
+        if item is not None:
+            self.table.scrollToItem(
+                item, QAbstractItemView.ScrollHint.PositionAtCenter)
 
     def _on_accept(self):
         calibration, reason = self._compute_calibration()

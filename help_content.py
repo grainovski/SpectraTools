@@ -442,6 +442,14 @@ it too. Clearing the assignments takes it down again. <b>Finish and save for Cal
 seven-column file for the efficiency-calibration program: channel and
 its error, net area and its error, energy, and relative intensity with
 its error.</p>
+<p><b>Click a point to find out which one it is.</b> Clicking a point on
+the curve or on the residual strip rings it on both, names it under the
+plot -- channel, energy, and its residual against the current fit --
+and selects its row in the table. That is what makes the residual strip
+usable: the point furthest from zero is the one worth looking at, and
+nothing on the strip says which line it is. Clicking away from every
+point clears the ring and the selection. An excluded point can be
+picked like any other, and says that it is excluded.</p>
 
 <h3>12. Automatic calibration</h3>
 <p><b>Operations &gt; Automatic Calibration...</b> (<kbd>Ctrl+Shift+L</kbd>)
@@ -466,9 +474,13 @@ would point at.</li>
 photopeaks. Every other peak is fitted <b>on its own, with its own
 markers</b>: a fit window around it alone, stopping halfway to any
 neighbour, and two background windows searched for on flat stretches
-where no peak was found. The fits are added to Fit Results. <b>Fits
-already on the spectrum are kept</b>: the new ones are appended after
-them, and the status bar says how many were there before.</li>
+where no peak was found. A fit that ends up somewhere other than the
+peak it started from -- displaced by more than a peak width, far wider
+than the spectrum's peaks, or with a negative area -- is dropped rather
+than committed, and so is the weaker of two fits that landed on the same
+peak. The rest are added to Fit Results. <b>Fits already on the spectrum
+are kept</b>: the new ones are appended after them, and the status bar
+says how many were there before.</li>
 <li>The Calibrate from Fitted Peaks dialog then opens with the source
 loaded and every identified peak's energy already filled in. A point
 whose area does not sit on the efficiency curve the others trace is
@@ -495,8 +507,10 @@ opens with the peaks fitted but unassigned. Type the energies of two
 peaks you recognise and press <b>Suggest remaining</b>, exactly as you
 would with hand-fitted peaks. The status line also reports candidates
 set aside as broad features, peaks that were found but could not be
-fitted, peaks skipped for want of a clear background on both sides, and
-fits set aside for an implausible width or a negative area.</p>
+fitted, peaks skipped for want of a clear background on both sides, fits
+that strayed onto a neighbour, fits that repeated a peak another fit had
+already caught, and fits set aside for an implausible width or a
+negative area.</p>
 <p>A peak fitted twice -- once by hand before the run, once by the
 automatic pass -- appears twice in the table, and the energy goes to the
 automatic copy. Running again appends a second set of fits;

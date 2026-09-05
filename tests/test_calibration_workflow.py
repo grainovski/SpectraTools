@@ -432,3 +432,47 @@ def test_quadratic_with_two_points_keeps_the_plot_open_and_says_why(qapp, tmp_pa
     dialog.quadratic_checkbox.setChecked(False)
     assert plot._calibration is not None
     assert plot._calibration.kind == "linear"
+
+
+def test_picking_a_point_on_the_plot_selects_its_row(qapp, tmp_path):
+    """Clicking a point -- on the curve or on the residual strip --
+    selects the row it came from, so the peak behind an outlying
+    residual can be found without counting rows."""
+    window, _ = _window(tmp_path, centres=(120.0, 300.0, 470.0))
+    dialog = _live_dialog(window, tmp_path)
+    for row, energy in enumerate(("300", "840", "1300")):
+        dialog.table.item(row, ENERGY).setText(energy)
+    plot = dialog._live_plot
+    assert len(plot._points) == 3
+
+    dialog.table.clearSelection()
+    plot.pointPicked.emit(2)
+    assert dialog.table.currentRow() == 2
+    assert dialog.table.selectionModel().isRowSelected(2)
+
+
+def test_a_pick_lands_on_the_right_row_when_earlier_rows_are_blank(qapp, tmp_path):
+    """The plot only holds the rows that carry an energy, so its second
+    point is not the table's second row."""
+    window, _ = _window(tmp_path, centres=(120.0, 300.0, 470.0))
+    dialog = _live_dialog(window, tmp_path)
+    dialog.table.item(1, ENERGY).setText("840")
+    dialog.table.item(2, ENERGY).setText("1300")
+    plot = dialog._live_plot
+    assert len(plot._points) == 2
+
+    plot.pointPicked.emit(0)
+    assert dialog.table.currentRow() == 1, "the blank first row was counted"
+    plot.pointPicked.emit(1)
+    assert dialog.table.currentRow() == 2
+
+
+def test_picking_nothing_clears_the_selection(qapp, tmp_path):
+    window, _ = _window(tmp_path, centres=(120.0, 300.0, 470.0))
+    dialog = _live_dialog(window, tmp_path)
+    for row, energy in enumerate(("300", "840", "1300")):
+        dialog.table.item(row, ENERGY).setText(energy)
+    dialog._live_plot.pointPicked.emit(1)
+    assert dialog.table.selectionModel().hasSelection()
+    dialog._live_plot.pointPicked.emit(-1)
+    assert not dialog.table.selectionModel().hasSelection()

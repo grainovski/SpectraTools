@@ -299,7 +299,8 @@ def test_one_failing_fit_does_not_abort_the_rest(monkeypatch):
     outcome = auto_calibrate.fit_found_peaks(x, y, found)
     assert outcome.failed == 1
     assert outcome.attempted == len(calls)
-    assert len(outcome.results) == outcome.attempted - 1
+    assert len(outcome.results) == (outcome.attempted - outcome.failed
+                                    - outcome.runaway - outcome.duplicate)
 
 
 def test_fit_found_peaks_passes_the_spectrum_variance_through(monkeypatch):
@@ -322,6 +323,102 @@ def test_fit_found_peaks_passes_the_spectrum_variance_through(monkeypatch):
     assert seen[0] is variance
 
 
+# --- what the settling pass throws out ----------------------------------
+
+
+def _fake_fit(position, fwhm, area):
+    peak = peak_fit.PeakResult(position=position, position_err=0.01, fwhm=fwhm,
+                               fwhm_err=0.01, area=area, area_err=1.0,
+                               amplitude=area / max(fwhm, 1e-9), sigma=fwhm / 2.3548)
+    return peak_fit.FitResult(left_bg_region=(position - 30, position - 20),
+                              right_bg_region=(position + 20, position + 30),
+                              fit_region=(position - 10, position + 10),
+                              background_slope=0.0, background_intercept=1.0,
+                              peaks=[peak])
+
+
+def _seed(channel):
+    return peak_search.FoundPeak(channel=channel, fwhm=4.0, prominence=100.0,
+                                 significance=20.0, height=100.0)
+
+
+def _trend(n, start=100.0, step=100.0, fwhm=4.0):
+    """n well-behaved fits, evenly spaced and all the same width, so that
+    the width trend is flat and anything added to them is judged against
+    a known expectation."""
+    return [(_seed(start + step * i), _fake_fit(start + step * i, fwhm, 1000.0))
+            for i in range(n)]
+
+
+def test_settle_keeps_fits_that_landed_where_they_were_seeded():
+    kept, runaway, duplicate = auto_calibrate._settle(_trend(8))
+    assert len(kept) == 8
+    assert (runaway, duplicate) == (0, 0)
+
+
+def test_settle_drops_a_fit_that_ran_onto_its_neighbour():
+    """The 416.02 keV case: seeded on one peak, converged on the strong
+    line beside it. Committing it would put a second, spurious peak on
+    top of one already fitted and let the matcher name it."""
+    fitted = _trend(8)
+    fitted.append((_seed(850.0), _fake_fit(841.0, 4.0, 5000.0)))
+    kept, runaway, duplicate = auto_calibrate._settle(fitted)
+    assert runaway == 1
+    assert duplicate == 0
+    assert all(abs(r.peaks[0].position - 841.0) > 1.0 for r in kept)
+
+
+def test_settle_drops_a_fit_far_wider_than_the_trend():
+    fitted = _trend(8)
+    fitted.append((_seed(850.0), _fake_fit(850.0, 40.0, 5000.0)))
+    kept, runaway, _duplicate = auto_calibrate._settle(fitted)
+    assert runaway == 1
+    assert all(r.peaks[0].fwhm < 40.0 for r in kept)
+
+
+def test_settle_drops_a_fit_with_no_positive_area():
+    fitted = _trend(8)
+    fitted.append((_seed(850.0), _fake_fit(850.0, 4.0, -20.0)))
+    kept, runaway, _duplicate = auto_calibrate._settle(fitted)
+    assert runaway == 1
+    assert all(r.peaks[0].area > 0 for r in kept)
+
+
+def test_settle_keeps_the_stronger_of_two_fits_of_one_peak():
+    """Two adjacent found peaks can both converge on the same line. Kept
+    both, they gave one physical peak two different energies -- 1084.00
+    and 1085.84 keV on a real Eu-152 spectrum."""
+    fitted = _trend(8)
+    fitted.append((_seed(801.0), _fake_fit(800.4, 4.0, 40.0)))
+    kept, runaway, duplicate = auto_calibrate._settle(fitted)
+    assert (runaway, duplicate) == (0, 1)
+    assert len(kept) == 8
+    areas = {r.peaks[0].area for r in kept if abs(r.peaks[0].position - 800.0) < 2}
+    assert areas == {1000.0}, "the weaker of the two was the one kept"
+
+
+def test_settle_keeps_two_peaks_that_are_genuinely_apart():
+    """CONTROL for the test above: the same extra fit, moved far enough
+    from its neighbour to be a peak of its own, is kept."""
+    fitted = _trend(8)
+    fitted.append((_seed(803.0), _fake_fit(803.0, 4.0, 40.0)))
+    kept, runaway, duplicate = auto_calibrate._settle(fitted)
+    assert (runaway, duplicate) == (0, 0)
+    assert len(kept) == 9
+
+
+def test_settle_returns_the_kept_fits_in_channel_order():
+    fitted = _trend(6)
+    fitted.append((_seed(250.0), _fake_fit(250.0, 4.0, 90000.0)))
+    kept, _runaway, _duplicate = auto_calibrate._settle(fitted)
+    positions = [r.peaks[0].position for r in kept]
+    assert positions == sorted(positions)
+
+
+def test_settle_on_nothing():
+    assert auto_calibrate._settle([]) == ([], 0, 0)
+
+
 # --- the whole thing, as the dialog runs it -----------------------------
 
 
@@ -330,7 +427,8 @@ def test_calibrate_runs_search_fit_and_match_together():
     x = np.arange(len(counts), dtype=float)
     outcome = auto_calibrate.calibrate(x, counts, load_sou(fixture_sou("eu152.sou")))
     assert outcome.match.ok, outcome.match.reason
-    assert len(outcome.results) == outcome.fits.attempted - outcome.fits.failed
+    assert len(outcome.results) == (outcome.fits.attempted - outcome.fits.failed
+                                    - outcome.fits.runaway - outcome.fits.duplicate)
     positions = [p.position for p in outcome.peaks]
     assert wrong_assignments(outcome.match.pairs, positions, 12.5, 0.40) == []
     # The pairs the dialog is handed are (channel, energy) on the FITTED
@@ -372,6 +470,8 @@ def test_summary_reports_every_count_the_status_line_needs():
     assert f"{outcome.fits.failed} failed" in text
     assert f"{outcome.fits.broad} broad features set aside" in text
     assert f"{outcome.fits.skipped} skipped for want of a clear background" in text
+    assert f"{outcome.fits.runaway} that strayed" in text
+    assert f"{outcome.fits.duplicate} that repeated another" in text
     assert f"{len(outcome.match.pairs)} identified in eu152.sou" in text
     assert "2 fits already on the spectrum were kept" in text
     # A peak set aside for its width is reported as such, not folded into

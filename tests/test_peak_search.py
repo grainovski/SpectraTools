@@ -198,13 +198,24 @@ def test_fit_window_is_clipped_at_the_midpoint_to_a_neighbour():
     assert fit_window(other, [peak, other]) == (505.0, 522.0)
 
 
-def test_fit_window_never_narrows_below_the_floor():
-    """A neighbour almost on top of the peak would clip the window to
-    nothing; the floor keeps enough of the peak to fit at all."""
+def test_a_close_neighbour_clips_the_window_and_nothing_widens_it_back():
+    """There used to be a floor of 1.2 widths either side that a clip
+    could not go below. Because the width is read off a smoothed copy
+    and comes out up to twice the fitted width, that floor reached past
+    close neighbours instead of stopping short of them: on a real
+    Eu-152 spectrum the window for the 416.02 keV line was floored back
+    out onto the line twenty times stronger eight channels away, and the
+    fit ran there. The clip wins now, however little it leaves."""
     peak, other = _peak(500.0, 4.0), _peak(502.0, 4.0)
-    lo, hi = fit_window(peak, [peak, other])
-    assert hi == pytest.approx(500.0 + 1.2 * 4.0)
-    assert lo == 488.0
+    assert fit_window(peak, [peak, other]) == (488.0, 501.0)
+
+
+def test_a_window_narrowed_to_nothing_is_not_widened_onto_the_neighbour():
+    """The control for the test above: the old floor would have put the
+    edge past the neighbour, which is the failure it caused."""
+    peak, other = _peak(500.0, 4.0), _peak(501.0, 4.0)
+    _lo, hi = fit_window(peak, [peak, other])
+    assert hi < other.channel
 
 
 # --- background windows ------------------------------------------------
@@ -274,7 +285,35 @@ def test_a_crowded_neighbourhood_falls_back_to_avoiding_only_what_matters():
     broad.broad = True
     right = background_window(counts, peak, +1, [peak] + weak + [broad])
     assert right is not None
-    assert right[0] >= 1030.0 + 1.5 * 20.0
+    assert right[0] >= 1030.0 + 3.0 * 4.0
+
+
+def test_a_broad_feature_is_kept_clear_of_by_a_photopeak_width_not_its_own():
+    """Channel 643 of the real Eu-152 spectrum: a Compton structure
+    measured 56 channels wide. Keeping 1.5 of ITS widths clear blanked
+    out 169 channels of spectrum, so six peaks below it could find no
+    background on their right and three above it none on their left, and
+    five source lines went unfitted. The clearance is capped at three of
+    the target peak's own widths instead, and flatness judges the rest."""
+    counts = _flat_spectrum(n=4000)
+    peak = _peak(1000.0, 4.0)
+    broad = _peak(1030.0, 56.0, prominence=50.0)
+    broad.broad = True
+    right = background_window(counts, peak, +1, [peak, broad])
+    assert right is not None
+    assert right[0] >= 1030.0 + 3.0 * 4.0        # clear of the bump's core
+    assert right[0] < 1030.0 + 1.5 * 56.0        # but not of its whole width
+
+
+def test_the_cap_is_what_makes_the_difference_not_the_reach():
+    """CONTROL: the same neighbour, same width, same place, but not
+    marked broad. It keeps its full clearance, and there is then nowhere
+    within reach to read a background from -- which is exactly what the
+    real spectrum did to five of its lines."""
+    counts = _flat_spectrum(n=4000)
+    peak = _peak(1000.0, 4.0)
+    wide = _peak(1030.0, 56.0, prominence=50.0)
+    assert background_window(counts, peak, +1, [peak, wide]) is None
 
 
 def test_regions_refuse_a_peak_with_no_background_on_one_side():

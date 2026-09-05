@@ -70,6 +70,13 @@ WIDTH_OUTLIER_RATIO = 2.0
 #: window bounds the data fitted, not where the centroid may go.
 REFIT_MAX_SHIFT_FWHM = 1.0
 
+#: Two fitted centroids closer together than this many expected widths
+#: are one peak fitted twice, not two peaks. Nothing is lost by dropping
+#: the weaker of them: lines half a width apart are not resolved by a
+#: single-peak fit anyway, so both fits describe the same blob, and
+#: keeping both lets the matcher hand one physical peak two energies.
+DUPLICATE_FWHM = 0.5
+
 #: Fewer inliers than this is not a calibration, it is a coincidence.
 #: Three points can be fitted by a quadratic exactly, so four is the
 #: smallest number that can disagree with the fit and thereby support it.
@@ -448,19 +455,25 @@ class AutoFitOutcome:
     in the same order, which is what the matcher and the calibration
     dialog see. `broad` counts the found peaks set aside as not being
     photopeaks; `skipped` the photopeaks that had no clear background on
-    both sides; `failed` the fits that did not converge. None of those
-    stops the rest.
+    both sides; `failed` the fits that did not converge; `runaway` those
+    that converged on something other than the peak they were seeded on;
+    `duplicate` those that landed on a peak another fit had already
+    taken. None of those stops the rest.
     """
 
-    __slots__ = ("results", "peaks", "attempted", "failed", "skipped", "broad")
+    __slots__ = ("results", "peaks", "attempted", "failed", "skipped", "broad",
+                 "runaway", "duplicate")
 
-    def __init__(self, results, peaks, attempted, failed, skipped, broad):
+    def __init__(self, results, peaks, attempted, failed, skipped, broad,
+                 runaway=0, duplicate=0):
         self.results = results
         self.peaks = peaks
         self.attempted = attempted
         self.failed = failed
         self.skipped = skipped
         self.broad = broad
+        self.runaway = runaway
+        self.duplicate = duplicate
 
 
 def _fit_one(x, y, peak, found, variance):
@@ -480,6 +493,56 @@ def _fit_one(x, y, peak, found, variance):
         return None, "failed"
 
 
+def _settle(fitted):
+    """(FitResults worth keeping, runaways dropped, duplicates dropped).
+
+    A single-peak fit is free to walk out of the window it was seeded in,
+    and on a crowded spectrum it does. Of 67 fits attempted on a real
+    Eu-152 spectrum, ten came back as something other than the peak they
+    were seeded on: components up to eighteen times the width of that
+    spectrum's own peaks, three of them with a negative area, two of
+    them sitting on a peak another fit had already caught. Committed,
+    each is a peak in Fit Results that is not in the spectrum, and the
+    matcher is free to name it -- while the fit window was still
+    widening onto close neighbours, two fits of one peak gave it two
+    different energies, 1084.00 and 1085.84 keV.
+
+    So a fit is dropped when it converged on something other than the
+    peak it was seeded on -- displaced by more than REFIT_MAX_SHIFT_FWHM
+    of the expected width, wider than WIDTH_OUTLIER_RATIO of it, or with
+    no positive area -- and, of two fits that landed on the same peak,
+    the one with the smaller area goes. This is the same guard the refit
+    pass applies, for the same reason and against the same trend through
+    the FITTED widths rather than each peak's own width.
+    """
+    if not fitted:
+        return [], 0, 0
+    widths = expected_widths([result.peaks[0].position for _p, result in fitted],
+                             [result.peaks[0].fwhm for _p, result in fitted])
+    sound, runaway = [], 0
+    for (seed, result), expected in zip(fitted, widths):
+        one = result.peaks[0]
+        if (not math.isfinite(float(expected)) or not math.isfinite(one.fwhm)
+                or not math.isfinite(one.position) or not (one.area > 0.0)
+                or one.fwhm > WIDTH_OUTLIER_RATIO * expected
+                or abs(one.position - seed.channel) > REFIT_MAX_SHIFT_FWHM * expected):
+            runaway += 1
+            continue
+        sound.append((result, one, float(expected)))
+
+    # Strongest first, so the fit that actually caught the peak is the
+    # one kept and the stray that landed beside it is the one dropped.
+    kept, duplicate = [], 0
+    for entry in sorted(sound, key=lambda s: -s[1].area):
+        if any(abs(entry[1].position - other.position) < DUPLICATE_FWHM * entry[2]
+               for _r, other, _e in kept):
+            duplicate += 1
+            continue
+        kept.append(entry)
+    kept.sort(key=lambda s: s[1].position)
+    return [result for result, _one, _expected in kept], runaway, duplicate
+
+
 def fit_found_peaks(x, y, found, link_widths=True, variance=None):
     """Fit every photopeak among `found`, one at a time.
 
@@ -496,7 +559,7 @@ def fit_found_peaks(x, y, found, link_widths=True, variance=None):
     file, exactly as the interactive Fit passes it.
     """
     peaks_to_fit, broad = peak_search.reject_broad(found)
-    results, peaks = [], []
+    fitted = []
     attempted = failed = skipped = 0
     for peak in sorted(peaks_to_fit, key=lambda p: p.channel):
         result, reason = _fit_one(x, y, peak, found, variance)
@@ -504,13 +567,16 @@ def fit_found_peaks(x, y, found, link_widths=True, variance=None):
             skipped += 1
             continue
         attempted += 1
-        if result is None:
+        if result is None or not result.peaks:
             failed += 1
             continue
-        results.append(result)
-        for fitted in result.peaks:
-            peaks.append((len(results) - 1, fitted))
-    return AutoFitOutcome(results, peaks, attempted, failed, skipped, len(broad))
+        fitted.append((peak, result))
+
+    results, runaway, duplicate = _settle(fitted)
+    peaks = [(index, one)
+             for index, result in enumerate(results) for one in result.peaks]
+    return AutoFitOutcome(results, peaks, attempted, failed, skipped, len(broad),
+                          runaway, duplicate)
 
 
 # ------------------------------------------------------------ the whole run
@@ -569,7 +635,9 @@ class AutoCalibration:
         fits = self.fits
         text = (f"{len(self.found)} peaks found, {fits.broad} broad features set aside; "
                 f"fits: {fits.attempted} attempted, {fits.failed} failed, "
-                f"{fits.skipped} skipped for want of a clear background; "
+                f"{fits.skipped} skipped for want of a clear background, "
+                f"{fits.runaway} that strayed and {fits.duplicate} that "
+                f"repeated another dropped; "
                 f"{len(self.peaks)} peaks fitted, ")
         if self.match.ok:
             text += f"{len(self.match.pairs)} identified in {source_name}"

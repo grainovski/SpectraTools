@@ -64,10 +64,22 @@ BROAD_FEATURE_RATIO = 2.0
 #: The fit window reaches this many widths either side of the peak, but
 #: never past the midpoint to a neighbouring found peak: a neighbour
 #: inside the window would be absorbed into this peak's area.
+#:
+#: There used to be a floor under that clipping -- the window was never
+#: narrower than 1.2 widths either side, so a very close neighbour still
+#: left something to fit. It did more harm than good, because the width
+#: it was measured in is read off a smoothed copy and comes out one and
+#: a half to two times the fitted width: on a real Eu-152 spectrum the
+#: 416.02 keV line, eight channels from a line twenty times stronger,
+#: had its window floored back out to the stronger line, and the fit
+#: promptly ran there. A window that honours the clip fits it at 665.81
+#: with a 2.7-channel width, and recovers four other peaks besides.
+#:
+#: So the clip now always wins. A neighbour close enough to clip the
+#: window to nothing leaves a fit that fails or strays, which the
+#: settling pass in auto_calibrate drops -- an honest miss, where
+#: widening onto the neighbour produced a confident wrong answer.
 FIT_HALF_WIDTH_FWHM = 3.0
-#: ...and never narrower than this, so a very close neighbour leaves
-#: enough of the peak to fit. Below this the two are one blob to any fit.
-MIN_FIT_HALF_WIDTH_FWHM = 1.2
 
 #: Background windows: each is BG_WINDOW_FWHM wide, the search for one
 #: starts BG_INNER_FWHM out from the peak (just clear of the widest fit
@@ -89,6 +101,27 @@ BG_INNER_FWHM = 3.25
 BG_STEP_FWHM = 0.5
 BG_MAX_REACH_FWHM = 25.0
 PEAK_CLEARANCE_FWHM = 1.5
+
+#: How far a BROAD feature is kept away from, at most, in multiples of
+#: the width of the peak being fitted -- not of its own width.
+#:
+#: A broad feature's reported width is the distance between the
+#: half-prominence crossings of a smooth bump, which is not a photopeak
+#: width and carries no promise of being modest: a Compton structure at
+#: channel 643 of a real Eu-152 spectrum was measured 56 channels wide,
+#: and 1.5 of those widths blanked out 169 channels. Six peaks below it
+#: could then find no background on their right and three above it none
+#: on their left, so five source lines -- 344.28, 367.79, 411.12, 416.02
+#: and 443.97 keV, the first of them the cleanest strong line in the
+#: spectrum -- were never fitted and never assigned.
+#:
+#: A window must still not be read from the crest of a bump, so the
+#: clearance is capped rather than dropped, and `flatness` -- which is
+#: what actually detects a window sitting on structure -- decides the
+#: rest. Reading a background close to a peak matters more than reading
+#: it far from a smooth feature: a straight line through two distant
+#: windows misjudges a curved continuum by more than a nearby bump does.
+BROAD_CLEARANCE_FWHM = 3.0
 
 #: When no window within reach is clear of EVERY found peak, the search
 #: tries again avoiding only the neighbours that would actually bias
@@ -267,7 +300,8 @@ def reject_broad(found, ratio=BROAD_FEATURE_RATIO):
 
 def fit_window(peak, found):
     """(lo, hi) around `peak`, clipped at the midpoint to any other found
-    peak that would otherwise fall inside it."""
+    peak that would otherwise fall inside it. The clip is never undone:
+    see FIT_HALF_WIDTH_FWHM."""
     half = FIT_HALF_WIDTH_FWHM * peak.fwhm
     lo, hi = peak.channel - half, peak.channel + half
     for other in found:
@@ -278,8 +312,7 @@ def fit_window(peak, found):
             lo = max(lo, midpoint)
         elif peak.channel < other.channel < hi:
             hi = min(hi, midpoint)
-    floor = MIN_FIT_HALF_WIDTH_FWHM * peak.fwhm
-    return min(lo, peak.channel - floor), max(hi, peak.channel + floor)
+    return lo, hi
 
 
 def flatness(counts, lo, hi):
@@ -305,6 +338,17 @@ def flatness(counts, lo, hi):
     return chi2 + 2.0 * tilt
 
 
+def _keep_away(peak, other):
+    """(lo, hi) a background window for `peak` must not touch on account
+    of `other`: PEAK_CLEARANCE_FWHM of the other peak's width, and for a
+    broad feature never more than BROAD_CLEARANCE_FWHM of the width of
+    the peak being fitted."""
+    reach = PEAK_CLEARANCE_FWHM * other.fwhm
+    if other.broad:
+        reach = min(reach, BROAD_CLEARANCE_FWHM * peak.fwhm)
+    return other.channel - reach, other.channel + reach
+
+
 def _clear_window(counts, peak, direction, avoid):
     """The nearest window on one side of `peak` that is clear of every
     peak in `avoid` and flatter than FLAT_SCORE; failing that, the
@@ -312,11 +356,7 @@ def _clear_window(counts, peak, direction, avoid):
     between the peak and the spectrum edge."""
     counts = np.asarray(counts, dtype=float)
     width = BG_WINDOW_FWHM * peak.fwhm
-    exclusions = [
-        (other.channel - PEAK_CLEARANCE_FWHM * other.fwhm,
-         other.channel + PEAK_CLEARANCE_FWHM * other.fwhm)
-        for other in avoid
-    ]
+    exclusions = [_keep_away(peak, other) for other in avoid]
     best = None
     distance = BG_INNER_FWHM * peak.fwhm
     limit = BG_MAX_REACH_FWHM * peak.fwhm

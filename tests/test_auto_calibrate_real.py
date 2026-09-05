@@ -56,12 +56,36 @@ def test_the_broad_compton_feature_is_set_aside_not_fitted(eu152):
     assert not any(abs(p.position - 187) < 2 for p in outcome.peaks)
 
 
+def test_the_lines_a_broad_feature_used_to_hide_are_all_found(eu152):
+    """The second bug report: 344.28, 367.79, 411.12, 416.02 and 443.97
+    keV were all missing, 344.28 being the cleanest strong line in the
+    spectrum. Every one of them sat behind a Compton structure at
+    channel 643 whose measured width -- 56 channels -- blanked out 169
+    channels of spectrum to the background search, or behind a fit
+    window floored back out onto a stronger neighbour."""
+    _counts, _lines, outcome = eu152
+    assigned = {round(e, 4): c for c, e in outcome.pairs}
+    for energy, channel in ((344.2785, 551.0), (367.7891, 588.7),
+                            (411.1165, 658.0), (416.0200, 665.8),
+                            (443.9653, 710.6)):
+        assert energy in assigned, f"{energy} keV is unassigned again"
+        assert assigned[energy] == pytest.approx(channel, abs=1.0)
+
+
+def test_no_peak_is_fitted_twice(eu152):
+    """Two fits landing on one peak let the matcher give it two
+    energies."""
+    _counts, _lines, outcome = eu152
+    positions = sorted(p.position for p in outcome.peaks)
+    assert all(b - a > 1.0 for a, b in zip(positions, positions[1:]))
+
+
 def test_coverage_on_a_crowded_real_spectrum(eu152):
     """The first flat-background search left 35 of 68 photopeaks
     unfitted and matched 15 lines. These floors pin the tuned version."""
     _counts, _lines, outcome = eu152
-    assert outcome.fits.skipped <= 15
-    assert len(outcome.pairs) >= 22
+    assert outcome.fits.skipped <= 2
+    assert len(outcome.pairs) >= 32
 
 
 def test_the_areas_trace_one_efficiency_curve(eu152):
@@ -109,7 +133,7 @@ def test_refit_covers_the_visible_source_lines(eu152):
     refit = auto_calibrate.refit_source_lines(
         channel_indices(len(counts)), counts, lines, cal)
 
-    assert len(refit.results) >= 24
+    assert len(refit.results) >= 32
     assert all(len(result.peaks) == 1 for result in refit.results)
     energies = [e for _c, e in refit.pairs]
     assert any(abs(e - 121.7817) < 1e-3 for e in energies)

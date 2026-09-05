@@ -4,6 +4,8 @@ the CalEnEff export behind Finish."""
 import numpy as np
 import pytest
 
+from matplotlib.backend_bases import MouseEvent
+
 from calibration import Calibration
 from calibration_plot_dialog import CalibrationPlotDialog
 from sou_io import SourceLine
@@ -148,3 +150,98 @@ def test_no_points_at_all_is_drawn_as_an_empty_plot(qapp):
     dialog.set_data(None, [], _lines(), reason="no assignments")
     assert _curve_lines(dialog) == []
     assert "no assignments" in dialog.summary_label.text()
+
+
+# --- picking a point off the plot ---------------------------------------
+
+
+def _click(dialog, axes, x, y, button=1):
+    """Click at the DATA position (x, y) of `axes`, through the canvas's
+    own event machinery, so the wiring is exercised and not just the
+    handler."""
+    canvas = dialog._figure.canvas
+    canvas.draw()
+    px, py = axes.transData.transform((x, y))
+    canvas.callbacks.process(
+        "button_press_event",
+        MouseEvent("button_press_event", canvas, px, py, button),
+    )
+
+
+def test_clicking_a_point_on_the_curve_picks_it(qapp):
+    dialog = _dialog(qapp)
+    picked = []
+    dialog.pointPicked.connect(picked.append)
+    _click(dialog, dialog.axes, 300.0, 344.276)
+    assert picked == [1]
+    assert dialog.picked_index() == 1
+    assert "344.276" in dialog.picked_label.text()
+
+
+def test_clicking_a_point_on_the_residual_strip_picks_it(qapp):
+    """The point of the feature: the residual strip is where a
+    misidentified line stands out, and it carries nothing that says
+    which line it is."""
+    cal = Calibration(kind="linear", a=10.0, b=1.1)
+    dialog = _dialog(qapp, calibration=cal)
+    picked = []
+    dialog.pointPicked.connect(picked.append)
+    _click(dialog, dialog.residual_axes, 500.0, 566.0 - cal.apply(500.0))
+    assert picked == [2]
+    assert dialog.picked_index() == 2
+
+
+def test_clicking_empty_space_picks_nothing(qapp):
+    """CONTROL: without this the nearest point would be picked wherever
+    the click landed, and the ring would mean nothing."""
+    dialog = _dialog(qapp)
+    picked = []
+    dialog.pointPicked.connect(picked.append)
+    _click(dialog, dialog.axes, 300.0, 344.276)
+    _click(dialog, dialog.axes, 200.0, 700.0)
+    assert picked == [1, -1]
+    assert dialog.picked_index() is None
+    assert dialog.picked_label.text() == ""
+
+
+def test_a_right_click_is_not_a_pick(qapp):
+    dialog = _dialog(qapp)
+    _click(dialog, dialog.axes, 300.0, 344.276, button=3)
+    assert dialog.picked_index() is None
+
+
+def test_an_excluded_point_can_be_picked_and_says_it_is_excluded(qapp):
+    dialog = _dialog(qapp)
+    dialog.set_data(dialog._calibration, _points(), _lines(), excluded=(566.0,))
+    _click(dialog, dialog.axes, 500.0, 566.0)
+    assert dialog.picked_index() == 2
+    assert "excluded" in dialog.picked_label.text()
+
+
+def test_the_pick_follows_its_point_through_a_redraw(qapp):
+    """The Calibrate dialog redraws on every keystroke. A ring left on
+    an index rather than on a peak would slide onto a different point
+    the moment a row above it was cleared."""
+    dialog = _dialog(qapp)
+    _click(dialog, dialog.axes, 500.0, 566.0)
+    assert dialog.picked_index() == 2
+    dialog.set_data(dialog._calibration, _points()[1:], _lines())
+    assert dialog.picked_index() == 1, "the ring moved to another peak"
+    assert "566" in dialog.picked_label.text()
+
+
+def test_a_pick_whose_point_is_gone_is_dropped(qapp):
+    dialog = _dialog(qapp)
+    _click(dialog, dialog.axes, 500.0, 566.0)
+    dialog.set_data(dialog._calibration, _points()[:2], _lines())
+    assert dialog.picked_index() is None
+    assert dialog.picked_label.text() == ""
+
+
+def test_nothing_can_be_picked_off_a_residual_strip_with_no_calibration(qapp):
+    """With no fit there are no residuals -- only the reason, written
+    across the strip."""
+    dialog = _dialog(qapp, calibration=None)
+    dialog.set_data(None, _points(), _lines(), reason="too few points")
+    _click(dialog, dialog.residual_axes, 0.5, 0.5)
+    assert dialog.picked_index() is None
