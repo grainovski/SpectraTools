@@ -1100,3 +1100,56 @@ def test_help_documents_the_include_exclude_tick():
     assert "unticking it leaves that point out" in howto
     assert "hollow marker" in howto
     assert "still written there" in howto      # the CalEnEff exception
+
+# ---------------------------------------------------------------------------
+# v5.1.0: automatic calibration. Rendered text or short single-line
+# fragments only -- the help HTML is line-wrapped, so a whole sentence
+# asserted against the raw HTML silently matches nothing.
+# ---------------------------------------------------------------------------
+
+
+def test_howto_documents_automatic_calibration():
+    html = build_howto_html()
+    assert "Automatic calibration</h3>" in html
+    # The Operations-menu table row, in the table and not just the prose.
+    assert "<td><kbd>Ctrl+Shift+L</kbd></td><td>Automatic Calibration...</td>" in html
+    text = _rendered_text(html)
+    assert "Load source..." in text
+    assert "The count of peaks found updates" in text
+    # Both halves of the append decision, and the honest fallback.
+    assert "Fits already on the spectrum are kept" in text
+    assert "how many were there before" in text
+    assert "fitted but unassigned" in text
+    assert "it never guesses" in text
+    assert "set aside for an" in text
+
+
+def test_knowledge_database_explains_how_lines_are_identified():
+    text = _rendered_text(build_knowledge_database_html())
+    assert "How automatic calibration identifies the lines" in text
+    assert "ten strongest peaks" in text
+    assert "fifteen strongest lines" in text
+    assert "explains the most peaks wins" in text
+    # The width rule the Ra-226 failure taught, and every refusal.
+    assert "width expected at its channel" in text
+    assert "three times the expected width" in text
+    assert "fitted area is negative" in text
+    assert "fewer than four peaks" in text
+    assert "more than five percent" in text
+    assert "three of the five strongest" in text
+
+
+def test_howto_cross_references_survived_the_renumbering():
+    """Inserting section 12 pushed Go To, View options and Matrix analysis
+    down by one; the two references to Matrix analysis by number, one on
+    each page, had to follow. The numbering test above covers the HowTo
+    page; the Knowledge Database reference is checked here because
+    nothing else looks at it."""
+    howto = build_howto_html()
+    assert "<h3>12. Automatic calibration</h3>" in howto
+    assert "<h3>15. Matrix analysis</h3>" in howto
+    assert '"14. Matrix analysis"' not in howto
+    kb = build_knowledge_database_html()
+    assert '"15. Matrix analysis"' in kb
+    assert '"14. Matrix analysis"' not in kb
+

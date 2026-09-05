@@ -58,6 +58,17 @@ def test_an_ambiguous_pair_is_left_blank_rather_than_guessed():
     assert restore(stored, [(101.5, 8.0), (100.2, 8.0)]) == {}
 
 
+def test_a_row_exactly_on_the_stored_channel_is_not_a_coin_flip():
+    """The automatic calibration stores the very centroids it fitted,
+    so the row at distance zero IS the stored peak. A twin 0.01 channels
+    away -- the same peak fitted again by hand -- must not turn that into
+    an ambiguity that blanks both rows."""
+    stored = EnergyAssignments(None, ((829.45, 344.276),))
+    assert restore(stored, [(829.45, 5.8), (829.46, 5.8)]) == {0: 344.276}
+    # Off by any amount at all and the coin-flip rule is back.
+    assert restore(stored, [(829.451, 5.8), (829.46, 5.8)]) == {}
+
+
 def test_each_row_takes_its_own_nearest_assignment():
     stored = EnergyAssignments(
         None, ((100.0, 121.783), (200.0, 344.276))

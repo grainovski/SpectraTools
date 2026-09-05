@@ -115,6 +115,7 @@ program supports.</p>
 <tr><th>Shortcut</th><th>Action</th></tr>
 <tr><td><kbd>Ctrl+L</kbd></td><td>Calibration...</td></tr>
 <tr><td><kbd>Ctrl+T</kbd></td><td>Toggle Calibration Active</td></tr>
+<tr><td><kbd>Ctrl+Shift+L</kbd></td><td>Automatic Calibration...</td></tr>
 <tr><td><kbd>Ctrl+M</kbd></td><td>Multiply by Factor...</td></tr>
 <tr><td><kbd>Ctrl+R</kbd></td><td>Rebin by Factor...</td></tr>
 <tr><td><kbd>Ctrl+N</kbd></td><td>Normalize Spectra</td></tr>
@@ -176,7 +177,7 @@ that tool drives the left button itself.</p>
 <tr><td><kbd>Ctrl+E</kbd></td><td>Export the working projection's fits</td></tr>
 <tr><td><kbd>Ctrl+2</kbd></td><td>Toggle the Fit Results panel</td></tr>
 <tr><td><kbd>Ctrl+3</kbd></td><td>Toggle the Fit Parameters panel</td></tr>
-<tr><td><kbd>Ctrl+L</kbd></td><td>Calibrate... (same calibration as the main window's Operations &gt; Calibration... -- see "14. Matrix analysis" below)</td></tr>
+<tr><td><kbd>Ctrl+L</kbd></td><td>Calibrate... (same calibration as the main window's Operations &gt; Calibration... -- see "15. Matrix analysis" below)</td></tr>
 <tr><td><kbd>Ctrl+=</kbd></td><td>Zoom in (X axis)</td></tr>
 <tr><td><kbd>Ctrl+-</kbd></td><td>Zoom out (X axis)</td></tr>
 <tr><td><kbd>Ctrl+0</kbd></td><td>Show full projection</td></tr>
@@ -442,7 +443,52 @@ seven-column file for the efficiency-calibration program: channel and
 its error, net area and its error, energy, and relative intensity with
 its error.</p>
 
-<h3>12. Go To an energy or channel</h3>
+<h3>12. Automatic calibration</h3>
+<p><b>Operations &gt; Automatic Calibration...</b> (<kbd>Ctrl+Shift+L</kbd>)
+calibrates a spectrum of a known source with no fits and no calibration
+to start from. It finds the peaks, fits them, works out which line of
+the source each one is, and opens the result in the same Calibrate from
+Fitted Peaks dialog as "11. Calibrating from fitted peaks" for you to
+check.</p>
+<ol>
+<li>Load the calibration spectrum and make it the active one.</li>
+<li>Open the dialog and press <b>Load source...</b> to pick the
+<code>.sou</code> file of the nuclide the spectrum was taken with. A
+source already loaded for this spectrum in the Calibrate from Fitted
+Peaks dialog is offered without asking.</li>
+<li>Set the <b>sensitivity</b>: how many standard deviations a peak must
+stand above the continuum around it. The count of peaks found updates
+as you change it -- lower it if a line you can see is missing, raise it
+if noise is being counted. The default of 5 finds the lines a person
+would point at.</li>
+<li>Press <b>Run</b>. Every group of found peaks is fitted -- peaks
+closer than three widths are fitted together as one multiplet -- and
+the fits are added to Fit Results. <b>Fits already on the spectrum are
+kept</b>: the new ones are appended after them, and the status bar says
+how many were there before.</li>
+<li>The Calibrate from Fitted Peaks dialog then opens with the source
+loaded and every identified peak's energy already filled in. Check the
+residual strip in the live plot, untick any point that sits off the
+line, and press OK to apply the calibration exactly as in "11.
+Calibrating from fitted peaks".</li>
+</ol>
+<p>The identification is either confident or refused; it never guesses.
+When no confident assignment exists -- the spectrum is not this nuclide,
+too few of its lines were found, or two different calibrations explain
+it equally well -- the status bar and the dialog say why, and the dialog
+opens with the peaks fitted but unassigned. Type the energies of two
+peaks you recognise and press <b>Suggest remaining</b>, exactly as you
+would with hand-fitted peaks. The status line also reports peaks that
+were found but could not be fitted, groups skipped for lying too close
+to the spectrum edge for a background region, and fits set aside for an
+implausible width or a negative area.</p>
+<p>A peak fitted twice -- once by hand before the run, once by the
+automatic pass -- appears twice in the table, and the energy goes to the
+automatic copy. Running again appends a second set of fits;
+<kbd>Ctrl+Shift+C</kbd> deletes every committed fit on the spectrum if
+you would rather start clean.</p>
+
+<h3>13. Go To an energy or channel</h3>
 <p><kbd>Ctrl+G</kbd>, or <b>View &gt; Go To...</b>, jumps the view to one
 place in the spectrum. Type an <b>energy in keV</b> when a calibration is
 active, or a <b>channel</b> when one is not -- the dialog asks for whichever
@@ -463,14 +509,14 @@ moves it to the matching energy rather than stranding it at a stale
 coordinate. <kbd>Ctrl+C</kbd> (Clear) removes it along with the fit marks.
 Go To works the same way in a matrix panel's projection window.</p>
 
-<h3>13. View options</h3>
+<h3>14. View options</h3>
 <p><kbd>Ctrl+Y</kbd> toggles a logarithmic Y axis. <kbd>Ctrl+D</kbd>
 toggles dark theme. <kbd>Ctrl+1</kbd>/<kbd>Ctrl+2</kbd>/<kbd>Ctrl+3</kbd>
 show or hide the Spectra, Fit Results, and Fit Parameters panels.
 <kbd>Ctrl+=</kbd>/<kbd>Ctrl+-</kbd> zoom the X axis in/out around the
 current view, and <kbd>Ctrl+0</kbd> resets to the full spectrum.</p>
 
-<h3>14. Matrix analysis</h3>
+<h3>15. Matrix analysis</h3>
 <p><b>File &gt; Open Matrix...</b> (<kbd>Ctrl+Shift+O</kbd>) opens a
 2D coincidence matrix (<b>.mtx</b>) in its own window. Only the raw
 histogram is read -- there's no way to save a matrix back out.
@@ -978,6 +1024,53 @@ Check the <b>worst residual</b> afterwards exactly as you would for
 energies typed by hand: an unambiguously nearest line can still be the
 wrong line if the provisional anchors were themselves misidentified.</p>
 
+<h3>How automatic calibration identifies the lines</h3>
+<p><b>Operations &rarr; Automatic Calibration...</b> has to break the
+same circle as Suggest -- deciding which line a peak is needs a
+calibration, and the calibration needs the lines -- with no anchors
+typed by anyone. It does so by trying them all. Two peaks paired with two
+source lines fix a straight line exactly; every pairing of the ten
+strongest peaks with the fifteen strongest lines is tried, each one
+predicts an energy for every other fitted peak, and a peak whose
+prediction lands on a real line within half a peak width counts as
+explained. The pairing that explains the most peaks wins, ties broken by
+the smaller residual. Only the strongest peaks and lines propose
+pairings, because the anchors need only be right and a strong peak in a
+calibration spectrum is far more likely to be a strong line of the
+source than a contaminant; the checking then runs against every peak
+and every line.</p>
+<p>The width behind "within half a peak width" is not each peak's own
+fitted width but the width expected at its channel, read off a robust
+straight line through all the fitted widths. A fit component that has
+run away to absorb background comes back ten times too wide, and judged
+against its own width it was being matched to a line ten or twenty keV
+away; judged against the trend it is set aside once it exceeds three
+times the expected width, as is any component whose fitted area is
+negative. The status line counts these separately from peaks that were
+simply not identified.</p>
+<p>The winner is <b>refused</b>, and the dialog opens unassigned with
+the reason on show, when fewer than four peaks are explained; when
+fewer than two peaks beyond the two anchors confirm it, since the
+anchors fit exactly by construction and are evidence of nothing; when
+another pairing with a gain differing by more than five percent
+explains as many peaks, because the evidence then does not choose
+between two genuinely different calibrations; or when fewer than three
+of the five strongest peaks were identified, because the strongest
+peaks of a calibration spectrum <i>are</i> the source's lines, and an
+assignment that leaves most of them unexplained has found a coincidence
+among the weak ones. The last two guards were each added after watching
+the matcher produce a confident, self-consistent and entirely wrong
+calibration without them.</p>
+<p>The peaks themselves come from a search on a lightly smoothed copy
+of the counts: a candidate is anything standing more than the chosen
+number of standard deviations above the continuum around it, measured
+as its prominence divided by the square root of that continuum, so the
+same sensitivity means the same thing in a weak spectrum and a strong
+one. Peaks closer than three widths are fitted together, since a
+doublet fitted as two single peaks gets both centroids wrong, and a
+group too close to the spectrum edge for a background region beside it
+is skipped rather than fitted against nothing.</p>
+
 <h3>What the dialog remembers</h3>
 <p>Assignments are stored per spectrum for the session. They are not
 written to disk and do not travel with Save Fits. When the dialog
@@ -1222,7 +1315,7 @@ build a new spectrum on the <i>other</i> axis -- not shown
 here.</figcaption>
 </figure>
 <p>A <b>2D coincidence matrix</b> (<b>File &gt; Open Matrix...</b>, see
-the HowTo page's "14. Matrix analysis") records pairs of gamma rays
+the HowTo page's "15. Matrix analysis") records pairs of gamma rays
 detected close together in time -- typically one in each of two
 detectors watching the same source. Each coincident pair increments one
 cell of the matrix; X and Y are the two detectors' own channel axes, so

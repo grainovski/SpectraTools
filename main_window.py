@@ -506,6 +506,23 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         )
         self.operations_menu.addAction(self.calibrate_from_peaks_action)
 
+        # The automatic route to the same dialog: it finds and fits the
+        # peaks itself and identifies them against a source file, so it
+        # needs a spectrum but no fits. Ctrl+Shift+L beside Calibration's
+        # Ctrl+L, the way Subtract's Ctrl+Shift+A sits beside Add's Ctrl+A;
+        # L is not a marking key, so the Ctrl+letter trap described in
+        # fit_mode.is_bare_key_event does not arise.
+        self.auto_calibrate_action = QAction("Automatic Calibration...", self)
+        self.auto_calibrate_action.setShortcut("Ctrl+Shift+L")
+        self.auto_calibrate_action.setEnabled(False)
+        self.auto_calibrate_action.setToolTip(
+            "Find and fit the peaks of the active spectrum, identify them "
+            "against a .sou source file, and calibrate from them -- no "
+            "calibration needed to start"
+        )
+        self.auto_calibrate_action.triggered.connect(self._open_auto_calibrate_dialog)
+        self.operations_menu.addAction(self.auto_calibrate_action)
+
         self.operations_menu.addSeparator()
 
         self.multiply_action = QAction("Multiply by Factor...", self)
@@ -1053,8 +1070,6 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         return choices
 
     def _open_calibrate_from_peaks_dialog(self):
-        from energy_assign_dialog import EnergyAssignDialog
-
         choices = self.fitted_peak_choices()
         if not choices:
             return
@@ -1062,12 +1077,28 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # touch which spectrum is active, so a second lookup after it would
         # only ever repeat this same answer.
         active = active_spectrum(self.spectra)
+        self._assign_energies(
+            active, choices, active.energy_assignments if active else None
+        )
+
+    def _assign_energies(self, active, choices, assignments, status=None):
+        """Open the Calibrate from Fitted Peaks dialog on `choices`,
+        prefilled from `assignments`, and apply what comes back.
+
+        Shared by the manual entry point and the automatic one, which
+        differ only in where the assignments come from -- the dialog, its
+        live plot, the ticks and the stored record are the same either
+        way. `status` is a first line for the dialog's status label; the
+        automatic run puts its summary there.
+        """
+        from energy_assign_dialog import EnergyAssignDialog
+
         dialog = EnergyAssignDialog(
             self, choices,
             quadratic=(self._calibration is not None
                        and self._calibration.kind == "quadratic"),
             settings=self.settings,
-            assignments=active.energy_assignments if active else None,
+            assignments=assignments,
             # Enables the live preview, which needs the channel range to
             # draw over and a name to offer its export under.
             max_channel=(len(active.data) - 1) if active is not None else None,
@@ -1075,6 +1106,8 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
                 self._caleneff_default_path(active) if active is not None else None
             ),
         )
+        if status:
+            dialog.status.setText(status)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         calibration = dialog.result_calibration
@@ -1082,6 +1115,53 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         if active is not None:
             self._store_energy_assignments(active, dialog)
             self._show_calibration_plot(active, dialog)
+
+    def _open_auto_calibrate_dialog(self):
+        """Find, fit and identify the peaks of the active spectrum, then
+        hand the result to the ordinary Calibrate from Fitted Peaks dialog
+        for review -- prefilled when the identification was confident,
+        blank with the reason on show when it was not."""
+        from auto_calibrate_dialog import AutoCalibrateDialog
+
+        active = active_spectrum(self.spectra)
+        if active is None:
+            return
+        remembered = active.energy_assignments
+        dialog = AutoCalibrateDialog(
+            self, active.data, settings=self.settings,
+            # None for a spectrum read from a file; set for a matrix cut
+            # or an Add/Subtract result, exactly as run_fit passes it.
+            variance=getattr(active, "variance", None),
+            # The source already chosen for this spectrum, if any, so it
+            # need not be picked twice.
+            source_path=remembered.source_path if remembered is not None else None,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        outcome = dialog.outcome
+        existing = len(active.fits)
+        # Appended, never replacing: whatever was fitted by hand stays, and
+        # the automatic fits join it in Fit Results. Committed through the
+        # same path as the Fit button, so each is logged and drawn exactly
+        # as a hand fit would be.
+        stamp = datetime.now().isoformat(timespec="seconds")
+        for result in outcome.results:
+            result.timestamp = stamp
+            self.fit_controller._commit_result(active, result)
+        self._plot_data(preserve_view=True)
+        summary = outcome.summary(existing, dialog.source_name())
+        self.fit_controller._show_status_message(summary, 10000)
+        # Stored now rather than only on OK, so cancelling the review does
+        # not throw the identifications away -- running again would append
+        # a second copy of every fit. A refused match stores the source
+        # alone, which is still worth remembering.
+        active.energy_assignments = EnergyAssignments(
+            source_path=dialog.source_path(), pairs=tuple(outcome.pairs)
+        )
+        self._assign_energies(
+            active, self.fitted_peak_choices(), active.energy_assignments,
+            status=summary,
+        )
 
     def _store_energy_assignments(self, spectrum, dialog):
         """Remember what the dialog was told, so a refit does not throw it
@@ -2060,6 +2140,8 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self.calibrate_from_peaks_action.setEnabled(
             len(self.fitted_peak_choices()) >= 2
         )
+        # Finds and fits its own peaks, so a spectrum is all it needs.
+        self.auto_calibrate_action.setEnabled(active is not None)
         visible_count = sum(1 for s in self.spectra if s.visible)
         self.normalize_action.setEnabled(visible_count >= 2)
         self.add_action.setEnabled(len(self.spectra) >= 2)

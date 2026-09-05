@@ -4,6 +4,56 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [5.1.0] - unreleased
+
+### Added
+
+- **Automatic calibration.** `Operations > Automatic Calibration...`
+  (`Ctrl+Shift+L`) calibrates a spectrum of a known source with no fits
+  and no calibration to start from. It finds the peaks, fits them, works
+  out which line of the `.sou` source each one is, and opens the result
+  in the Calibrate from Fitted Peaks dialog with the energies filled in
+  and the live plot showing, so a misidentified line is a residual you
+  can see and untick before anything is applied.
+
+  Identifying a peak needs a calibration and the calibration needs the
+  identifications. The matcher breaks that circle the way a star tracker
+  does: every pairing of the strongest peaks with the strongest source
+  lines fixes a provisional straight line, each line predicts where
+  every other peak should fall, and the pairing that explains the most
+  peaks wins. It is confident or it refuses -- when fewer than four
+  peaks are explained, when a rival calibration with a clearly different
+  gain explains as many, or when most of the strongest peaks stay
+  unidentified. A refusal is not a failure of the feature: the peaks are
+  still fitted and the dialog still opens, unassigned, with the reason
+  in its status line, so two energies typed by hand and *Suggest
+  remaining* finish the job as before. On synthetic spectra built from
+  the sample sources it recovered every calibration tried -- Eu-152,
+  Ba-133, Ra-226 with its daughters, Co-56, Ta-182 -- and refused every
+  wrong source it was offered.
+
+  The tolerance for "explained" is half a peak width, but the width of
+  the trend through all the fitted widths rather than each peak's own.
+  Judged against its own width, a fit component that had run away to a
+  hundred channels bought itself a tolerance of twenty keV and was
+  matched to a line that far away -- one to three such assignments per
+  spectrum, before this was found. Such components are now set aside
+  and counted in the status line.
+
+  Fits already on the spectrum are always kept; the automatic fits are
+  appended after them and the status bar says how many were there. The
+  peak search's sensitivity, in standard deviations above the local
+  continuum, has a sensible default and a control in the dialog whose
+  count of peaks found updates as it is changed.
+
+### Fixed
+
+- **A remembered energy sitting exactly on a peak's centroid could still
+  be dropped as ambiguous.** The rule that refuses a coin flip between
+  two nearby peaks now recognises a distance of exactly zero as the
+  stored peak itself. Without this, a peak fitted twice -- once by hand
+  and once by the automatic pass -- left both copies blank.
+
 ## [5.0.2] - 2026-09-05
 
 ### Added

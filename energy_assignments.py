@@ -113,7 +113,13 @@ def restore(assignments, peaks):
         # peak the solver handed it to: if two peaks sit almost equally
         # close to it, no rule can say which one it belongs to.
         column = np.sort(cost[:, index])
-        if len(column) > 1 and column[1] < _IMPOSSIBLE:
+        # A distance of exactly zero is not a match to judge, it is the
+        # stored centroid itself. The automatic calibration stores the very
+        # centroids it has just fitted, and a peak fitted twice -- once by
+        # hand and once by the automatic pass, or a search that counted one
+        # peak as two -- would otherwise turn the true row into a coin flip
+        # against its own copy and leave both blank.
+        if cost[row, index] > 0.0 and len(column) > 1 and column[1] < _IMPOSSIBLE:
             if (column[1] - column[0]) < _AMBIGUITY_MARGIN * _tolerance(peaks[row][1]):
                 continue
         out[row] = pairs[index][1]
