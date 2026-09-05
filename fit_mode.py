@@ -17,7 +17,8 @@ import fit_export
 from calibration import CalibrationError
 from peak_fit import (
     FWHM_FACTOR, FitError, IntegrationResult, channel_indices, compute_background, fit_peaks,
-    fit_result_values_by_name, hypermet_left_tail, integrate_region, parameter_names,
+    fit_result_values_by_name, hypermet_left_tail, hypermet_step, integrate_region,
+    parameter_names,
 )
 from spectrum import active_spectrum
 from theme import NEUTRAL_LINE_COLOR, fit_drawing_colors
@@ -251,6 +252,10 @@ def _parameter_label(name, calibrated=False):
         return "Tail fraction (r)"
     if name == "tail_beta":
         return "Tail beta (β)"
+    if name == "step_fraction":
+        # Named before the rsplit below, which would otherwise try
+        # int("fraction") and raise on the way to building a panel row.
+        return "Step (fraction of height)"
     if name == "bg_c0":
         # Named for what it is to a user -- the height of the background
         # line -- rather than for the centred coefficient it is internally.
@@ -426,14 +431,26 @@ def _export_writer_for(path, chosen_filter):
 
 def _peak_component(x_dense, peak, result):
     """One peak's own shape (Gaussian or hypermet-tail, matching
-    result.tail_fraction), evaluated over x_dense -- shared by the
-    total-curve accumulation and the per-peak decomposition overlay
-    in draw_committed_fits, so the two can never silently diverge."""
+    result.tail_fraction, plus the step when the fit carried one),
+    evaluated over x_dense -- shared by the total-curve accumulation and
+    the per-peak decomposition overlay in draw_committed_fits, so the two
+    can never silently diverge.
+
+    The step is drawn with the peak even though it is background in the
+    area sense: it was fitted as part of this peak's shape and scales
+    with this peak's amplitude, so a curve without it would not lie on
+    the data the fit was judged against."""
     if result.tail_fraction is not None:
-        return peak.amplitude * hypermet_left_tail(
+        component = peak.amplitude * hypermet_left_tail(
             x_dense, peak.position, peak.sigma, result.tail_fraction, result.tail_beta,
         )
-    return peak.amplitude * np.exp(-((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2))
+    else:
+        component = peak.amplitude * np.exp(
+            -((x_dense - peak.position) ** 2) / (2 * peak.sigma ** 2))
+    if result.step_fraction is not None:
+        component = component + peak.amplitude * hypermet_step(
+            x_dense, peak.position, peak.sigma, result.step_fraction)
+    return component
 
 
 def _is_sigma_name(name):
@@ -1009,6 +1026,12 @@ class FitModeController(QObject):
         mw.left_tail_action.setToolTip(
             "Allow a small low-channel tail contribution to each peak's shape"
         )
+        mw.step_action = QCheckBox("Step")
+        mw.step_action.setToolTip(
+            "Add the smoothed step under each peak -- the shelf left by "
+            "photons that scattered in the detector. Fitted as background, "
+            "so it is not counted in the peak's area"
+        )
         mw.fit_background_action = QCheckBox("Fit background")
         mw.fit_background_action.setToolTip(
             "Fit the background line together with the peaks instead of "
@@ -1023,6 +1046,7 @@ class FitModeController(QObject):
         layout = QVBoxLayout(container)
         layout.addWidget(mw.independent_widths_action)
         layout.addWidget(mw.left_tail_action)
+        layout.addWidget(mw.step_action)
         layout.addWidget(mw.fit_background_action)
         layout.addWidget(self.parameters_table)
 
@@ -1253,6 +1277,12 @@ class FitModeController(QObject):
             ]
             if not result.link_widths:
                 shared_tooltip_lines.append("independent widths")
+            if result.step_fraction is not None:
+                shared_tooltip_lines.append(
+                    f"step: {result.step_fraction * 100:.3g}% of peak height"
+                    f"±{_err_text(result.step_fraction_err * 100)} "
+                    f"(background, not counted in the volume)"
+                )
             if result.tail_fraction is not None:
                 shared_tooltip_lines.append(
                     f"left tail: r={result.tail_fraction:.2f}"
@@ -1388,6 +1418,7 @@ class FitModeController(QObject):
 
         self.main_window.independent_widths_action.setChecked(not result.link_widths)
         self.main_window.left_tail_action.setChecked(result.tail_fraction is not None)
+        self.main_window.step_action.setChecked(result.step_fraction is not None)
         # The third mode flag, restored like the other two. Leaving it out
         # meant double-clicking a fitted-background result showed the panel
         # WITHOUT its bg_c0/bg_c1 rows and left the checkbox on whatever the
@@ -1397,7 +1428,7 @@ class FitModeController(QObject):
 
         names = parameter_names(
             len(result.peaks), result.link_widths, result.tail_fraction is not None,
-            result.fit_background,
+            result.fit_background, result.step_fraction is not None,
         )
         self._parameter_names_shown = []  # force a full rebuild below
         self.update_parameters_panel(names, fit_result_values_by_name(result))
@@ -1445,6 +1476,7 @@ class FitModeController(QObject):
         y = active.data
         link_widths = not self.main_window.independent_widths_action.isChecked()
         enable_left_tail = self.main_window.left_tail_action.isChecked()
+        enable_step = self.main_window.step_action.isChecked()
         fit_background = self.main_window.fit_background_action.isChecked()
         try:
             # A Fix checkbox (or an edited value) from a since-changed
@@ -1456,7 +1488,7 @@ class FitModeController(QObject):
             # once this fit succeeds and rebuilds the row set.
             current_names = set(
                 parameter_names(len(self.state.peak_positions), link_widths,
-                                enable_left_tail, fit_background)
+                                enable_left_tail, fit_background, enable_step)
             )
             fixed_params = {
                 name: value for name, value in self.fixed_params_from_panel().items()
@@ -1476,6 +1508,7 @@ class FitModeController(QObject):
                 # matrix_cut.compute_cut_with_variance.
                 variance=getattr(active, "variance", None),
                 fit_background=fit_background,
+                enable_step=enable_step,
             )
         except FitError as exc:
             self._show_status_message(f"Fit failed: {exc}", 5000)
@@ -1483,7 +1516,8 @@ class FitModeController(QObject):
         result.timestamp = datetime.now().isoformat(timespec="seconds")
         self._commit_result(active, result)
         names = parameter_names(len(result.peaks), result.link_widths,
-                                result.tail_fraction is not None, result.fit_background)
+                                result.tail_fraction is not None, result.fit_background,
+                                result.step_fraction is not None)
         self.update_parameters_panel(names, fit_result_values_by_name(result))
         self.main_window._plot_data(preserve_view=True)
 

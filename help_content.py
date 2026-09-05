@@ -302,12 +302,24 @@ optimizer adjust it. Leave a row unchecked and its Value is used only
 as that parameter's starting guess -- the fit can still move it.</p>
 <p>The panel also carries three checkboxes. <b>Independent widths</b>
 fits each peak its own width instead of one shared FWHM. <b>Left tail</b>
-adds a low-channel tail to the peak shape. <b>Fit background</b> fits the
-background line together with the peaks rather than subtracting it
-first -- peak uncertainties grow when it is on, because they then
-include how well the background itself is known, and two extra rows
-(Background level and Background slope) appear in the panel. See the
-Knowledge Database page for when each is worth using.</p>
+adds a low-channel tail to the peak shape. <b>Step</b> adds the smoothed
+shelf that sits under every real peak, left by photons that scattered in
+the detector before depositing the rest of their energy elsewhere; it is
+fitted as background, so it is not counted in the peak&rsquo;s volume.
+<b>Fit background</b> fits the background line together with the peaks
+rather than subtracting it first -- peak uncertainties grow when it is
+on, because they then include how well the background itself is known,
+and two extra rows (Background level and Background slope) appear in the
+panel. See the Knowledge Database page for when each is worth using.</p>
+<p><b>The three go together.</b> Ticking <b>Left tail</b>, <b>Step</b>
+and <b>Fit background</b> at once is the full peak shape, and on a
+strong peak it is the only combination that brings the reduced
+chi-squared near 1. Ticked singly they can each make matters worse: a
+step cannot be told apart from a background line unless the two are
+fitted together, and a tail with no step to help it will swallow the
+shelf and inflate the volume. They are off by default because turning
+them on changes every reported volume, which is your decision to make
+rather than the program&rsquo;s.</p>
 <p>Once both background regions are marked, <kbd>Ctrl+B</kbd> previews
 just the background line -- no fit region or peaks needed -- useful
 for sanity-checking the background before marking the rest. It's a
@@ -674,6 +686,59 @@ peak-fitting tool, is:</p>
 (the <code>(1&minus;r)&middot;exp(&minus;w&sup2;)</code> term) blended
 with an exponential tail on the low-energy side (the
 <code>r&middot;...</code> term).</p>
+<p>With <b>Step</b> ticked, one more term is added to each peak, also
+from <code>gf3</code>:</p>
+<p style="text-align:center"><code>step&middot;erfc(w)/2</code></p>
+<p>a smoothed shelf that is <code>step</code> of the peak&rsquo;s own
+height far below the peak, half that at the centroid, and nothing above
+it. Physically it is what photons leave behind when they scatter in the
+detector and carry part of their energy away: every real peak sits on
+one. It is <b>background</b> and not part of the peak, which is
+<code>gf3</code>&rsquo;s own reading -- the branch of <code>gf3</code>
+that evaluates the background alone includes this term and nothing else
+from the peak -- so it is excluded from the reported volume exactly as
+the background line is.</p>
+
+<h2>Why the shape options belong together</h2>
+<p>A <b>step</b> and a <b>background line</b> are the same thing to a
+fit that sees only the region around one peak: both raise the low side
+and lower the high side. They can be told apart only when they are
+fitted together, which is why the Step box is worth little unless <b>Fit
+background</b> is ticked as well. With the background subtracted first,
+the line was fitted to data that already contained the shelf, so the
+line has taken most of it and the step has almost nothing left to
+find.</p>
+<p>A <b>tail</b> without a step is worse than either. The shelf is still
+in the data and the tail is the only component that can reach it, so the
+tail stretches to cover it -- and unlike the step, the tail <i>is</i>
+counted in the volume. On a peak with a 3% step, fitting the tail alone
+overstated the volume by about a third; adding the step brought it back
+to within a fraction of a percent.</p>
+<p>The three together -- <b>Left tail</b>, <b>Step</b>, <b>Fit
+background</b> -- are the full Hypermet description, and they are what
+brings a strong peak&rsquo;s reduced chi-squared near 1. They are off by
+default because turning them on changes every reported volume.</p>
+
+<h2>What a large reduced chi-squared means for a fit</h2>
+<p>Roughly 1 is what a good fit gives, and a weak peak fitted here does
+give it. A <i>strong</i> peak routinely gives tens or hundreds, and that
+is not a failed fit. It is arithmetic: the reduced chi-squared compares
+how far the model misses the data against how well the data are known,
+and a peak with a million counts is known to about a tenth of a percent
+per channel. No peak-shape model describes a real detector that well, so
+the mismatch that a weak peak hides inside its own counting noise stands
+out by tens of standard deviations in a strong one.</p>
+<p>That is why the number rises with peak strength and not with anything
+being wrong. The practical consequences are worth knowing: a large value
+on a strong peak means the reported <i>uncertainties</i> are optimistic,
+because they assume the model is right; and it means the shape options
+above are worth turning on, since each one that is missing is part of
+what the model is failing to describe.</p>
+<p>What a large value on a <i>weak</i> peak means is different, and
+worth looking at: with the counting noise large, only a real problem can
+push the value up -- a fit region that includes a neighbouring peak that
+was not marked, background regions sitting on structure rather than on
+background, or a marked peak that is not there.</p>
 
 <h2>What the tail parameters mean</h2>
 <figure>
@@ -1156,10 +1221,16 @@ same stored assignment: the nearer one takes it.</p>
 
 <h3>Reduced chi-squared, and when there is none</h3>
 <p>The plot window divides each point&rsquo;s residual by that
-point&rsquo;s energy uncertainty, obtained from its channel uncertainty
-through the calibration&rsquo;s local slope dE/dch, squares and sums
-them, and divides by n&minus;p. <i>p</i> is 2 for a line and 3 for a
-quadratic.</p>
+point&rsquo;s energy uncertainty, squares and sums them, and divides by
+n&minus;p. <i>p</i> is 2 for a line and 3 for a quadratic.</p>
+<p>The uncertainty has <b>two parts, added in quadrature</b>. One is the
+fitted centroid&rsquo;s own, converted from channels to keV through the
+calibration&rsquo;s local slope dE/dch. The other is whatever the source
+file states for the line itself, the <code>dE</code> column of a
+<code>.sou</code> file. Both belong there: a line the literature quotes
+to a whole keV cannot be held to the precision of a centroid measured to
+a hundredth of a channel. An energy you typed by hand has no dE to
+quote and contributes only the first part.</p>
 <p>It is reported as <b>undefined</b> in four cases, three of them
 naming their reason. When any centroid uncertainty is unusable the
 calibration was fitted <b>unweighted</b>, so the weights a chi-squared
@@ -1168,9 +1239,32 @@ of fit while meaning nothing. When there are exactly as many points as
 parameters there are <b>no degrees of freedom</b> and the fit passes
 through them exactly. When a point sits on a quadratic&rsquo;s turning
 point, dE/dch is zero there, so its channel uncertainty maps to no
-energy uncertainty at all. The fourth case gives no reason at all: if
-the computed value itself is not a finite number, a bare
-<b>undefined</b> is reported on its own.</p>
+energy uncertainty at all &mdash; and it is undefined only if the line
+has no stated uncertainty either, since that one would still weigh the
+point. The fourth case gives no reason at all: if the computed value
+itself is not a finite number, a bare <b>undefined</b> is reported on
+its own.</p>
+<p><b>A large value does not mean the calibration failed.</b> It means
+the straight line, or the parabola, describes the points less well than
+the points are known. Centroids fitted on strong peaks are routinely
+good to a hundredth of a channel, and no real detector&rsquo;s
+channel-to-energy relation is exactly a polynomial at that precision, so
+residuals of a tenth of a keV against uncertainties of a hundredth give
+a reduced chi-squared in the hundreds while the calibration itself is
+perfectly usable.</p>
+<p>Judge it by the numbers that are in keV. The status bar reports the
+<b>worst residual</b> when the calibration is applied, and the residual
+strip shows the spread; those say whether the calibration is accurate
+enough for what you are measuring. The reduced chi-squared answers a
+narrower question &mdash; can the shape you chose describe the data
+<i>within their own errors</i> &mdash; and at this precision the honest
+answer is usually no.</p>
+<p>The residual strip tells you which it is. Residuals that sweep
+smoothly from one side of zero to the other and back are detector
+non-linearity, and switching to the quadratic will absorb part of it.
+Residuals that scatter with no pattern mean the fit is already as good
+as the chosen shape allows, and a large chi-squared then reflects how
+precisely the centroids were measured rather than anything wrong.</p>
 
 <h3>The CalEnEff export</h3>
 <p><b>Finish and save for CalEnEff...</b> writes seven

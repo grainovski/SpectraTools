@@ -4224,3 +4224,62 @@ def test_a_fit_inside_the_visible_range_is_still_drawn(qapp):
     hidden = len(main_window.axes.get_children())
 
     assert in_view > hidden, "a fit within the visible range must still be drawn"
+
+
+def _marked_window():
+    """A spectrum with both background regions, a fit region and one peak
+    marked -- the state run_fit() needs, marked the way a user marks it."""
+    main_window = MainWindow()
+    spectrum = _make_active_spectrum(main_window)
+    for x in (70, 85, 115, 130):
+        _held_key_click(main_window, "b", x)
+    _held_key_click(main_window, "r", 80)
+    _held_key_click(main_window, "r", 120)
+    _held_key_click(main_window, "p", 100)
+    return main_window, spectrum
+
+
+def test_the_step_checkbox_is_in_the_parameters_panel_and_off_by_default(qapp):
+    main_window = MainWindow()
+    assert isinstance(main_window.step_action, QCheckBox)
+    assert main_window.step_action.parentWidget() is         main_window.fit_controller.parameters_dock.widget()
+    assert main_window.step_action.isChecked() is False,         "on by default would change every reported volume without being asked"
+
+
+def test_ticking_step_fits_one_and_gives_the_panel_a_row_for_it(qapp):
+    """The row needs its label spelled out: without it the generic
+    "peak N parameter" path would reach int("fraction") and raise on the
+    way to building the panel."""
+    main_window, spectrum = _marked_window()
+    main_window.step_action.setChecked(True)
+    main_window.fit_controller.run_fit()
+
+    assert len(spectrum.fits) == 1
+    assert spectrum.fits[0].step_fraction is not None
+    table = main_window.fit_controller.parameters_table
+    labels = [table.item(row, 0).text() for row in range(table.rowCount())]
+    assert "Step (fraction of height)" in labels
+
+
+def test_no_step_row_when_the_box_is_clear(qapp):
+    """CONTROL for the test above."""
+    main_window, spectrum = _marked_window()
+    main_window.fit_controller.run_fit()
+    assert spectrum.fits[0].step_fraction is None
+    table = main_window.fit_controller.parameters_table
+    labels = [table.item(row, 0).text() for row in range(table.rowCount())]
+    assert "Step (fraction of height)" not in labels
+
+
+def test_reopening_a_stepped_fit_puts_the_checkbox_back(qapp):
+    """The other two mode flags are restored on double-click; leaving this
+    one out would let a refit from that panel silently drop the step."""
+    main_window, spectrum = _marked_window()
+    main_window.step_action.setChecked(True)
+    main_window.fit_controller.run_fit()
+    main_window.fit_controller.clear()
+    main_window.step_action.setChecked(False)
+
+    item = main_window.fit_controller.results_table.item(0, 0)
+    main_window.fit_controller._on_result_double_clicked(item)
+    assert main_window.step_action.isChecked() is True

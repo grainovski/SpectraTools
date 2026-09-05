@@ -41,6 +41,7 @@ _RESULT_FIELDS = (
     "left_bg_region", "right_bg_region", "fit_region",
     "background_slope", "background_intercept", "link_widths",
     "tail_fraction", "tail_fraction_err", "tail_beta", "tail_beta_err",
+    "step_fraction", "step_fraction_err",
     "fixed_params", "visible", "timestamp",
     "gross_area", "gross_area_err", "net_area", "net_area_err",
     "reduced_chi2", "fit_background",
@@ -121,10 +122,13 @@ def _from_record_v1(record):
         value = record.get(name)
         if name in ("left_bg_region", "right_bg_region", "fit_region"):
             values[name] = tuple(value) if value is not None else (0.0, 0.0)
-        elif name in ("tail_fraction", "tail_fraction_err", "tail_beta", "tail_beta_err"):
-            # These are None when the fit had no tail at all, which is
-            # different from an undetermined uncertainty -- so None here
-            # must stay None rather than becoming NaN.
+        elif name in ("tail_fraction", "tail_fraction_err", "tail_beta", "tail_beta_err",
+                      "step_fraction", "step_fraction_err"):
+            # These are None when the fit had no tail or no step at all,
+            # which is different from an undetermined uncertainty -- so
+            # None here must stay None rather than becoming NaN. A file
+            # written before the step existed simply has no key, and
+            # record.get returns None, which is the right answer.
             values[name] = value
         elif name == "fixed_params":
             values[name] = dict(value or {})
@@ -205,4 +209,5 @@ def refit(result, x, y, variance=None):
         fixed_params=dict(result.fixed_params or {}),
         variance=variance,
         fit_background=result.fit_background,
+        enable_step=result.step_fraction is not None,
     )

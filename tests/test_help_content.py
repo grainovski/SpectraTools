@@ -1189,3 +1189,54 @@ def test_help_no_longer_describes_grouped_fits():
     howto = build_howto_html()
     assert "fitted together as one multiplet" not in howto
     assert "groups skipped" not in howto
+
+
+def test_help_explains_the_two_terms_in_the_calibration_chi_squared():
+    kb = _strip_base64_images(build_knowledge_database_html())
+    assert "two parts, added in quadrature" in kb
+    assert "column of a" in kb          # the .sou dE column
+    assert "typed by hand has no dE" in kb
+
+
+def test_help_says_what_a_large_calibration_chi_squared_means():
+    """The question this text exists to answer: the number is large, is
+    the calibration broken? It is not, and the page has to say so and
+    say what to judge instead."""
+    kb = _strip_base64_images(build_knowledge_database_html())
+    assert "does not mean the calibration failed" in kb
+    assert "worst residual" in kb
+    assert "within their own errors" in kb
+    assert "detector" in kb and "non-linearity" in kb
+
+
+def test_help_documents_the_step_checkbox():
+    howto = build_howto_html()
+    assert "<b>Step</b> adds the smoothed" in howto
+    assert "not counted in the peak" in howto
+    assert "The three go together" in howto
+
+
+def test_help_explains_why_the_shape_options_belong_together():
+    kb = _strip_base64_images(build_knowledge_database_html())
+    assert "Why the shape options belong together" in kb
+    assert "fitted together" in kb
+    assert "the tail is the only component that can reach it" in kb
+
+
+def test_help_gives_the_step_formula_and_says_it_is_background():
+    kb = _strip_base64_images(build_knowledge_database_html())
+    assert "erfc(w)/2" in kb
+    assert "excluded from the reported volume" in kb
+
+
+def test_help_says_what_a_large_reduced_chi_squared_means_for_a_fit():
+    """The question that opened 5.2.0. The page has to distinguish a
+    strong peak, where a large value is expected, from a weak one, where
+    it is a symptom worth chasing."""
+    kb = _strip_base64_images(build_knowledge_database_html())
+    assert "What a large reduced chi-squared means for a fit" in kb
+    assert "is not a failed fit" in kb
+    assert "rises with peak strength" in kb
+    assert "uncertainties</i> are optimistic" in kb
+    # and the weak-peak case, which is the opposite advice
+    assert "neighbouring peak that" in kb

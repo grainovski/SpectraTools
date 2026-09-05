@@ -97,3 +97,92 @@ def test_a_zero_derivative_is_reported_rather_than_dividing_by_zero():
     value, reason = reduced_chi_squared(cal, channels, energies, [0.1] * 4)
     assert value is None
     assert "turning point" in reason
+
+
+
+# --- the line's own energy uncertainty counts too ------------------------
+
+
+def _drifting(cal, channels, drift):
+    return [cal.apply(c) + d for c, d in zip(channels, drift)]
+
+
+def test_the_lines_own_uncertainty_lowers_the_reported_value():
+    """The residual has two sources and the test is only fair if it
+    counts both. A line quoted to a keV cannot be held to the precision
+    of a centroid measured to a hundredth of a channel."""
+    cal = Calibration(kind="linear", a=0.0, b=0.5)
+    channels = [100.0, 200.0, 300.0, 400.0, 500.0]
+    energies = _drifting(cal, channels, (0.05, -0.04, 0.06, -0.05, 0.04))
+    tight = [0.01] * 5
+    without, _r = reduced_chi_squared(cal, channels, energies, tight)
+    with_dE, _r = reduced_chi_squared(cal, channels, energies, tight, [0.05] * 5)
+    assert without > with_dE > 0.0
+
+
+def test_no_energy_errors_reproduces_the_old_value_exactly():
+    """CONTROL: the new term must be inert when there is nothing to add,
+    or every calibration in the archive would have changed meaning."""
+    cal = Calibration(kind="linear", a=0.0, b=0.5)
+    channels = [100.0, 200.0, 300.0, 400.0]
+    energies = _drifting(cal, channels, (0.05, -0.03, 0.02, 0.10))
+    errors = [0.02, 0.03, 0.02, 0.04]
+    plain, _r = reduced_chi_squared(cal, channels, energies, errors)
+    zeros, _r = reduced_chi_squared(cal, channels, energies, errors, [0.0] * 4)
+    assert plain == pytest.approx(zeros)
+
+
+def test_the_value_matches_the_two_term_formula():
+    cal = Calibration(kind="linear", a=0.0, b=0.5)
+    channels = [100.0, 200.0, 300.0, 400.0, 500.0]
+    energies = _drifting(cal, channels, (0.05, -0.03, 0.02, 0.10, -0.07))
+    sigma_ch = [0.02, 0.03, 0.02, 0.04, 0.05]
+    sigma_e = [0.01, 0.20, 0.0, 0.005, 1.0]
+    expected = sum(
+        (e - cal.apply(c)) ** 2 / ((s * cal.derivative(c)) ** 2 + se ** 2)
+        for c, e, s, se in zip(channels, energies, sigma_ch, sigma_e)
+    ) / (len(channels) - 2)
+    value, reason = reduced_chi_squared(cal, channels, energies, sigma_ch, sigma_e)
+    assert reason is None
+    assert value == pytest.approx(expected)
+
+
+def test_a_line_uncertainty_rescues_a_point_at_the_turning_point():
+    """dE/dch is zero at a quadratic's vertex, so the centroid there maps
+    to no energy uncertainty at all -- but the LINE still has one, and
+    that is enough to weigh the point by."""
+    cal = Calibration(kind="quadratic", a=0.0, b=1.0, c=-0.005)
+    channels = [50.0, 100.0, 150.0, 200.0]      # 100 is the vertex
+    energies = [cal.apply(c) for c in channels]
+    value, reason = reduced_chi_squared(cal, channels, energies, [0.1] * 4)
+    assert value is None and "turning point" in reason
+    value, reason = reduced_chi_squared(cal, channels, energies, [0.1] * 4,
+                                        [0.02] * 4)
+    assert reason is None
+    assert value == pytest.approx(0.0, abs=1e-12)
+
+
+def test_unusable_line_uncertainties_count_as_zero_not_as_a_refusal():
+    """Unlike a channel error, which would carry infinite weight and so
+    invalidates the whole weighting, a missing energy uncertainty is an
+    honest statement that the line adds nothing of its own."""
+    cal = Calibration(kind="linear", a=0.0, b=0.5)
+    channels = [100.0, 200.0, 300.0, 400.0]
+    energies = _drifting(cal, channels, (0.05, -0.03, 0.02, 0.10))
+    errors = [0.02] * 4
+    plain, _r = reduced_chi_squared(cal, channels, energies, errors)
+    for bad in ([float("nan")] * 4, [-1.0] * 4, [None] * 4, ["x"] * 4):
+        value, reason = reduced_chi_squared(cal, channels, energies, errors, bad)
+        assert reason is None
+        assert value == pytest.approx(plain)
+
+
+def test_a_wrong_length_list_of_line_uncertainties_is_ignored():
+    cal = Calibration(kind="linear", a=0.0, b=0.5)
+    channels = [100.0, 200.0, 300.0, 400.0]
+    energies = _drifting(cal, channels, (0.05, -0.03, 0.02, 0.10))
+    errors = [0.02] * 4
+    plain, _r = reduced_chi_squared(cal, channels, energies, errors)
+    value, reason = reduced_chi_squared(cal, channels, energies, errors, [0.05])
+    assert reason is None
+    assert value == pytest.approx(plain)

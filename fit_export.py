@@ -72,6 +72,8 @@ def fit_result_to_json_record(result, spectrum_path, calibration=None):
         "link_widths": result.link_widths,
         "tail_fraction": result.tail_fraction,
         "tail_fraction_err": result.tail_fraction_err,
+        "step_fraction": result.step_fraction,
+        "step_fraction_err": result.step_fraction_err,
         "tail_beta": result.tail_beta,
         "tail_beta_err": result.tail_beta_err,
         "fixed_params": dict(result.fixed_params),
@@ -193,6 +195,11 @@ def fit_result_to_text_report(result, spectrum_path, fit_number=1, calibration=N
         f"Reduced chi^2: {result.reduced_chi2:.4g}" if result.reduced_chi2 is not None
         else "Reduced chi^2: undefined (zero degrees of freedom)",
     ]
+    if result.step_fraction is not None:
+        lines.append(
+            f"Step: {_format_err(result.step_fraction, result.step_fraction_err)} "
+            f"of peak height (background -- not counted in the volume)"
+        )
     if result.tail_fraction is not None:
         lines.append(
             f"Left tail: r={_format_err(result.tail_fraction, result.tail_fraction_err)}, "

@@ -38,6 +38,13 @@ _CURVE_SAMPLES = 400
 #: pick instead of grabbing whatever was nearest.
 _PICK_RADIUS_PX = 12.0
 
+#: How close a plotted point's energy has to be to a source line's for
+#: that line's stated uncertainty to be used as the point's own. Both
+#: numbers came from the same file and differ only by a round trip
+#: through the table's text, so this only has to absorb that -- it is
+#: the same tolerance caleneff_export matches on, for the same reason.
+_ENERGY_MATCH_KEV = 1e-6
+
 
 class CalibrationPlotDialog(QDialog):
     """`points` is (channel, channel_err, area, area_err, energy) per
@@ -284,6 +291,20 @@ class CalibrationPlotDialog(QDialog):
             text += " (excluded from the fit)"
         return text
 
+    def _literature_errors(self, energies):
+        """Each point's stated energy uncertainty, from the source lines
+        it was assigned from, or zero where it came from nowhere -- a
+        hand-typed energy has no dE to quote."""
+        out = []
+        for energy in energies:
+            match = 0.0
+            for line in self._source_lines:
+                if abs(line.energy - energy) <= _ENERGY_MATCH_KEV:
+                    match = float(line.energy_err or 0.0)
+                    break
+            out.append(match)
+        return out
+
     def _summary_text(self, channels, energies, errors):
         cal = self._calibration
         coefficient_errors = cal.coefficient_errors or ()
@@ -296,7 +317,8 @@ class CalibrationPlotDialog(QDialog):
         if cal.kind == "quadratic":
             parts.append(coefficient(2, cal.c, "c"))
 
-        value, reason = reduced_chi_squared(cal, channels, energies, errors)
+        value, reason = reduced_chi_squared(
+            cal, channels, energies, errors, self._literature_errors(energies))
         parts.append(
             f"reduced chi^2 = {value:.4g}" if reason is None
             else f"reduced chi^2 {reason}"

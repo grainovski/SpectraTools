@@ -2,7 +2,7 @@ import math
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy.special import erfcx
+from scipy.special import erfc, erfcx
 
 FWHM_FACTOR = 2.3548200450309493  # 2*sqrt(2*ln(2))
 SQRT_2PI = 2.5066282746310002  # sqrt(2*pi)
@@ -39,6 +39,21 @@ TAIL_BETA_MIN = 0.1
 #: tail's, and paying 0.05 in reduced chi-square to stop reporting areas
 #: wrong by fifteen orders of magnitude is the right way round.
 TAIL_BETA_MAX_SIGMA = 20.0
+
+#: The step's height, as a fraction of the peak's own amplitude, is
+#: bounded to [0, this].
+#:
+#: gf3 calls it STEP and states it in percent of peak height ("the
+#: relative height (in % of the peak height) of a smoothed step function
+#: which increases the background below each peak"), seeding it at 0.25%.
+#: Real detector steps are of that order, so 0.3 is deliberately far
+#: above anything physical: the bound is there to stop the step running
+#: away and swallowing background on a weak peak, not to express what a
+#: step should be. Same number and same reasoning as TAIL_FRACTION_MAX.
+STEP_FRACTION_MAX = 0.3
+
+#: What the step is seeded at, as a fraction. gf3's own default, 0.25%.
+_STEP_SEED = 0.0025
 
 _CUR_RATIO = 1e-12
 _CUR_LAMBDA_START = 1e-3
@@ -173,6 +188,31 @@ def hypermet_left_tail(x, position, sigma, r, beta):
     return (1 - r) * gaussian_core + r * tail
 
 
+def hypermet_step(x, position, sigma, step_fraction):
+    """The smoothed step that sits under a peak, from gf3's eval():
+
+        step(x) = step_fraction * erfc(w) / 2,  w = (x - position)/(sigma*sqrt(2))
+
+    multiplied by the peak's amplitude by the caller. gf3 computes
+    `h * pars[5] * erfc(w) / 200` with pars[5] the step height in PERCENT
+    of peak height; the 200 is 100 for the percent and 2 because erfc
+    tends to 2 far below the peak, so the asymptote is exactly
+    step_fraction of the amplitude. Verified against srcRW/gf3_subs.c.
+
+    Physically this is the shelf left by photons that scattered in the
+    detector before depositing the rest of their energy elsewhere: every
+    real peak sits on one, and it is a step rather than a bump because
+    the deficit can be anything from nothing to everything.
+
+    It is BACKGROUND, not peak. gf3 says so structurally -- its
+    `mode == -1` branch, which evaluates the background alone, adds this
+    term and nothing else from the peak -- so the step is excluded from
+    the reported area, exactly as the fitted background line is.
+    """
+    w = (np.asarray(x, dtype=float) - position) / (sigma * math.sqrt(2.0))
+    return step_fraction * erfc(w) / 2.0
+
+
 def hypermet_area(amplitude, sigma, r, beta):
     """Exact analytic integral of `amplitude * hypermet_left_tail(...)`
     over all x:
@@ -241,6 +281,11 @@ class FitResult:
     tail_fraction_err: float = None
     tail_beta: float = None
     tail_beta_err: float = None
+    # Shared by every peak in the fit, like the tail pair, and like gf3's
+    # own STEP which is one parameter for the whole fit rather than one
+    # per peak. None when the step was not part of the model.
+    step_fraction: float = None
+    step_fraction_err: float = None
     fixed_params: dict = field(default_factory=dict)
     visible: bool = True
     timestamp: str = None
@@ -446,10 +491,11 @@ def compute_background(x, y, left_bg_region, right_bg_region):
     return slope, intercept
 
 
-def _parameter_names(n_peaks, link_widths, enable_left_tail, fit_background=False):
+def _parameter_names(n_peaks, link_widths, enable_left_tail, fit_background=False,
+                    enable_step=False):
     """Canonical, ordered list of every fittable parameter's name for
-    a given (n_peaks, link_widths, enable_left_tail, fit_background)
-    configuration.
+    a given (n_peaks, link_widths, enable_left_tail, fit_background,
+    enable_step) configuration.
     This is the single source of truth for parameter identity, shared
     by the initial guess, bounds, model function, and (from Task 2)
     fixed-parameter handling in fit_peaks(). Public (no leading
@@ -466,6 +512,8 @@ def _parameter_names(n_peaks, link_widths, enable_left_tail, fit_background=Fals
     if enable_left_tail:
         names.append("tail_fraction")
         names.append("tail_beta")
+    if enable_step:
+        names.append("step_fraction")
     if fit_background:
         # Appended last, as HDTV appends its internal-background
         # coefficients after the peak parameters. bg_c0 is the level at the
@@ -497,7 +545,7 @@ def _unpack_named(values_by_name, n_peaks, link_widths, enable_left_tail):
 
 
 def _make_model(names, free_names, fixed_params, n_peaks, link_widths, enable_left_tail,
-                background_reference=None):
+                background_reference=None, enable_step=False):
     """The model the optimiser sees: the sum of the peaks, plus a linear
     background when `background_reference` is given.
 
@@ -518,6 +566,7 @@ def _make_model(names, free_names, fixed_params, n_peaks, link_widths, enable_le
         amplitudes, positions, sigmas, tail_fraction, tail_beta = _unpack_named(
             values_by_name, n_peaks, link_widths, enable_left_tail
         )
+        step_fraction = values_by_name.get("step_fraction")
         result = np.zeros_like(x, dtype=float)
         for amplitude, position, sigma in zip(amplitudes, positions, sigmas):
             if enable_left_tail:
@@ -526,6 +575,10 @@ def _make_model(names, free_names, fixed_params, n_peaks, link_widths, enable_le
                 )
             else:
                 result = result + amplitude * np.exp(-((x - position) ** 2) / (2 * sigma ** 2))
+            if enable_step:
+                result = result + amplitude * hypermet_step(
+                    x, position, sigma, step_fraction
+                )
         if background_reference is not None:
             result = result + (
                 values_by_name["bg_c0"]
@@ -607,7 +660,7 @@ def _integral_sigma(x_fit, y_sub, peak_positions):
 
 def _initial_guess(
     free_names, x_fit, y_sub, fit_region, peak_positions, link_widths, enable_left_tail,
-    initial_guess_overrides=None, background_seed=None,
+    initial_guess_overrides=None, background_seed=None, enable_step=False,
 ):
     lo, hi = fit_region
     region_width = hi - lo
@@ -664,6 +717,8 @@ def _initial_guess(
             guess_by_name[f"sigma_{i}"] = sigma0
     if link_widths:
         guess_by_name["sigma"] = sigma0
+    if enable_step:
+        guess_by_name["step_fraction"] = _STEP_SEED
     if enable_left_tail:
         guess_by_name["tail_fraction"] = 0.05
         # Seeded from a FULL width estimate, never the halved one:
@@ -708,8 +763,8 @@ def _build_param_damping(free_names, fixed_params, link_widths):
                 damping.append(_ParamDamping("pos", sigma_value=fixed_params[sigma_name]))
         elif name == "sigma" or name.startswith("sigma_"):
             damping.append(_ParamDamping("sigma"))
-        elif name == "tail_fraction":
-            damping.append(_ParamDamping("tail_fraction"))
+        elif name in ("tail_fraction", "step_fraction"):
+            damping.append(_ParamDamping(name))
         elif name == "tail_beta":
             # Every peak width, however it is held, so _clamp_trial can bound
             # this against the widest of them. Collected here rather than in
@@ -743,6 +798,7 @@ def fit_peaks(
     x, y, left_bg_region, right_bg_region, fit_region, peak_positions,
     link_widths=True, enable_left_tail=False, fixed_params=None,
     initial_guess_overrides=None, variance=None, fit_background=False,
+    enable_step=False,
 ):
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -761,7 +817,8 @@ def fit_peaks(
         raise FitError(f"Fit region {fit_region} contains no data")
 
     n_peaks = len(peak_positions)
-    names = _parameter_names(n_peaks, link_widths, enable_left_tail, fit_background)
+    names = _parameter_names(n_peaks, link_widths, enable_left_tail, fit_background,
+                             enable_step)
     unknown_fixed = set(fixed_params) - set(names)
     if unknown_fixed:
         raise FitError(f"Unknown fixed parameter name(s): {sorted(unknown_fixed)}")
@@ -841,6 +898,7 @@ def fit_peaks(
 
     model_named = _make_model(
         names, free_names, fixed_params, n_peaks, link_widths, enable_left_tail,
+        enable_step=enable_step,
         background_reference=background_reference,
     )
 
@@ -861,6 +919,7 @@ def fit_peaks(
         # background itself is being fitted afterwards.
         p0 = _initial_guess(
             free_names, x_fit, y_sub, fit_region, peak_positions, link_widths, enable_left_tail,
+            enable_step=enable_step,
             initial_guess_overrides=initial_guess_overrides,
             background_seed=background_seed,
         )
@@ -905,7 +964,7 @@ def fit_peaks(
         }
         degenerate_peak_params = {
             name for name in undetermined
-            if not name.startswith("tail_")
+            if not name.startswith("tail_") and name != "step_fraction"
         }
         if degenerate_peak_params:
             # Reported as peak NUMBERS, not internal parameter names.
@@ -1044,7 +1103,15 @@ def fit_peaks(
         # propagates exactly. Combined in quadrature here, as HDTV does
         # for its own background-subtracted integral
         # (TH1BgsubIntegral::GetBinError2 = eh**2 + eb**2).
-        background_under_peak = (slope * position + intercept) * fwhm
+        # The step, when the fit carried one, is part of the local
+        # background level and belongs in this term for the same reason
+        # it is kept out of `area`: gf3 counts it as background. At the
+        # centroid the step is exactly half its asymptotic height, which
+        # is where this convention samples the level.
+        local_background = slope * position + intercept
+        if enable_step:
+            local_background += amplitude * values_by_name["step_fraction"] / 2.0
+        background_under_peak = local_background * fwhm
         background_area_err = float(fwhm * bg_level_err_at(position))
         full_area = area + background_under_peak
         full_area_err = float(math.sqrt(area_err ** 2 + background_area_err ** 2))
@@ -1117,6 +1184,10 @@ def fit_peaks(
         tail_fraction_err=float(tail_fraction_err) if tail_fraction_err is not None else None,
         tail_beta=float(tail_beta) if tail_beta is not None else None,
         tail_beta_err=float(tail_beta_err) if tail_beta_err is not None else None,
+        step_fraction=(float(values_by_name["step_fraction"])
+                       if enable_step else None),
+        step_fraction_err=(float(err_by_name.get("step_fraction", 0.0))
+                           if enable_step else None),
         fixed_params=dict(fixed_params),
         gross_area=gross_area, gross_area_err=gross_area_err,
         net_area=net_area, net_area_err=net_area_err,
@@ -1127,10 +1198,12 @@ def fit_peaks(
     )
 
 
-def parameter_names(n_peaks, link_widths, enable_left_tail, fit_background=False):
+def parameter_names(n_peaks, link_widths, enable_left_tail, fit_background=False,
+                    enable_step=False):
     """Public alias of _parameter_names -- fit_mode.py's Fit Parameters
     panel needs this exact ordering to know which rows to display."""
-    return _parameter_names(n_peaks, link_widths, enable_left_tail, fit_background)
+    return _parameter_names(n_peaks, link_widths, enable_left_tail, fit_background,
+                            enable_step)
 
 
 def fit_result_values_by_name(result):
@@ -1153,6 +1226,8 @@ def fit_result_values_by_name(result):
     if enable_left_tail:
         values["tail_fraction"] = result.tail_fraction
         values["tail_beta"] = result.tail_beta
+    if result.step_fraction is not None:
+        values["step_fraction"] = result.step_fraction
     if result.fit_background:
         # Back into the CENTRED form the fit used, so the panel's values
         # round-trip through fixed_params/initial_guess_overrides. The
@@ -1569,7 +1644,7 @@ def _apply_step_damping(p, delta, damping, fit_region_bounds):
                 delta[i] = math.copysign(cap, delta[i])
             if p[i] + delta[i] == 0.0:
                 delta[i] *= 0.5
-        elif meta.kind in ("tail_fraction", "tail_beta"):
+        elif meta.kind in ("tail_fraction", "tail_beta", "step_fraction"):
             if p[i] + delta[i] == 0.0:
                 delta[i] *= 0.5
         elif meta.kind == "bg":
@@ -1596,6 +1671,8 @@ def _clamp_trial(p_try, damping):
                 p_try[i] = 1e-6 if p_try[i] >= 0 else -1e-6
         elif meta.kind == "tail_fraction":
             p_try[i] = min(max(p_try[i], 0.0), TAIL_FRACTION_MAX)
+        elif meta.kind == "step_fraction":
+            p_try[i] = min(max(p_try[i], 0.0), STEP_FRACTION_MAX)
         elif meta.kind == "tail_beta":
             p_try[i] = max(p_try[i], TAIL_BETA_MIN)
             # Bounded above as well as below -- see TAIL_BETA_MAX_SIGMA. The

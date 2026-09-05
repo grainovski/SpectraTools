@@ -10,6 +10,7 @@ from peak_fit import (
     background_error,
     compute_background,
     hypermet_left_tail,
+    hypermet_step,
 )
 
 
@@ -2677,3 +2678,180 @@ def test_the_bound_does_not_bind_on_a_genuinely_long_tail():
         )
         assert result.tail_beta == pytest.approx(true_beta, rel=0.35)
         assert result.peaks[0].area == pytest.approx(true_area, rel=0.05)
+
+
+
+# --- the step under a peak ----------------------------------------------
+#
+# gf3's STEP: "the relative height (in % of the peak height) of a smoothed
+# step function which increases the background below each peak", evaluated
+# in eval() as h * pars[5] * erfc(w) / 200. Ported here as a fraction
+# rather than a percent, so the /200 becomes /2.
+
+
+def test_the_step_is_the_full_fraction_below_and_nothing_above():
+    values = hypermet_step(np.array([-1e6, 0.0, 1e6]), 0.0, 2.0, 0.01)
+    assert values[0] == pytest.approx(0.01)      # the shelf, far below
+    assert values[1] == pytest.approx(0.005)     # half of it, at the centre
+    assert values[2] == pytest.approx(0.0)       # nothing above
+
+
+def test_the_step_scales_with_the_width_of_the_peak_it_belongs_to():
+    """It is smoothed by the same resolution that smears the peak, so the
+    crossing takes a sigma either side, not a fixed number of channels."""
+    narrow = hypermet_step(np.array([-3.0]), 0.0, 1.0, 0.01)[0]
+    wide = hypermet_step(np.array([-3.0]), 0.0, 5.0, 0.01)[0]
+    assert narrow > wide                          # narrower peak, sharper step
+    assert 0.005 < narrow <= 0.01
+    assert 0.005 < wide < 0.01
+
+
+def test_a_zero_step_contributes_nothing():
+    values = hypermet_step(np.array([-10.0, 0.0, 10.0]), 0.0, 2.0, 0.0)
+    np.testing.assert_allclose(values, 0.0)
+
+
+def _stepped_spectrum(step_fraction=0.02, amplitude=20000.0, sigma=3.0,
+                      centre=100.0, channels=200, level=300.0, seed=3):
+    """Background + one Gaussian + that Gaussian's step, Poisson noise."""
+    x = np.arange(channels, dtype=float)
+    clean = np.full(channels, level)
+    clean = clean + amplitude * np.exp(-((x - centre) ** 2) / (2 * sigma ** 2))
+    clean = clean + amplitude * np.asarray(
+        hypermet_step(x, centre, sigma, step_fraction))
+    return x, np.random.default_rng(seed).poisson(clean).astype(float)
+
+
+def test_the_step_is_recovered_when_the_background_is_fitted_with_it():
+    """A step and a background line are the same thing to a fit that sees
+    only the region around one peak: both raise the low side. They are
+    separable only when they are fitted together, which is how gf3 does
+    it -- gf3 has no pre-subtracted background at all."""
+    from peak_fit import fit_peaks
+
+    x, y = _stepped_spectrum(step_fraction=0.01)
+    joint = fit_peaks(x, y, (20.0, 60.0), (140.0, 180.0), (70.0, 130.0), [100.0],
+                      enable_step=True, fit_background=True)
+    assert joint.step_fraction == pytest.approx(0.01, rel=0.25)
+    assert joint.step_fraction_err is not None and joint.step_fraction_err > 0.0
+
+
+def test_a_pre_subtracted_background_line_takes_most_of_the_step():
+    """The other half of the test above, and the reason the Step box is
+    worth little on its own: the line through the two marked regions is
+    fitted to data that already contains the shelf, so it absorbs the
+    shelf, and the step term is left with a fraction of what is there."""
+    from peak_fit import fit_peaks
+
+    x, y = _stepped_spectrum(step_fraction=0.01)
+    subtracted = fit_peaks(x, y, (20.0, 60.0), (140.0, 180.0), (70.0, 130.0), [100.0],
+                           enable_step=True)
+    assert 0.0 <= subtracted.step_fraction < 0.006, "the line left the step to fit"
+
+
+def test_the_step_is_not_counted_in_the_peak_area():
+    """gf3 evaluates the step in its background-only branch, so it is
+    background however it is drawn. A peak sitting on a 1% step must
+    report the volume of the gaussian alone."""
+    from peak_fit import fit_peaks
+
+    truth = 20000.0 * 3.0 * math.sqrt(2 * math.pi)
+    x, y = _stepped_spectrum(step_fraction=0.01)
+    with_step = fit_peaks(x, y, (20.0, 60.0), (140.0, 180.0), (70.0, 130.0), [100.0],
+                          enable_step=True, fit_background=True)
+    assert with_step.peaks[0].area == pytest.approx(truth, rel=0.02)
+
+
+def test_the_step_is_what_stops_a_tail_swallowing_the_shelf():
+    """The reason the step earns its place. A peak with both a tail and a
+    step, fitted with the tail alone, hands the shelf to the tail -- and
+    the tail IS counted in the volume, so the volume runs away. Adding
+    the step gives the shelf somewhere honest to go.
+
+    Both fitted with the background, since that is the only mode in which
+    a step can be told from a background at all."""
+    from peak_fit import fit_peaks, hypermet_area, hypermet_left_tail
+
+    amp, sigma, centre, r, beta = 20000.0, 3.0, 100.0, 0.02, 4.5
+    x = np.arange(200, dtype=float)
+    clean = (300.0
+             + amp * np.asarray(hypermet_left_tail(x, centre, sigma, r, beta))
+             + amp * np.asarray(hypermet_step(x, centre, sigma, 0.03)))
+    y = np.random.default_rng(5).poisson(clean).astype(float)
+    truth = hypermet_area(amp, sigma, r, beta)
+
+    def volume_error(step):
+        result = fit_peaks(x, y, (20.0, 60.0), (140.0, 180.0), (70.0, 130.0), [centre],
+                           enable_left_tail=True, enable_step=step, fit_background=True)
+        return 100.0 * (result.peaks[0].area - truth) / truth
+
+    assert abs(volume_error(True)) < 3.0
+    assert volume_error(False) > 10.0, "the tail was supposed to run away without it"
+
+
+def test_no_step_asked_for_means_no_step_reported():
+    from peak_fit import fit_peaks
+
+    x, y = _stepped_spectrum(step_fraction=0.0)
+    result = fit_peaks(x, y, (20.0, 60.0), (140.0, 180.0), (70.0, 130.0), [100.0])
+    assert result.step_fraction is None
+    assert result.step_fraction_err is None
+
+
+def test_the_step_appears_in_the_parameter_names_only_when_enabled():
+    from peak_fit import parameter_names
+
+    assert "step_fraction" not in parameter_names(2, True, False, False)
+    names = parameter_names(2, True, False, False, True)
+    assert names[-1] == "step_fraction"
+    both = parameter_names(2, True, True, False, True)
+    assert both.index("tail_beta") < both.index("step_fraction")
+
+
+def test_a_fixed_step_is_held_exactly():
+    from peak_fit import fit_peaks
+
+    x, y = _stepped_spectrum(step_fraction=0.02)
+    result = fit_peaks(x, y, (20.0, 60.0), (140.0, 180.0), (70.0, 130.0), [100.0],
+                       enable_step=True, fixed_params={"step_fraction": 0.01})
+    assert result.step_fraction == pytest.approx(0.01)
+    assert result.step_fraction_err == pytest.approx(0.0)
+
+
+def test_the_step_is_bounded_and_cannot_run_away():
+    """A weak peak cannot constrain a step, and an unbounded one would
+    swallow the background under it."""
+    from peak_fit import STEP_FRACTION_MAX, fit_peaks
+
+    x, y = _stepped_spectrum(step_fraction=0.0, amplitude=40.0, level=500.0)
+    result = fit_peaks(x, y, (20.0, 60.0), (140.0, 180.0), (70.0, 130.0), [100.0],
+                       enable_step=True)
+    assert 0.0 <= result.step_fraction <= STEP_FRACTION_MAX
+
+
+def test_the_step_counts_as_background_in_the_full_area():
+    """`area` excludes the step because gf3 calls it background; the
+    background-included `full_area` must therefore INCLUDE it, or the
+    step would fall out of both and be counted nowhere."""
+    from peak_fit import fit_peaks
+
+    x, y = _stepped_spectrum(step_fraction=0.01)
+    r = fit_peaks(x, y, (20.0, 60.0), (140.0, 180.0), (70.0, 130.0), [100.0],
+                  enable_step=True, fit_background=True)
+    peak = r.peaks[0]
+    line_only = (r.background_slope * peak.position + r.background_intercept) * peak.fwhm
+    # half the step's asymptote, sampled at the centroid, times the FWHM
+    step_part = peak.amplitude * r.step_fraction / 2.0 * peak.fwhm
+    assert peak.full_area == pytest.approx(peak.area + line_only + step_part, rel=1e-9)
+    assert step_part > 0.0, "nothing was being tested"
+
+
+def test_without_a_step_the_full_area_is_the_line_alone():
+    """CONTROL: the new term must be inert when no step was fitted."""
+    from peak_fit import fit_peaks
+
+    x, y = _stepped_spectrum(step_fraction=0.0)
+    r = fit_peaks(x, y, (20.0, 60.0), (140.0, 180.0), (70.0, 130.0), [100.0])
+    peak = r.peaks[0]
+    line_only = (r.background_slope * peak.position + r.background_intercept) * peak.fwhm
+    assert peak.full_area == pytest.approx(peak.area + line_only, rel=1e-9)

@@ -297,4 +297,36 @@ def test_one_point_on_the_line_still_gets_a_usable_scale(qapp):
     cal = Calibration(kind="linear", a=10.0, b=1.1)
     dialog = _dialog(qapp, calibration=cal, points=_outlier_points()[:1])
     low, high = dialog.residual_axes.get_ylim()
-    assert high > low
+    assert high > low
+# --- the plot takes each line's uncertainty from the source it loaded ----
+
+
+def test_the_summary_counts_the_source_lines_own_uncertainties(qapp):
+    """The two lines of _lines() carry dE of 0.002 and 0.004 keV. Giving
+    the same points a source whose lines are quoted a hundred times more
+    loosely must lower the reported chi-squared."""
+    cal = Calibration(kind="linear", a=10.0, b=1.1)
+    loose = [SourceLine(121.783, 0.5, 5000.0, 50.0),
+             SourceLine(344.276, 0.5, 10000.0, 80.0)]
+    tight = _dialog(qapp, calibration=cal)
+    slack = _dialog(qapp, calibration=cal, lines=loose)
+
+    def chi(dialog):
+        text = dialog.summary_label.text()
+        return float(text.split("reduced chi^2 = ")[1].split(",")[0])
+
+    assert chi(slack) < chi(tight)
+
+
+def test_a_point_with_no_source_line_contributes_no_extra_uncertainty(qapp):
+    """CONTROL: the third point of _points() is at 566 keV, which neither
+    source line matches, so widening the source must not change it."""
+    cal = Calibration(kind="linear", a=10.0, b=1.1)
+    dialog = _dialog(qapp, calibration=cal)
+    assert dialog._literature_errors([121.783, 344.276, 566.0]) == [0.002, 0.004, 0.0]
+
+
+def test_no_source_loaded_leaves_every_uncertainty_at_zero(qapp):
+    dialog = _dialog(qapp, calibration=Calibration(kind="linear", a=10.0, b=1.1),
+                     lines=[])
+    assert dialog._literature_errors([121.783, 344.276]) == [0.0, 0.0]

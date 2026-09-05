@@ -4,6 +4,103 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [5.2.0] - unreleased
+
+### Added
+
+- **A `Step` option in the Fit Parameters panel: the smoothed shelf that
+  sits under every real peak.** Photons that scatter in the detector and
+  carry part of their energy away leave a step, not a bump, under the
+  photopeak -- anything from nothing to everything can be lost, so the
+  deficit fills the whole range below. `gf3` and TV both model it and
+  this app did not; `peak_fit.py` said so, "the step-background term is
+  out of scope, per the design spec".
+
+  Ported from `srcRW/gf3_subs.c`'s `eval()`, which computes
+  `h * STEP * erfc(w) / 200` with STEP in percent of peak height. Here
+  it is a fraction, so `amplitude * step * erfc(w) / 2`: the shelf is
+  `step` of the peak's height far below it, half that at the centroid,
+  and nothing above. It is **background, not peak**, which is `gf3`'s
+  own reading -- its background-only branch evaluates this term and
+  nothing else from the peak -- so it is excluded from the reported
+  volume exactly as the fitted background line is.
+
+  **The option only does its job alongside `Fit background`.** A step
+  and a background line are the same thing to a fit that sees one peak:
+  both raise the low side. They separate only when fitted together,
+  which is how `gf3` does it, having no pre-subtracted background at
+  all. With the line subtracted first it was fitted to data that already
+  contained the shelf, so it has absorbed most of it -- on a synthetic
+  peak with a 1.00% step, the step term recovers 1.03% when the
+  background is fitted with it and only 0.34% when it is not.
+
+  **What it is really for is stopping the tail running away.** The shelf
+  is in the data whether or not it is modelled, and without a step the
+  tail is the only component that can reach it -- and the tail, unlike
+  the step, is counted in the volume. On a synthetic peak carrying both
+  a 2% tail and a 3% step, the tail alone overstated the volume by
+  31.5%; tail and step together gave +0.04%.
+
+  The background-included `full_area` counts the step, since `area` does
+  not: the step is background, and a term excluded from both would be
+  counted nowhere. Sampled at the centroid, where the step is exactly
+  half its asymptotic height, matching the convention that term already
+  used for the background line.
+
+### Changed
+
+- **The calibration's reduced chi-squared now counts the source lines'
+  own energy uncertainties**, added in quadrature with the centroid's.
+  The residual has two sources and the test was only counting one, which
+  made it far harsher than the data warranted: on a real Eu-152
+  calibration it halved the reported value, 995 to 482. The lines it
+  matters for are the ones quoted to a keV rather than a thousandth of
+  one -- eu152's 1084.0(10) keV carries an uncertainty eight hundred
+  times its centroid's. A hand-typed energy has no stated uncertainty
+  and contributes nothing extra, which also means every calibration made
+  without a source file reports exactly what it did before.
+
+  A point sitting on a quadratic's turning point is no longer
+  automatically undefined either: dE/dch is zero there, but the line's
+  own uncertainty still weighs the point.
+
+### Documentation
+
+- **What a large reduced chi-squared means, in both places it is
+  reported.** Neither page said, and the number is alarming without it.
+
+  For a **fit**: about 1 is what a good fit gives and a weak peak does
+  give it, while a strong peak routinely gives tens or hundreds and is
+  not thereby a failed fit. A peak with a million counts is known to
+  about a tenth of a percent per channel, and no peak-shape model
+  describes a real detector that well, so a mismatch a weak peak hides
+  inside its own noise stands out by tens of standard deviations in a
+  strong one. On a real Eu-152 spectrum the ten weakest peaks gave a
+  median of 1.3 and the ten strongest 66.8. Two consequences are worth
+  knowing and are now stated: the reported uncertainties on a strong
+  peak are optimistic, because they assume the model is right; and a
+  large value on a WEAK peak is the opposite situation and worth
+  chasing, since only a real problem can lift it above the noise.
+
+  For a **calibration**: a large value does not mean the fit failed, it
+  means a polynomial describes the points less well than the points are
+  known. Centroids from strong peaks are good to a hundredth of a
+  channel and no detector is exactly linear at that precision, so
+  residuals of a tenth of a keV against uncertainties of a hundredth
+  give a value in the hundreds while the calibration is perfectly
+  usable. The page now says to judge it by the numbers that are in keV,
+  and how to read the residual strip: a smooth sweep across zero is
+  non-linearity, which the quadratic will partly absorb; scatter with no
+  pattern means the fit is already as good as the shape allows.
+
+- **How the three shape options work together.** `Left tail`, `Step` and
+  `Fit background` are the full Hypermet description and are what brings
+  a strong peak near 1. Singly they can each make matters worse. On the
+  real Eu-152 spectrum the median reduced chi-squared over 66 peaks was
+  5.83 as fitted by default and 1.54 with all three, and over the strong
+  peaks alone 46.1 against 2.0. All three stay OFF by default: turning
+  them on changes every reported volume, which is the user's decision.
+
 ## [5.1.0] - 2026-09-05
 
 ### Added
