@@ -42,9 +42,21 @@ _IMPOSSIBLE = 1e9
 
 @dataclass(frozen=True)
 class EnergyAssignments:
-    """`pairs` is ((channel, energy), ...) as assigned at the time."""
+    """`pairs` is ((channel, energy), ...) as assigned at the time.
+
+    `excluded` holds the energies the user unticked, so a point judged
+    an outlier stays out of the calibration fit across a refit or a
+    reopened dialog. Keyed by ENERGY rather than by row or channel
+    because that is the part the user chose and the part a refit leaves
+    unchanged -- a channel moves slightly every time the peaks are
+    fitted again. Two rows carrying the same energy would be a mistake
+    in the assignment itself, so it is unique in practice.
+
+    Defaulted, so every existing two-argument construction still works.
+    """
     source_path: str
     pairs: tuple
+    excluded: tuple = ()
 
 
 def _tolerance(fwhm):

@@ -112,6 +112,12 @@ class EnergyAssignDialog(QDialog):
     # that column could be inserted at all.
     ENERGY_COLUMN = 3
 
+    #: The include/exclude tick rides on the peak's own name cell rather
+    #: than in a column of its own: it costs no width, it cannot shift
+    #: ENERGY_COLUMN again, and ticking a peak's name is what the choice
+    #: actually means.
+    INCLUDE_COLUMN = 0
+
     def __init__(self, parent, peaks, quadratic=False, settings=None,
                  assignments=None, max_channel=None, export_default_path=None):
         super().__init__(parent)
@@ -176,15 +182,21 @@ class EnergyAssignDialog(QDialog):
 
         self.table = QTableWidget(len(self._peaks), 4)
         self.table.setHorizontalHeaderLabels(
-            ["Peak", "Channel", "± ch", "Energy (keV)"]
+            ["Use / Peak", "Channel", "± ch", "Energy (keV)"]
         )
         self.table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
         )
         for row, peak in enumerate(self._peaks):
             name = QTableWidgetItem(peak.label)
-            name.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            self.table.setItem(row, 0, name)
+            name.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
+            name.setCheckState(Qt.CheckState.Checked)
+            name.setToolTip(
+                "Untick to leave this peak out of the calibration fit. "
+                "Its energy is kept, and it is still written to the "
+                "CalEnEff export."
+            )
+            self.table.setItem(row, self.INCLUDE_COLUMN, name)
 
             position = QTableWidgetItem(f"{peak.channel:.3f}")
             position.setFlags(Qt.ItemFlag.ItemIsEnabled)
@@ -233,8 +245,17 @@ class EnergyAssignDialog(QDialog):
         peaks = [(peak.channel, peak.fwhm) for peak in self._peaks]
         self._writing = True
         try:
+            excluded = tuple(assignments.excluded or ())
             for row, energy in restore(assignments, peaks).items():
                 self.table.item(row, self.ENERGY_COLUMN).setText(repr(energy))
+                # A point the user judged an outlier must not quietly
+                # rejoin the fit just because the dialog was reopened.
+                # Matched on the energy, which is what was stored and what
+                # a refit leaves unchanged.
+                if any(abs(energy - e) < 1e-9 for e in excluded):
+                    self.table.item(row, self.INCLUDE_COLUMN).setCheckState(
+                        Qt.CheckState.Unchecked
+                    )
         finally:
             self._writing = False
         if assignments.source_path and os.path.exists(assignments.source_path):
@@ -253,6 +274,12 @@ class EnergyAssignDialog(QDialog):
                 item.setText("")
                 item.setBackground(QBrush())
                 item.setToolTip("")
+                # Clear means start over, so the ticks go back to included
+                # too -- leaving a row unticked with no energy would be an
+                # exclusion the user could no longer see the reason for.
+                self.table.item(row, self.INCLUDE_COLUMN).setCheckState(
+                    Qt.CheckState.Checked
+                )
         finally:
             self._writing = False
         self._suggested.clear()
@@ -281,25 +308,74 @@ class EnergyAssignDialog(QDialog):
         than skipping it: a typo silently dropped would produce a
         calibration quietly fitted to fewer points than the user thinks.
         """
+        return self._read_rows(lambda row: True)
+
+    def _row_energy(self, row, peak):
+        """The typed energy for one row, or None when it is blank.
+
+        Raises ValueError naming the row for anything unparseable. Shared
+        by assignments() and fit_assignments() so the two can never report
+        the same bad row differently.
+        """
+        text = self._energy_text(row).strip()
+        if not text:
+            return None
+        try:
+            value = float(text)
+        except ValueError:
+            raise ValueError(f"{peak.label}: {text!r} is not a number") from None
+        # float() alone accepts "nan"/"inf", which from_points would only
+        # reject later with a message about the whole fit's coefficients --
+        # name the offending row here instead, exactly like an unparseable
+        # entry.
+        if not math.isfinite(value):
+            raise ValueError(f"{peak.label}: {text!r} is not a finite energy") from None
+        return value
+
+    def _read_rows(self, keep):
         channels, energies, errors = [], [], []
         for row, peak in enumerate(self._peaks):
-            text = self._energy_text(row).strip()
-            if not text:
+            value = self._row_energy(row, peak)
+            if value is None or not keep(row):
                 continue
-            try:
-                value = float(text)
-            except ValueError:
-                raise ValueError(f"{peak.label}: {text!r} is not a number") from None
-            # float() alone accepts "nan"/"inf", which from_points would
-            # only reject later with a message about the whole fit's
-            # coefficients -- name the offending row here instead, exactly
-            # like an unparseable entry.
-            if not math.isfinite(value):
-                raise ValueError(f"{peak.label}: {text!r} is not a finite energy") from None
             energies.append(value)
             channels.append(peak.channel)
             errors.append(peak.channel_err)
         return channels, energies, errors
+
+    def is_included(self, row):
+        """Whether row `row` is ticked for the calibration fit."""
+        item = self.table.item(row, self.INCLUDE_COLUMN)
+        return item is None or item.checkState() == Qt.CheckState.Checked
+
+    def fit_assignments(self):
+        """`assignments()` restricted to the ticked rows.
+
+        This is what the calibration is fitted from. `assignments()`
+        itself deliberately still returns every typed row, because it is
+        also what the spectrum's stored record is built from -- filtering
+        there would not exclude an outlier, it would forget the energy the
+        user typed for it.
+        """
+        return self._read_rows(self.is_included)
+
+    def excluded_energies(self):
+        """Energies of rows that carry one but are unticked."""
+        out = []
+        for row in range(len(self._peaks)):
+            if self.is_included(row):
+                continue
+            value = _parse_energy(self._energy_text(row))
+            if value is not None:
+                out.append(value)
+        return tuple(out)
+
+    def excluded_rows(self):
+        """Row indices that carry an energy but are unticked -- what the
+        plot draws differently."""
+        return {row for row in range(len(self._peaks))
+                if not self.is_included(row)
+                and _parse_energy(self._energy_text(row)) is not None}
 
     def source_path(self):
         """The loaded .sou path, or None. Stored so reopening the dialog
@@ -325,9 +401,12 @@ class EnergyAssignDialog(QDialog):
         return set(self._suggested)
 
     def _anchor_count(self):
+        """Rows that can anchor a suggestion: typed AND ticked, matching
+        what _on_suggest will actually fit."""
         return sum(
             1 for row in range(len(self._peaks))
-            if _parse_energy(self._energy_text(row)) is not None
+            if self.is_included(row)
+            and _parse_energy(self._energy_text(row)) is not None
         )
 
     # --- source loading ---------------------------------------------------
@@ -381,7 +460,14 @@ class EnergyAssignDialog(QDialog):
         )
 
     def _on_item_changed(self, item):
-        if self._writing or item.column() != self.ENERGY_COLUMN:
+        if self._writing:
+            return
+        if item.column() == self.INCLUDE_COLUMN:
+            # Ticking changes which points the fit sees, so the live plot
+            # and the Suggest button both have to follow it.
+            self._assignments_changed()
+            return
+        if item.column() != self.ENERGY_COLUMN:
             return
         row = item.row()
         # An edited suggestion is the user's own value now: it loses the
@@ -434,7 +520,10 @@ class EnergyAssignDialog(QDialog):
             return
         self._clear_suggestions()
         try:
-            channels, energies, errors = self.assignments()
+            # Suggesting IS an energy fit, so an unticked point must not
+            # anchor it -- a suspect assignment would otherwise propagate
+            # into every energy proposed from it.
+            channels, energies, errors = self.fit_assignments()
         except ValueError as exc:
             self.status.setText(str(exc))
             return
@@ -520,7 +609,7 @@ class EnergyAssignDialog(QDialog):
         never be the result of a different fit from the one OK applies.
         """
         try:
-            channels, energies, errors = self.assignments()
+            channels, energies, errors = self.fit_assignments()
         except ValueError as exc:
             return None, str(exc)
         try:
@@ -568,16 +657,18 @@ class EnergyAssignDialog(QDialog):
             self._close_live_plot()
             return
         points = self.export_points()
+        excluded = self.excluded_energies()
         if self._live_plot is not None:
             try:
-                self._live_plot.set_data(calibration, points, self.source_lines)
+                self._live_plot.set_data(calibration, points, self.source_lines,
+                                         excluded=excluded)
                 return
             except RuntimeError:
                 # Closed by the user; fall through and build a new one.
                 self._live_plot = None
         self._live_plot = CalibrationPlotDialog(
             self, calibration, points, self.source_lines,
-            self._max_channel, self._export_default_path,
+            self._max_channel, self._export_default_path, excluded=excluded,
         )
         self._live_plot.show()
 

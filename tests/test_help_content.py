@@ -1091,3 +1091,12 @@ def test_help_does_not_still_describe_the_dropped_column():
 def test_help_says_the_calibration_plot_is_live():
     howto = build_howto_html()
     assert "redraws after every change" in howto
+
+
+def test_help_documents_the_include_exclude_tick():
+    """Short single-line fragments: the HTML is wrapped, so asserting on a
+    whole sentence silently matches nothing."""
+    howto = build_howto_html()
+    assert "unticking it leaves that point out" in howto
+    assert "hollow marker" in howto
+    assert "still written there" in howto      # the CalEnEff exception

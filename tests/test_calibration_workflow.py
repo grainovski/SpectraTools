@@ -251,3 +251,126 @@ def test_ok_closes_the_preview(qapp, tmp_path):
     dialog._on_accept()
     assert dialog._live_plot is None
     assert dialog.result_calibration is not None
+
+
+# --- v5.0.2: including / excluding a point from the fit ------------------
+
+INCLUDE = EnergyAssignDialog.INCLUDE_COLUMN
+
+
+def _untick(dialog, row):
+    from PySide6.QtCore import Qt
+    dialog.table.item(row, INCLUDE).setCheckState(Qt.CheckState.Unchecked)
+
+
+def _is_ticked(dialog, row):
+    from PySide6.QtCore import Qt
+    return dialog.table.item(row, INCLUDE).checkState() == Qt.CheckState.Checked
+
+
+def test_every_point_starts_included(qapp, tmp_path):
+    window, _ = _window(tmp_path)
+    dialog = EnergyAssignDialog(None, window.fitted_peak_choices())
+    assert all(_is_ticked(dialog, r) for r in range(dialog.table.rowCount()))
+
+
+def test_unticking_drops_the_point_from_the_fit_but_keeps_its_energy(qapp, tmp_path):
+    """The energy is what the user typed; the tick only says whether the
+    calibration is fitted through it."""
+    window, _ = _window(tmp_path)
+    dialog = EnergyAssignDialog(None, window.fitted_peak_choices())
+    dialog.table.item(0, ENERGY).setText("300")
+    dialog.table.item(1, ENERGY).setText("840")
+    _untick(dialog, 1)
+
+    channels, energies, _ = dialog.fit_assignments()
+    assert energies == [300.0], "the unticked point still reached the fit"
+
+    all_channels, all_energies, _ = dialog.assignments()
+    assert all_energies == [300.0, 840.0], "the unticked point lost its energy"
+    assert dialog.excluded_energies() == (840.0,)
+
+
+def test_unticking_actually_changes_the_calibration(qapp, tmp_path):
+    """The control for the test above: proving the point is filtered out
+    is worth nothing unless the fit that results is different."""
+    window, active = _window(tmp_path, centres=(150.0, 300.0, 420.0))
+    dialog = EnergyAssignDialog(None, window.fitted_peak_choices())
+    dialog.table.item(0, ENERGY).setText("300")
+    dialog.table.item(1, ENERGY).setText("600")
+    dialog.table.item(2, ENERGY).setText("2000")      # a deliberate outlier
+    with_outlier, _ = dialog._compute_calibration()
+
+    _untick(dialog, 2)
+    without, _ = dialog._compute_calibration()
+
+    assert with_outlier is not None and without is not None
+    assert without.b != pytest.approx(with_outlier.b), \
+        "excluding the outlier left the slope unchanged"
+
+
+def test_an_exclusion_survives_reopening_the_dialog(qapp, tmp_path):
+    window, active = _window(tmp_path)
+    choices = window.fitted_peak_choices()
+    dialog = EnergyAssignDialog(None, choices)
+    dialog.table.item(0, ENERGY).setText("300")
+    dialog.table.item(1, ENERGY).setText("840")
+    _untick(dialog, 1)
+    dialog._on_accept()
+    window._store_energy_assignments(active, dialog)
+
+    assert active.energy_assignments.excluded == (840.0,)
+
+    reopened = EnergyAssignDialog(None, choices,
+                                  assignments=active.energy_assignments)
+    assert _is_ticked(reopened, 0)
+    assert not _is_ticked(reopened, 1), "the outlier quietly rejoined the fit"
+    assert float(reopened.table.item(1, ENERGY).text()) == pytest.approx(840.0)
+
+
+def test_clear_puts_every_tick_back(qapp, tmp_path):
+    window, _ = _window(tmp_path)
+    dialog = EnergyAssignDialog(None, window.fitted_peak_choices())
+    dialog.table.item(0, ENERGY).setText("300")
+    _untick(dialog, 0)
+    dialog._on_clear()
+    assert all(_is_ticked(dialog, r) for r in range(dialog.table.rowCount()))
+
+
+def test_an_excluded_point_is_still_exported_for_efficiency(qapp, tmp_path):
+    """Deliberate: the tick is about the ENERGY fit. A point left out of
+    the calibration still carries a usable area and intensity."""
+    window, _ = _window(tmp_path)
+    dialog = EnergyAssignDialog(None, window.fitted_peak_choices())
+    dialog.table.item(0, ENERGY).setText("300")
+    dialog.table.item(1, ENERGY).setText("840")
+    _untick(dialog, 1)
+    exported = [p[4] for p in dialog.export_points()]
+    assert sorted(exported) == [300.0, 840.0]
+
+
+def test_unticking_refreshes_the_live_plot(qapp, tmp_path):
+    window, _ = _window(tmp_path)
+    dialog = _live_dialog(window, tmp_path)
+    dialog.table.item(0, ENERGY).setText("300")
+    dialog.table.item(1, ENERGY).setText("840")
+    assert dialog._live_plot is not None
+    before = dialog._live_plot._calibration.b
+
+    _untick(dialog, 1)
+    # One point cannot fit a line, so the preview comes down rather than
+    # showing a curve that no longer describes the table.
+    assert dialog._live_plot is None or dialog._live_plot._calibration.b != before
+
+
+def test_suggest_will_not_anchor_on_an_excluded_point(qapp, tmp_path):
+    """Suggesting is itself an energy fit, so a point the user called
+    suspect must not be allowed to place every other line."""
+    window, _ = _window(tmp_path)
+    dialog = EnergyAssignDialog(None, window.fitted_peak_choices())
+    dialog.table.item(0, ENERGY).setText("300")
+    dialog.table.item(1, ENERGY).setText("840")
+    assert dialog._anchor_count() == 2
+    _untick(dialog, 1)
+    assert dialog._anchor_count() == 1
+    assert not dialog.suggest_button.isEnabled()

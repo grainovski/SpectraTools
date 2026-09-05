@@ -406,12 +406,27 @@ OK fits through exactly what the table shows. Pressing Suggest again
 clears the untouched suggestions and recomputes from your own values, and
 so does loading a different source file -- guesses made from one nuclide
 are never carried into another.</p>
+<p><b>Each peak has a tick, and unticking it leaves that point out of
+the fit.</b> The energy you typed is kept -- the tick only decides
+whether the calibration is fitted through that point. It is what the
+residual strip is for: when one point sits far off the line, untick it
+and watch the fit and the residuals redraw without it. The excluded
+point is still drawn, as a hollow marker, and its residual against the
+new fit is still shown, so you can see what you rejected and change your
+mind. <b>Suggest remaining</b> ignores unticked points too, since
+suggesting is itself an energy fit and a suspect anchor would place every
+other line wrongly. The CalEnEff export is the exception: an excluded
+point is still written there, because its area and intensity are
+unaffected by a doubt about the energy fit.</p>
 <p><b>Your assignments are remembered.</b> Everything you type stays with
 that spectrum for the session, so refitting and reopening the dialog
-brings it back rather than making you retype it. A peak whose centroid
-moved further than its own width comes back blank, because past that
-distance it is a different peak. <b>Clear</b> forgets every assignment
-and the loaded source. It deliberately leaves the active calibration
+brings it back rather than making you retype it -- and so does the
+tick, so a point you judged an outlier does not quietly rejoin the fit
+after a refit. A peak whose centroid moved further than
+its own width comes back blank, because past that distance it is a
+different peak.
+<b>Clear</b> forgets every assignment and the loaded source, and puts
+every tick back. It deliberately leaves the active calibration
 alone: discarding your identifications and un-calibrating the spectrum
 are separate actions.</p>
 <p><b>The fit opens in its own window</b> showing the assigned points
@@ -421,8 +436,8 @@ reduced chi-squared. It appears as soon as there are enough assignments
 to fit a calibration and <b>redraws after every change</b> -- a typed
 energy, a loaded source, a suggestion accepted -- so a misidentified
 line shows in the residuals while you can still correct it, rather than
-only after the calibration has been applied. Clearing the assignments
-takes it down again. <b>Finish and save for CalEnEff...</b> writes a
+only after the calibration has been applied. Unticking a point redraws
+it too. Clearing the assignments takes it down again. <b>Finish and save for CalEnEff...</b> writes a
 seven-column file for the efficiency-calibration program: channel and
 its error, net area and its error, energy, and relative intensity with
 its error.</p>

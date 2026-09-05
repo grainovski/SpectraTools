@@ -4,6 +4,52 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [5.0.2] - unreleased
+
+### Added
+
+- **Each peak in the calibration dialog now has a tick, and unticking it
+  leaves that point out of the fit.** The energy you typed is kept; the
+  tick only decides whether the calibration is fitted through that
+  point. It is what the residual strip has been asking for since the plot
+  arrived in 5.0.0: when one point sits visibly off the line, untick it
+  and watch the fit and its residuals redraw without it.
+
+  The excluded point stays on the plot as a hollow marker, with its
+  residual against the new fit still shown, so what you rejected remains
+  visible and reversible rather than disappearing.
+
+  **Suggest remaining** ignores unticked points as well. Suggesting is
+  itself an energy fit, so allowing a point you have called suspect to
+  anchor it would push the error into every line proposed from it.
+
+  The tick is remembered with the energies, per spectrum, so a point
+  judged an outlier does not quietly rejoin the fit after a refit or a
+  reopened dialog. **Clear** puts every tick back along with emptying the
+  table.
+
+  One deliberate exception: an excluded point is **still written to the
+  CalEnEff export**. The tick expresses a doubt about the energy fit,
+  which leaves the peak's area and the intensity matched to it
+  untouched.
+
+### Notes
+
+- The `.sou` source files used here during development were rebuilt from
+  the evaluated ENSDF decay data that NNDC's NuDat serves. They are not
+  part of the application and are not installed with it, so nothing in
+  this release changes for anyone using their own -- but the errors found
+  are worth checking for in any set of the same vintage. In ours:
+  `eu152` was missing the 1085.837 keV line entirely and had 964.057 keV
+  recorded 0.074 keV too high; `ba133` had 223.237 keV out by 0.121 keV;
+  `co56`'s lines above 3 MeV were low by up to 0.09 keV and it carried no
+  511 keV annihilation peak despite a 19.6% positron branch; `ta182`'s
+  intensities were uniformly about 7% off relative to its strongest line.
+  A new `ra226` set covers Ra-226 in secular equilibrium with its Pb-214
+  and Bi-214 daughters, 45 lines from 53 to 2448 keV, whose strongest
+  line is the 609.312 keV one CalEnEff's own 226Ra sample normalises
+  to 100.
+
 ## [5.0.1] - 2026-09-04
 
 ### Fixed

@@ -35,7 +35,7 @@ class CalibrationPlotDialog(QDialog):
     from, used only by the export."""
 
     def __init__(self, parent, calibration, points, source_lines,
-                 max_channel, default_path):
+                 max_channel, default_path, excluded=()):
         super().__init__(parent)
         self.setWindowTitle("Energy Calibration")
         self._default_path = default_path
@@ -68,9 +68,10 @@ class CalibrationPlotDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        self.set_data(calibration, points, source_lines)
+        self.set_data(calibration, points, source_lines, excluded=excluded)
 
-    def set_data(self, calibration, points, source_lines, max_channel=None):
+    def set_data(self, calibration, points, source_lines, max_channel=None,
+                 excluded=()):
         """Redraw for a new calibration without rebuilding the window.
 
         The Calibrate dialog's live preview refreshes after every change
@@ -82,12 +83,23 @@ class CalibrationPlotDialog(QDialog):
         self._calibration = calibration
         self._points = list(points)
         self._source_lines = list(source_lines or [])
+        self._excluded = tuple(excluded or ())
         if max_channel is not None:
             self._max_channel = max_channel
 
-        channels = [p[0] for p in self._points]
-        errors = [p[1] for p in self._points]
-        energies = [p[4] for p in self._points]
+        # An excluded point is still DRAWN, hollow, and its residual is
+        # still shown. That is the whole reason to exclude one: you want
+        # to see how far the point you rejected sits from the fit made
+        # without it. Hiding it would remove the evidence.
+        def is_out(energy):
+            return any(abs(energy - e) < 1e-9 for e in self._excluded)
+
+        used = [p for p in self._points if not is_out(p[4])]
+        left = [p for p in self._points if is_out(p[4])]
+
+        channels = [p[0] for p in used]
+        errors = [p[1] for p in used]
+        energies = [p[4] for p in used]
 
         self.axes.clear()
         self.residual_axes.clear()
@@ -96,6 +108,12 @@ class CalibrationPlotDialog(QDialog):
             channels, energies, xerr=errors, fmt="o", capsize=3,
             label="assigned peaks",
         )
+        if left:
+            self.axes.errorbar(
+                [p[0] for p in left], [p[4] for p in left],
+                xerr=[p[1] for p in left], fmt="o", capsize=3,
+                markerfacecolor="none", label="excluded from the fit",
+            )
         upper = max(self._max_channel, max(channels) if channels else 0)
         grid = np.linspace(0.0, float(upper), _CURVE_SAMPLES)
         self.axes.plot(grid, calibration.apply(grid), "-", label="calibration")
@@ -105,6 +123,12 @@ class CalibrationPlotDialog(QDialog):
         residuals = [e - calibration.apply(c) for c, e in zip(channels, energies)]
         self.residual_axes.axhline(0.0, linewidth=0.8)
         self.residual_axes.errorbar(channels, residuals, fmt="o", capsize=3)
+        if left:
+            self.residual_axes.errorbar(
+                [p[0] for p in left],
+                [p[4] - calibration.apply(p[0]) for p in left],
+                fmt="o", capsize=3, markerfacecolor="none",
+            )
         self.residual_axes.set_xlabel("Channel")
         self.residual_axes.set_ylabel("Residual (keV)")
         self._figure.tight_layout()

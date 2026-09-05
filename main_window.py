@@ -1099,6 +1099,10 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         spectrum.energy_assignments = EnergyAssignments(
             source_path=dialog.source_path(),
             pairs=tuple(zip(channels, energies)),
+            # Which points the user left out of the fit is part of what
+            # they told the dialog, so it is stored with the energies
+            # rather than being rediscovered after every refit.
+            excluded=dialog.excluded_energies(),
         )
 
     def _caleneff_default_path(self, spectrum):
@@ -1127,6 +1131,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self._calibration_plot = CalibrationPlotDialog(
             self, dialog.result_calibration, points,
             dialog.source_lines, len(spectrum.data) - 1, default_path,
+            excluded=dialog.excluded_energies(),
         )
         self._calibration_plot.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self._calibration_plot.show()
