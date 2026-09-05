@@ -508,9 +508,9 @@ peaks you recognise and press <b>Suggest remaining</b>, exactly as you
 would with hand-fitted peaks. The status line also reports candidates
 set aside as broad features, peaks that were found but could not be
 fitted, peaks skipped for want of a clear background on both sides, fits
-that strayed onto a neighbour, fits that repeated a peak another fit had
-already caught, and fits set aside for an implausible width or a
-negative area.</p>
+that strayed off the peak they started from, fits that repeated a peak
+another fit had already caught, and fits set aside for an implausible
+width or a negative area.</p>
 <p>A peak fitted twice -- once by hand before the run, once by the
 automatic pass -- appears twice in the table, and the energy goes to the
 automatic copy. Running again appends a second set of fits;
