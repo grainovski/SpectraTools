@@ -122,5 +122,8 @@ def restore(assignments, peaks):
         if cost[row, index] > 0.0 and len(column) > 1 and column[1] < _IMPOSSIBLE:
             if (column[1] - column[0]) < _AMBIGUITY_MARGIN * _tolerance(peaks[row][1]):
                 continue
-        out[row] = pairs[index][1]
+        # int(), not numpy's int64: these are row numbers handed to Qt,
+        # which wants a Python int, and to callers that compare them
+        # against range().
+        out[int(row)] = pairs[index][1]
     return out

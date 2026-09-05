@@ -253,3 +253,39 @@ def test_every_line_unticked_leaves_a_spectrum_with_no_peaks_accounted_for():
     assert refit.excluded == len(lines)
     assert refit.invisible == 0
     assert _accounted(refit, lines)
+
+
+# --- the refit judges a fit against the same trend the first pass does ---
+
+
+def test_the_refit_guard_uses_the_fitted_width_trend(eu152):
+    """Both passes claim to apply "the same judgement". The refit used to
+    measure against the trend through the SEARCH's widths, which are read
+    off a smoothed copy and run about 1.8 times wider -- 5.03 channels
+    against 2.83 at channel 551 of this spectrum -- so the export, the
+    more consequential of the two paths, had the weaker gate."""
+    counts, lines, _outcome = eu152
+    cal = C.Calibration(kind="linear", a=0.0, b=0.6249)
+    refit = auto_calibrate.refit_source_lines(
+        channel_indices(len(counts)), counts, lines, cal)
+
+    positions = [r.peaks[0].position for r in refit.results]
+    widths = [r.peaks[0].fwhm for r in refit.results]
+    trend = auto_calibrate.expected_widths(positions, widths)
+    for result, expected in zip(refit.results, trend):
+        peak = result.peaks[0]
+        assert peak.fwhm <= auto_calibrate.WIDTH_OUTLIER_RATIO * expected, (
+            f"a {peak.fwhm:.2f}-channel fit at {peak.position:.1f} was exported "
+            f"against a {expected:.2f}-channel trend")
+
+
+def test_the_refit_still_accounts_for_every_line(eu152):
+    """The guard moved to a second pass; the arithmetic must survive it."""
+    counts, lines, _outcome = eu152
+    cal = C.Calibration(kind="linear", a=0.0, b=0.6249)
+    refit = auto_calibrate.refit_source_lines(
+        channel_indices(len(counts)), counts, lines, cal)
+    total = (refit.outside + refit.invisible + refit.blended + refit.skipped
+             + refit.failed + refit.runaway + refit.excluded + len(refit.results))
+    assert total == len(lines)
+    assert refit.runaway >= 1, "the 674.64/678.62 stray is still supposed to be caught"

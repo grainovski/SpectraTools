@@ -1155,7 +1155,14 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         stamp = datetime.now().isoformat(timespec="seconds")
         for result in outcome.results:
             result.timestamp = stamp
-            self.fit_controller._commit_result(active, result)
+            # NOT logged yet. If the review is accepted, every one of
+            # these is replaced by a refit of the same peak, and logging
+            # both would put two records of each line in the spectrum's
+            # `_fits.jsonl` -- the same double count the in-memory list
+            # goes to some trouble to avoid, in the file the HowTo tells
+            # people to process with other tools. Logged below, once it
+            # is known which pass the user is keeping.
+            self.fit_controller._commit_result(active, result, log=False)
         self._plot_data(preserve_view=True)
         summary = outcome.summary(existing, dialog.source_name())
         self.fit_controller._show_status_message(summary, 10000)
@@ -1174,6 +1181,9 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             status=summary, show_plot=False,
         )
         if calibration is None or dialog.source_lines is None:
+            # No refit is coming, so these fits are the ones being kept.
+            for result in outcome.results:
+                self.fit_controller.append_auto_log(active, result)
             return
         self._refit_for_caleneff(active, dialog, outcome, calibration)
 

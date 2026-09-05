@@ -476,3 +476,55 @@ def test_picking_nothing_clears_the_selection(qapp, tmp_path):
     assert dialog.table.selectionModel().hasSelection()
     dialog._live_plot.pointPicked.emit(-1)
     assert not dialog.table.selectionModel().hasSelection()
+
+
+
+# --- a half-typed energy is not an exception ----------------------------
+
+
+def test_a_typo_in_an_energy_cell_does_not_break_the_live_plot(qapp, tmp_path):
+    """export_points runs from itemChanged, on every keystroke. Raising
+    there reports nothing -- the packaged executable is built --windowed
+    and has no stderr -- and leaves the plot silently no longer following
+    the table. The typo is still named, by the calibration itself."""
+    window, _ = _window(tmp_path, centres=(120.0, 300.0, 470.0))
+    dialog = _live_dialog(window, tmp_path)
+    dialog.table.item(0, ENERGY).setText("300")
+    dialog.table.item(1, ENERGY).setText("840")
+    plot = dialog._live_plot
+    assert plot is not None and plot._calibration is not None
+
+    dialog.table.item(2, ENERGY).setText("12a")
+
+    assert dialog._live_plot is plot, "the plot was taken down"
+    assert len(dialog.export_points()) == 2, "the two good rows still plot"
+    assert dialog.rows_with_energy() == [0, 1]
+    assert "not a number" in plot.summary_label.text()
+
+
+def test_the_typo_is_forgiven_as_soon_as_it_is_corrected(qapp, tmp_path):
+    window, _ = _window(tmp_path, centres=(120.0, 300.0, 470.0))
+    dialog = _live_dialog(window, tmp_path)
+    dialog.table.item(0, ENERGY).setText("300")
+    dialog.table.item(1, ENERGY).setText("840")
+    dialog.table.item(2, ENERGY).setText("12a")
+    dialog.table.item(2, ENERGY).setText("1300")
+
+    assert len(dialog.export_points()) == 3
+    assert dialog._live_plot._calibration is not None
+
+
+def test_a_typo_row_keeps_the_pick_index_lined_up_with_the_table(qapp, tmp_path):
+    """rows_with_energy is what turns a clicked point back into a row, so
+    it has to drop exactly the rows export_points drops."""
+    window, _ = _window(tmp_path, centres=(120.0, 300.0, 470.0))
+    dialog = _live_dialog(window, tmp_path)
+    dialog.table.item(0, ENERGY).setText("300")
+    dialog.table.item(1, ENERGY).setText("not a number")
+    dialog.table.item(2, ENERGY).setText("1300")
+
+    rows = dialog.rows_with_energy()
+    assert rows == [0, 2]
+    assert len(dialog.export_points()) == len(rows)
+    dialog._live_plot.pointPicked.emit(1)
+    assert dialog.table.currentRow() == 2

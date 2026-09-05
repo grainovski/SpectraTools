@@ -392,9 +392,20 @@ class EnergyAssignDialog(QDialog):
         """The rows export_points reports, in that order -- so the Nth
         point drawn on the plot belongs to the Nth row here. The plot
         names a clicked point by its index, and this is what turns that
-        back into a row."""
+        back into a row.
+
+        A row holding something that is not a number does not count. Both
+        this and export_points are called on every keystroke, from a Qt
+        slot, where raising is not a way to report anything: the
+        traceback goes to a stderr the packaged executable does not have,
+        and the live plot silently stops following the table. The typo is
+        still reported -- _compute_calibration raises on it by design and
+        the reason reaches the status line and the plot's summary -- so
+        it is named where a user can act on it, and drawn as the fit
+        being momentarily impossible rather than as nothing happening.
+        """
         return [row for row in range(len(self._peaks))
-                if self._energy_text(row).strip()]
+                if _parse_energy(self._energy_text(row)) is not None]
 
     def export_points(self):
         """(channel, channel_err, area, area_err, energy) per assigned
@@ -405,7 +416,7 @@ class EnergyAssignDialog(QDialog):
             points.append((
                 peak.channel, peak.channel_err or 0.0,
                 peak.area, peak.area_err,
-                float(self._energy_text(row).strip()),
+                _parse_energy(self._energy_text(row)),
             ))
         return points
 

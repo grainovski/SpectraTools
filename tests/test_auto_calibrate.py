@@ -487,3 +487,49 @@ def test_summary_reports_every_count_the_status_line_needs():
     assert "none identified" in text
     assert refused.match.reason in text
     assert "no fits were on the spectrum before" in text
+
+
+# --- saying which way the peaks were lost --------------------------------
+
+
+def test_no_peaks_survived_says_which_way_they_went(monkeypatch):
+    """"Could not be fitted" reads as a solver failure and usually is
+    not: on a crowded spectrum the fits succeed and are then dropped for
+    landing somewhere other than the peak they were seeded on."""
+    x, y, _centres = _eight_line_spectrum()
+
+    def all_stray(fitted):
+        return [], len(fitted), 0
+
+    monkeypatch.setattr(auto_calibrate, "_settle", all_stray)
+    outcome = auto_calibrate.calibrate(x, y, load_sou(fixture_sou("eu152.sou")))
+
+    assert not outcome.match.ok
+    assert "whose fit strayed" in outcome.match.reason
+    assert outcome.fits.runaway > 0
+
+
+def test_the_reason_stays_short_when_there_is_nothing_to_add(monkeypatch):
+    """CONTROL: with no counts to report, the sentence is the plain one
+    and gains no trailing colon."""
+    x, y, _centres = _eight_line_spectrum()
+    monkeypatch.setattr(auto_calibrate, "_settle", lambda fitted: ([], 0, 0))
+    monkeypatch.setattr(peak_search, "reject_broad", lambda found, **k: (list(found), []))
+    outcome = auto_calibrate.calibrate(x, y, load_sou(fixture_sou("eu152.sou")))
+    assert outcome.match.reason.endswith("peaks found could be fitted")
+
+
+# --- the matcher's candidate lookup at the ends of the line list ---------
+
+
+def test_a_peak_predicted_below_every_line_still_matches_the_first(monkeypatch):
+    """The three candidates around the insertion point include one that
+    is out of range at each end of the array. Vectorising that lookup
+    must keep an out-of-range neighbour out of the running rather than
+    wrapping to the other end."""
+    result = match([10.0, 20.0, 30.0, 40.0, 50.0], [2.0] * 5, [100.0] * 5,
+                   [100.0, 200.0, 300.0, 400.0, 500.0])
+    assert result.ok
+    assigned = dict(result.pairs)
+    assert assigned[0] == pytest.approx(100.0)
+    assert assigned[4] == pytest.approx(500.0)

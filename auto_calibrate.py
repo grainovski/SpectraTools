@@ -239,20 +239,33 @@ def _inliers(channels, tolerances, energies, gain, offset):
 
     A negative tolerance means the peak is not to be matched at all.
     """
+    count = len(energies)
     predicted = offset + gain * channels
-    order = np.argsort(np.abs(predicted - energies[np.clip(
-        np.searchsorted(energies, predicted), 0, len(energies) - 1)]))
+    insertion = np.searchsorted(energies, predicted)
+    order = np.argsort(np.abs(
+        predicted - energies[np.clip(insertion, 0, count - 1)]))
+
+    # Every peak's three candidate lines and their distances, computed
+    # once for the whole array rather than per peak inside the loop
+    # below. This function runs thousands of times per match and was two
+    # thirds of the matcher's time, almost all of it in 130,000 scalar
+    # searchsorted calls. The candidates and the ordering are exactly
+    # what the scalar version produced -- an out-of-range neighbour is
+    # given an infinite distance rather than being skipped, which comes
+    # to the same thing under the minimum.
+    neighbours = np.stack([insertion - 1, insertion, insertion + 1])
+    inside = (neighbours >= 0) & (neighbours < count)
+    safe = np.clip(neighbours, 0, count - 1)
+    distances = np.where(inside, np.abs(energies[safe] - predicted), np.inf)
+
     taken_lines, pairs, total = set(), [], 0.0
     for k in order:
-        target = predicted[k]
-        j = int(np.searchsorted(energies, target))
         # nearest line, checking the neighbour on each side
         best_j, best_d = -1, float("inf")
-        for cand in (j - 1, j, j + 1):
-            if 0 <= cand < len(energies) and cand not in taken_lines:
-                d = abs(energies[cand] - target)
-                if d < best_d:
-                    best_j, best_d = cand, d
+        for row in range(3):
+            cand = int(safe[row, k])
+            if inside[row, k] and cand not in taken_lines and distances[row, k] < best_d:
+                best_j, best_d = cand, float(distances[row, k])
         if best_j < 0 or best_d > tolerances[k]:
             continue
         taken_lines.add(best_j)
@@ -688,8 +701,22 @@ def calibrate(x, counts, lines, sensitivity=peak_search.DEFAULT_SENSITIVITY,
                            variance=variance)
     peaks = [peak for _index, peak in fits.peaks]
     if not peaks:
+        # Say which way they were lost. "Could not be fitted" reads as a
+        # solver failure, and it usually is not: on a crowded spectrum
+        # the fits succeed and are then dropped for landing somewhere
+        # other than the peak they were seeded on.
+        why = ", ".join(
+            f"{count} {what}" for count, what in (
+                (fits.broad, "set aside as broad features"),
+                (fits.skipped, "with no clear background"),
+                (fits.failed, "that would not fit"),
+                (fits.runaway, "whose fit strayed"),
+                (fits.duplicate, "repeating another fit"),
+            ) if count
+        )
         return AutoCalibration(found, fits, MatchResult(
-            reason=f"none of the {len(found)} peaks found could be fitted"))
+            reason=(f"none of the {len(found)} peaks found could be fitted"
+                    + (f": {why}" if why else ""))))
     result = match([p.position for p in peaks], [p.fwhm for p in peaks],
                    [p.area for p in peaks],
                    [line.energy for line in lines],
@@ -802,6 +829,7 @@ def refit_source_lines(x, counts, lines, calibration,
             continue
         claims.setdefault(k, []).append(line)
 
+    fitted = []
     for k in sorted(claims):
         candidates = claims[k]
         line = max(candidates, key=lambda l: l.intensity)
@@ -820,18 +848,20 @@ def refit_source_lines(x, counts, lines, calibration,
         except (FitError, ValueError, RuntimeError):
             outcome.failed += 1
             continue
-        # The same judgement the identification pass applies before it
-        # trusts a fit, applied here before a fit is exported: a width far
-        # off the trend, a centroid that left the peak it was seeded on,
-        # or a non-positive area is a fit of something else.
-        fitted = result.peaks[0]
-        expected = float(widths[k])
-        if (not math.isfinite(fitted.fwhm) or fitted.fwhm > WIDTH_OUTLIER_RATIO * expected
-                or not math.isfinite(fitted.position)
-                or abs(fitted.position - photopeaks[k].channel) > REFIT_MAX_SHIFT_FWHM * expected
-                or not (fitted.area > 0.0)):
-            outcome.runaway += 1
-            continue
+        fitted.append((photopeaks[k], result, line))
+
+    # The same judgement the identification pass applies before it trusts
+    # a fit, applied here before a fit is EXPORTED -- and against the same
+    # trend it uses, the one through the FITTED widths. Judging against
+    # the search's widths instead, as this did, is 1.8 times looser: the
+    # search reads a width off a smoothed copy, which on a real Eu-152
+    # spectrum came out 5.03 channels where the fits say 2.83. Nothing
+    # wrong had reached an export, but this is the more consequential of
+    # the two paths and had the weaker gate.
+    kept, runaway, _duplicate = _settle([(seed, result) for seed, result, _l in fitted])
+    outcome.runaway += runaway
+    by_id = {id(result): line for _seed, result, line in fitted}
+    for result in kept:
         outcome.results.append(result)
-        outcome.pairs.append((fitted.position, line.energy))
+        outcome.pairs.append((result.peaks[0].position, by_id[id(result)].energy))
     return outcome

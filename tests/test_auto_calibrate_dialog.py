@@ -185,3 +185,37 @@ def test_run_passes_the_sensitivity_and_variance_through(qapp, counts, monkeypat
     assert seen["variance"] is variance
     assert seen["lines"] is dialog.source_lines
     assert dialog.outcome is not None
+
+
+# --- an unexpected failure has somewhere to go --------------------------
+
+
+def test_an_unexpected_failure_reaches_the_status_line(qapp, counts, monkeypatch):
+    """Every failure the pipeline is designed to have comes back as a
+    reason. This is the one it is not designed to have: raising out of a
+    Qt slot prints to a stderr the packaged executable does not have and
+    leaves Run looking as though it did nothing."""
+    dialog = AutoCalibrateDialog(None, counts)
+    dialog.load_source(fixture_sou("eu152.sou"))
+
+    def boom(*args, **kwargs):
+        raise MemoryError("not enough memory to fit")
+
+    monkeypatch.setattr(auto_calibrate, "calibrate", boom)
+    dialog._on_run()
+
+    assert dialog.outcome is None
+    assert dialog.result() != QDialog.DialogCode.Accepted
+    assert "MemoryError" in dialog.status.text()
+    assert "not enough memory" in dialog.status.text()
+
+
+def test_the_wait_cursor_is_restored_even_when_the_run_raises(qapp, counts, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+
+    dialog = AutoCalibrateDialog(None, counts)
+    dialog.load_source(fixture_sou("eu152.sou"))
+    monkeypatch.setattr(auto_calibrate, "calibrate",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+    dialog._on_run()
+    assert QApplication.overrideCursor() is None

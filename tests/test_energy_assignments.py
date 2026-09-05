@@ -163,3 +163,14 @@ def test_a_tight_doublet_is_reduced_but_not_guaranteed():
 
     rate = wrong / total
     assert rate < 0.02, f"misassignment at 0.8 x FWHM rose to {rate:.2%}"
+
+
+
+def test_restore_returns_plain_int_row_numbers():
+    """They index Qt rows and get compared against range(); numpy's
+    int64 works until something asks for an exact type."""
+    peaks = [(100.0, 4.0), (300.0, 4.0)]
+    out = restore(EnergyAssignments("s.sou", ((100.0, 121.78), (300.0, 344.28))), peaks)
+    assert out
+    for row in out:
+        assert type(row) is int

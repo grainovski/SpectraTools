@@ -415,3 +415,58 @@ def test_with_nothing_unticked_that_line_is_refitted(qapp, tmp_path, monkeypatch
     _auto, _assign = _run_and_accept(window, monkeypatch, source)
     energies = [e for _c, e in active.energy_assignments.pairs]
     assert any(abs(e - 344.2785) < 1e-6 for e in energies)
+
+
+# --- the fit log gets one record per fit the user keeps ------------------
+
+
+def _log_records(active):
+    import fit_export
+
+    path = fit_export.auto_log_path(active.path)
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as handle:
+        return [line for line in handle.read().splitlines() if line.strip()]
+
+
+def test_the_fit_log_records_each_refitted_line_once(qapp, tmp_path, monkeypatch):
+    """The identification pass is replaced wholesale by the refit, so
+    logging both would put two records of every line in the file the
+    HowTo tells people to process with other tools -- the same double
+    count the in-memory list goes to some trouble to avoid."""
+    source = _write_sou(tmp_path, EIGHT_LINES, "eight.sou")
+    window, active = _window(tmp_path, source)
+    _auto, _assign = _run_and_accept(window, monkeypatch, source)
+
+    records = _log_records(active)
+    assert records, "nothing was logged at all"
+    assert len(records) == len(active.fits)
+
+
+def test_cancelling_the_review_still_logs_the_fits_that_are_kept(qapp, tmp_path, monkeypatch):
+    """The other half: with no refit coming, the identification pass IS
+    what the user keeps, so it must reach the log -- once."""
+    source = _write_sou(tmp_path, EIGHT_LINES, "eight.sou")
+    window, active = _window(tmp_path, source)
+    _auto, _assign = _run(window, monkeypatch, source)      # cancels the review
+
+    assert active.fits, "the fits should have been kept"
+    assert len(_log_records(active)) == len(active.fits)
+
+
+def test_a_hand_fit_made_before_the_run_is_logged_once_and_kept(qapp, tmp_path, monkeypatch):
+    """CONTROL: the run must not disturb what was already there. A fit
+    committed by hand goes through the ordinary path and is logged by
+    it, so the count includes it exactly once."""
+    source = _write_sou(tmp_path, EIGHT_LINES, "eight.sou")
+    window, active = _window(tmp_path, source)
+    hand = _hand_fit(active, (121.7817 - 12.5) / 0.40)
+    active.fits.append(hand)
+    window.fit_controller.append_auto_log(active, hand)
+    before = len(_log_records(active))
+    assert before == 1
+
+    _auto, _assign = _run_and_accept(window, monkeypatch, source)
+    assert active.fits[0] is hand
+    assert len(_log_records(active)) == len(active.fits)

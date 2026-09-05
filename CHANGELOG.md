@@ -4,6 +4,65 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [5.2.1] - unreleased
+
+### Fixed
+
+- **A half-typed energy in the Calibrate dialog stopped the live plot
+  following the table.** `export_points` runs from the table's
+  `itemChanged` signal, on every keystroke, and raised on a cell holding
+  something that is not a number. Raising there reports nothing: the
+  traceback goes to a stderr the packaged executable does not have, and
+  the plot silently stops updating until the typo is fixed. Rows that do
+  not parse are now simply not plotted, and the typo is still named --
+  the calibration itself refuses it, and the reason reaches the status
+  line and the plot's summary, which is where it can be acted on.
+
+- **The `_fits.jsonl` log recorded every automatically calibrated line
+  twice.** An automatic run commits the identification pass, then
+  replaces all of it with a refit of the same peaks. Both passes were
+  logged, so the file the HowTo tells people to process with other tools
+  carried two records of every line -- exactly the double count the
+  in-memory fit list goes to some trouble to avoid. The identification
+  pass is now logged only if the review is cancelled and those fits are
+  the ones being kept; otherwise the refit is logged, once. Measured on
+  a synthetic Eu-152 run: 66 records for 33 fits before, 33 after.
+
+- **The refit judged a fit against a looser rule than the identification
+  pass did**, though both describe themselves as applying "the same
+  judgement". The refit measured each fitted width and shift against the
+  trend through the SEARCH's widths, which are read off a smoothed copy
+  and come out about 1.8 times wider -- 5.03 channels against 2.83 at
+  channel 551 of a real Eu-152 spectrum. Both now use the trend through
+  the fitted widths. Nothing wrong had reached an export, but the export
+  is the more consequential of the two paths and had the weaker gate.
+
+- **An unexpected failure during a run had nowhere to go.** Every
+  failure the automatic pipeline is designed to have comes back as a
+  reason; anything else raised out of a Qt slot, where it printed to a
+  stderr the windowed executable does not have and left Run looking as
+  though it had done nothing. It now reaches the dialog's status line,
+  and the wait cursor is restored either way.
+
+- **"None of the peaks found could be fitted" now says which way they
+  went.** It reads as a solver failure and usually is not: on a crowded
+  spectrum the fits succeed and are then dropped for landing somewhere
+  other than the peak they were seeded on. The reason names the counts.
+
+- **`restore` returned numpy integers as row numbers**, where Qt and
+  `range()` comparisons want a Python `int`.
+
+### Changed
+
+- **The matcher's inlier search computes its candidate lines for the
+  whole array at once** instead of one scalar `searchsorted` per peak
+  inside a loop that runs thousands of times per match. Verified to
+  produce byte-identical results -- same pairs, same gains, same
+  residuals -- across the real Eu-152 spectrum and forty synthetic ones
+  covering five nuclides. Worth about a tenth of the matching time,
+  0.377 s to 0.334 s; the profiler had suggested rather more, which the
+  wall clock did not bear out.
+
 ## [5.2.0] - 2026-09-05
 
 ### Added

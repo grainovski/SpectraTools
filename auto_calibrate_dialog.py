@@ -197,6 +197,15 @@ class AutoCalibrateDialog(QDialog):
                 channel_indices(len(counts)), counts, self.source_lines,
                 sensitivity=self.sensitivity.value(), variance=self._variance,
             )
+        except Exception as exc:  # noqa: BLE001 -- see below
+            # Every failure the pipeline is designed to have comes back as
+            # a MatchResult carrying its reason; this is for the one it is
+            # not designed to have. Raising out of a Qt slot would print a
+            # traceback to a stderr the packaged executable does not have
+            # (it is built --windowed) and leave the dialog looking as
+            # though Run did nothing at all.
+            self.status.setText(f"The run failed: {type(exc).__name__}: {exc}")
+            return
         finally:
             QApplication.restoreOverrideCursor()
         if not outcome.results:

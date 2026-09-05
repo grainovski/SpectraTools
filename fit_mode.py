@@ -1439,7 +1439,23 @@ class FitModeController(QObject):
         self._redraw_progress()
         self.main_window._update_fit_mode_availability()
 
-    def _commit_result(self, active, result):
+    def append_auto_log(self, active, result):
+        """Write one fit to the spectrum's `_fits.jsonl`, reporting a
+        failure without invalidating the fit itself.
+
+        Separate from _commit_result because the automatic calibration
+        commits a pass it may be about to throw away: it logs only once
+        it knows which fits the user is keeping. See
+        main_window._open_auto_calibrate_dialog.
+        """
+        calibration = (self.main_window._calibration
+                       if self.main_window._calibration_active else None)
+        try:
+            fit_export.append_auto_log(active.path, result, calibration)
+        except OSError as exc:
+            self._show_status_message(f"Could not write fit log: {exc}", 5000)
+
+    def _commit_result(self, active, result, log=True):
         """Shared by run_fit/run_integration. Re-fitting/re-integrating
         the exact same marks (e.g. after toggling a checkbox) is a
         supported workflow, not a mistake -- but drawing every attempt
@@ -1458,11 +1474,8 @@ class FitModeController(QObject):
             ):
                 earlier.visible = False
         active.fits.append(result)
-        calibration = self.main_window._calibration if self.main_window._calibration_active else None
-        try:
-            fit_export.append_auto_log(active.path, result, calibration)
-        except OSError as exc:
-            self._show_status_message(f"Could not write fit log: {exc}", 5000)
+        if log:
+            self.append_auto_log(active, result)
 
     def run_fit(self):
         if not self.state.ready_to_fit():
