@@ -411,12 +411,15 @@ def match(peak_channels, peak_fwhms, peak_weights, line_energies,
                     f"too few of its lines were found"),
             considered=considered, unusable=unusable)
 
-    def scatter_of(result):
-        if intensity_of is None or not result.pairs:
+    def scatter_of_pairs(pairs):
+        if intensity_of is None or not pairs:
             return None, None
-        idx = [k for k, _e in result.pairs]
-        e = [en for _k, en in result.pairs]
+        idx = [k for k, _e in pairs]
+        e = [en for _k, en in pairs]
         return efficiency_scatter(e, weights[idx], [intensity_of[en] for en in e])
+
+    def scatter_of(result):
+        return scatter_of_pairs(result.pairs)
 
     best_scatter, best_residuals = scatter_of(best)
 
@@ -465,7 +468,28 @@ def match(peak_channels, peak_fwhms, peak_weights, line_energies,
         limit = max(EFFICIENCY_SUSPECT_SIGMA * best_scatter, EFFICIENCY_SUSPECT_FLOOR)
         best.suspect = [pair for pair, r in zip(best.pairs, best_residuals)
                         if np.isfinite(r) and abs(r) > limit]
-        best.efficiency_scatter = best_scatter
+        # Report the scatter of the curve that SURVIVES, not the one the
+        # doubted points distorted. A suspect point is already kept out
+        # of the calibration fit and out of the export -- it opens
+        # unticked -- so a number computed with it in describes a curve
+        # nothing downstream uses.
+        #
+        # This is not cosmetic. On a real Eu-152 spectrum one peak in a
+        # crowded triplet was flagged suspect, correctly, and still
+        # carried the reported scatter from 0.045 to 0.078 on its own --
+        # which is what made a better-fitting peak shape look worse than
+        # the one it would replace.
+        #
+        # Deliberately NOT iterated: dropping a point lowers the scatter,
+        # which lowers the limit, which can flag another. One pass is
+        # enough to stop a known-bad point inflating the number, and
+        # chasing the sequence risks trimming a spectrum down to whatever
+        # happens to be self-consistent.
+        kept = [pair for pair in best.pairs if pair not in best.suspect]
+        kept_scatter, _kept_residuals = scatter_of_pairs(kept)
+        best.efficiency_scatter = (
+            best_scatter if kept_scatter is None else kept_scatter
+        )
     return best
 
 

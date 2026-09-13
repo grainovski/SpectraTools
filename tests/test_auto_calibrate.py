@@ -533,3 +533,43 @@ def test_a_peak_predicted_below_every_line_still_matches_the_first(monkeypatch):
     assigned = dict(result.pairs)
     assert assigned[0] == pytest.approx(100.0)
     assert assigned[4] == pytest.approx(500.0)
+
+
+def test_the_reported_scatter_excludes_the_points_it_calls_suspect():
+    """A suspect point is removed from the calibration fit and from the
+    export, so the scatter that is reported alongside it must describe
+    the curve that survives -- not the one the bad point distorted.
+
+    Measured on the real Eu-152 spectrum: one peak in a crowded triplet
+    was flagged suspect, correctly, and yet still counted in the number.
+    It alone carried the scatter from 0.045 to 0.078, which is what made
+    a better-fitting peak shape look worse than it was.
+    """
+    channels, fwhms, weights, energies, intensities = _ra226_reference_peaks()
+    # One peak whose AREA is far off the efficiency curve while its
+    # position is exactly right, so it is assigned and then doubted.
+    strayed = len(channels)
+    channels.append(1729.595 / 0.35)
+    fwhms.append(true_fwhm(channels[-1]))
+    # 4x, not 40x: enough to be doubted, not enough to trip the hard
+    # EFFICIENCY_MAX_SCATTER gate, which refuses the whole assignment
+    # before suspects are ever computed.
+    weights.append(float(np.median(weights)) * 4.0)
+    energies = list(energies) + [1729.595]
+    intensities = list(intensities) + [float(np.median(intensities))]
+
+    result = match(channels, fwhms, weights, energies, intensities)
+    assert result.ok, result.reason
+    assert any(k == strayed for k, _e in result.pairs), "the probe was not assigned"
+    assert result.suspect, "an area 4x off the curve should be suspect"
+
+    kept = [(k, e) for k, e in result.pairs if (k, e) not in result.suspect]
+    rms_kept, _r = auto_calibrate.efficiency_scatter(
+        [e for _k, e in kept],
+        [weights[k] for k, _e in kept],
+        [intensities[energies.index(e)] for _k, e in kept],
+    )
+    assert result.efficiency_scatter == pytest.approx(rms_kept, rel=1e-9), (
+        f"reported {result.efficiency_scatter:.4f} but the surviving points "
+        f"scatter by {rms_kept:.4f}"
+    )
