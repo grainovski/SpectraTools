@@ -4,6 +4,44 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [5.2.2] - 2026-09-14
+
+### Fixed
+
+- **Automatic calibration reported an efficiency scatter that included
+  the points it had just rejected.** A peak whose area does not sit on
+  the efficiency curve is flagged suspect, left out of the calibration
+  fit and out of the CalEnEff export, and opens unticked in the dialog.
+  The scatter printed beside it, however, was computed before suspects
+  were known and never recomputed, so the number described a curve
+  nothing downstream uses. It now describes the points that survive.
+
+  This is not cosmetic. On a real Eu-152 spectrum a single peak in the
+  crowded 674.64 / 678.62 / 688.67 keV triplet is flagged, correctly,
+  and on its own carried the reported scatter from 0.045 to 0.078. That
+  inflated figure was the whole evidence against fitting the automatic
+  pass with the full peak shape; measured again with the suspect
+  excluded it reads 0.049 against 0.045, while identifying 36 lines
+  instead of 33 and cutting median reduced chi-squared from 6.6 to 1.6.
+  The shape itself is unchanged and still off by default -- that choice
+  now needs deciding on evidence rather than on an artifact.
+
+  The hard rejection threshold still sees the uncleaned scatter, which
+  is the conservative direction: a genuinely mispaired assignment should
+  fail on all of its points, not on the ones left after a trim.
+
+### Internal
+
+- **The test suite could no longer finish on one of the development
+  machines**, dying at 52% of a run with a Windows access violation and
+  the process holding 3.4 GB. No leak in the application: a matrix
+  panel releases its decoded matrix when it closes, and closing the main
+  window closes its panels first. Nothing ran those handlers, because
+  one Qt application serves the whole session and the tests never closed
+  what they opened -- one file alone opens 75 panels and closes none,
+  each keeping an 8192x8192 matrix reachable. Tests now close their
+  windows at teardown; the suite completes, 1521 passed.
+
 ## [5.2.1] - 2026-09-05
 
 ### Fixed
