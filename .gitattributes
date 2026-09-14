@@ -17,3 +17,10 @@
 # two identical datasets as different -- which it did, costing a session.
 # The parser splits on whitespace, so neither ending changes any result.
 *.sou text eol=lf
+
+# Real instrument data used as a test fixture. Git was treating it as
+# text: stored LF, checked out CRLF, so the file's bytes differed by
+# platform (52781 bytes in a fresh clone against 36231 here) even though
+# git reported the tree clean. Detector output should round-trip
+# untouched, so take it out of conversion entirely.
+*.lzs -text
