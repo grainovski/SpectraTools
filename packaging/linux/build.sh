@@ -14,6 +14,12 @@ mkdir -p "$BUILD_DIR"
 # the build with ModuleNotFoundError deep in PyInstaller's analysis. A glob
 # can't go stale the same way.
 cp "$ROOT_DIR"/*.py "$ROOT_DIR"/requirements.txt "$ROOT_DIR"/requirements-dev.txt "$BUILD_DIR/"
+
+# The .sou calibration sources are packaged with the app from 5.2.3.
+# This build does NOT use packaging/windows/SpectraTools.spec -- it calls
+# PyInstaller directly below -- so the directory has to be staged here
+# and declared there, separately from the Windows spec's datas entry.
+cp -a "$ROOT_DIR/sources" "$BUILD_DIR/"
 cd "$BUILD_DIR"
 
 # Build-host prerequisites, installed unconditionally every run (dnf install
@@ -110,7 +116,7 @@ echo "Stamped build_info.py: VERSION=$VERSION BUILD_DATE=$BUILD_DATE"
 # build.ps1. uproot's awkward_cpp loads its kernel library through ctypes,
 # which PyInstaller's analysis cannot see, so the app builds and then dies
 # at import without this.
-.venv/bin/python3 -m PyInstaller --noconfirm --onedir --windowed --collect-all awkward_cpp --name SpectraTools main.py
+.venv/bin/python3 -m PyInstaller --noconfirm --onedir --windowed --collect-all awkward_cpp --add-data "sources:sources" --name SpectraTools main.py
 
 # Hand-off point for build_deb.sh (run separately, on the Ubuntu-24.04 WSL
 # host): copy the PyInstaller output to the repo's own (gitignored) output

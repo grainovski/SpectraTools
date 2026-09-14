@@ -14,11 +14,20 @@ _icon = os.path.join(_root, 'assets', 'icon.ico')
 
 datas_awk, binaries_awk, hiddenimports_awk = collect_all('awkward_cpp')
 
+# The .sou calibration sources ship with the app as of 5.2.3. Without
+# them the calibration dialogs were present but arrived with no data to
+# work on, so a new install could not calibrate until the user found
+# source files of their own. bundled_sources.py locates this directory
+# at runtime under sys._MEIPASS; the target name here, the --add-data
+# flag in packaging/linux/build.sh, and bundled_sources.DIRECTORY_NAME
+# must all agree, and tests/test_bundled_sources.py checks that they do.
+_sources = [(os.path.join(_root, 'sources'), 'sources')]
+
 a = Analysis(
     [os.path.join(_root, 'main.py')],
     pathex=[_root],
     binaries=binaries_awk,
-    datas=datas_awk,
+    datas=datas_awk + _sources,
     hiddenimports=hiddenimports_awk,
     hookspath=[],
     hooksconfig={},

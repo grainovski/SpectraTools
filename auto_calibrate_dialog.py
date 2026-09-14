@@ -32,6 +32,7 @@ import auto_calibrate
 import peak_search
 from histogram_io import ParseError
 from peak_fit import channel_indices
+from bundled_sources import bundled_sources_dir
 from sou_io import load_sou
 
 #: The spin box's range, in sigma above the local continuum. Below two
@@ -152,7 +153,12 @@ class AutoCalibrateDialog(QDialog):
     # --- source loading ---------------------------------------------------
 
     def _on_load_source_clicked(self):
-        directory = self._settings.last_folder() if self._settings else ""
+        directory = self._settings.last_source_folder() if self._settings else ""
+        if not directory:
+            # Nothing remembered: start at the sources packaged with
+            # the app, so a fresh install can calibrate without the
+            # user first having to find source files of their own.
+            directory = bundled_sources_dir() or ""
         path, _ = QFileDialog.getOpenFileName(
             self, "Load Source", directory, "Source files (*.sou);;All files (*)"
         )
@@ -172,7 +178,7 @@ class AutoCalibrateDialog(QDialog):
         self._source_path = path
         self.source_label.setText(f"{os.path.basename(path)}: {len(lines)} lines")
         if self._settings is not None:
-            self._settings.set_last_folder(os.path.dirname(path))
+            self._settings.set_last_source_folder(os.path.dirname(path))
         self.status.setText("")
         self._update_run_availability()
         return True

@@ -407,7 +407,10 @@ minimum whenever you can.</p>
 table, press <b>Load source...</b> and pick a <code>.sou</code> file: a
 plain-text list of one nuclide's lines, one per row, as four numbers --
 energy in keV, its error, relative intensity, its error -- with no
-header. Type the energies of <b>two</b> peaks you recognise, then press
+header. Ten of these ship with SpectraTools -- Am-241, Am-243, Ba-133,
+Co-56, Eu-152, Na-24, Ra-226, Se-75, Ta-182 and Y-88 -- and the dialog
+opens on them until you load one of your own.
+Type the energies of <b>two</b> peaks you recognise, then press
 <b>Suggest remaining</b>. A straight line through those two anchors
 predicts where every other peak falls, and each blank row is filled with
 the source line nearest that prediction -- but only when that line is
@@ -1079,7 +1082,11 @@ reported.</p>
 
 <h3>Assigning energies from a source file</h3>
 <p>A <code>.sou</code> file describes one calibration nuclide's known
-lines. It is plain text with no header: one line per gamma, four
+lines. Ten come with the program, covering the common calibration
+nuclides, so the first calibration needs no files of your own; the
+<b>Load source...</b> dialog starts there and afterwards remembers
+wherever you last took a source from.
+It is plain text with no header: one line per gamma, four
 whitespace-separated numbers each -- <b>energy in keV</b>, the
 uncertainty on that energy, the <b>relative intensity</b>, and its
 uncertainty. The intensity scale is per-file and not comparable between

@@ -4,6 +4,43 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [5.2.3] - 2026-09-14
+
+### Added
+
+- **The calibration source files now ship with the program.** Both
+  calibration dialogs ask for a `.sou` file naming a nuclide's known gamma
+  lines, and until now the packages contained none: the feature was
+  installed but arrived with no data to work on, so a new installation
+  could not calibrate at all until the user found source files elsewhere.
+  Ten are now included -- Am-241, Am-243, Ba-133, Co-56, Eu-152, Na-24,
+  Ra-226, Se-75, Ta-182 and Y-88 -- rebuilt from evaluated ENSDF data in
+  September 2026.
+
+  Packaging them is only half of it, so **Load source...** now opens on
+  them. Previously it opened wherever a spectrum was last loaded from,
+  which is never where these live; bundled files nobody can find would
+  have left the feature exactly as unusable as before.
+
+### Fixed
+
+- **Loading a source file no longer changes where Open Spectrum starts.**
+  The two dialogs shared one remembered folder, so picking a `.sou` sent
+  the next spectrum browse to the nuclide data instead of the spectra. The
+  source folder is now remembered separately, and once you load a source
+  of your own the dialog returns there rather than to the shipped files.
+
+### Internal
+
+- The `.sou` files have one tracked home, `sources/`, instead of being
+  split between `tests/fixtures/` and ten untracked copies at the
+  repository root. Untracked files do not travel in git, which had left
+  one machine running the application against the pristine 2018 originals
+  while its tests validated against the 2026 ENSDF rebuild, with nothing
+  to indicate the two disagreed. The 2018 originals are tracked too, in
+  `assets/`, and `*.sou` is pinned to LF so a byte comparison between a
+  checkout and an archive answers the question actually being asked.
+
 ## [5.2.2] - 2026-09-14
 
 ### Fixed

@@ -39,6 +39,12 @@ class _Settings:
     def set_last_folder(self, folder):
         self.remembered.append(folder)
 
+    def last_source_folder(self):
+        return self.folder
+
+    def set_last_source_folder(self, folder):
+        self.remembered.append(folder)
+
 
 # --- the sensitivity control and its live count ------------------------
 

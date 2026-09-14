@@ -44,6 +44,7 @@ from calibration_plot_dialog import CalibrationPlotDialog
 from calibration import CalibrationError
 from energy_assignments import restore
 from histogram_io import ParseError
+from bundled_sources import bundled_sources_dir
 from sou_io import load_sou, match_line
 
 #: Background for a suggested energy cell. Translucent amber: it blends
@@ -436,7 +437,12 @@ class EnergyAssignDialog(QDialog):
     # --- source loading ---------------------------------------------------
 
     def _on_load_source_clicked(self):
-        directory = self._settings.last_folder() if self._settings else ""
+        directory = self._settings.last_source_folder() if self._settings else ""
+        if not directory:
+            # Nothing remembered: start at the sources packaged with
+            # the app, so a fresh install can calibrate without the
+            # user first having to find source files of their own.
+            directory = bundled_sources_dir() or ""
         path, _ = QFileDialog.getOpenFileName(
             self, "Load Source", directory, "Source files (*.sou);;All files (*)"
         )
@@ -468,7 +474,7 @@ class EnergyAssignDialog(QDialog):
         self._source_path = path
         self.source_label.setText(f"{self._source_name}: {len(lines)} lines")
         if self._settings is not None:
-            self._settings.set_last_folder(os.path.dirname(path))
+            self._settings.set_last_source_folder(os.path.dirname(path))
         self.status.setText(
             f"Cleared {dropped} suggestion(s) from the previous source."
             if dropped else ""

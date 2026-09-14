@@ -17,6 +17,21 @@ class Settings:
         self._settings.setValue("last_folder", folder)
         self._settings.sync()
 
+    def last_source_folder(self) -> str:
+        """Folder the last `.sou` was loaded from.
+
+        Kept apart from last_folder because they are different journeys:
+        loading a source used to overwrite the spectrum folder, so the
+        next Open Spectrum started wherever the nuclide data lived. It
+        also lets an install with no history start at the sources that
+        ship with the app."""
+        value = self._settings.value("last_source_folder", "")
+        return value if isinstance(value, str) else ""
+
+    def set_last_source_folder(self, folder: str) -> None:
+        self._settings.setValue("last_source_folder", folder)
+        self._settings.sync()
+
     def recent_files(self) -> list:
         value = self._settings.value("recent_files", [])
         if value is None:

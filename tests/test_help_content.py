@@ -1240,3 +1240,20 @@ def test_help_says_what_a_large_reduced_chi_squared_means_for_a_fit():
     assert "uncertainties</i> are optimistic" in kb
     # and the weak-peak case, which is the opposite advice
     assert "neighbouring peak that" in kb
+
+
+def test_help_says_the_source_files_ship_with_the_program():
+    """5.2.3 packages ten .sou files and opens the dialog on them. The help
+    told users to go and find a file, which was the only accurate reading
+    before and is wrong now.
+
+    The fragments are deliberately short and single-line: this file is
+    hand-wrapped HTML, so a sentence-length anchor spans a newline and
+    matches nothing, passing whatever the page actually says.
+    """
+    howto = build_howto_html()
+    kb = build_knowledge_database_html()
+    assert "Ten of these ship with SpectraTools" in howto
+    assert "Ten come with the program" in kb
+    for nuclide in ("Am-241", "Ba-133", "Eu-152", "Ra-226", "Y-88"):
+        assert nuclide in howto, nuclide
