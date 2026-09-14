@@ -13,7 +13,15 @@ packaging/windows/output/
 packaging/linux/output/
 packaging/linux/tools/
 .worktrees/
-assets/
+# Ignore the CONTENTS of assets/, not the directory itself: git cannot
+# re-include a file whose parent directory is excluded, and the .sou
+# originals below have to be tracked. icon.png/icon.ico stay ignored --
+# they are build artifacts, regenerated from main_window._app_icon_pixmap
+# by packaging/make_icon.py, which both build scripts call when missing.
+assets/*
+# The pristine 2018 calibration sources: irreplaceable input data,
+# derivable from nothing, and the 'before' side of the 2026 ENSDF audit.
+!assets/*.sou
 .superpowers/
 releases/
 build_info.py

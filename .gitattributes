@@ -8,3 +8,12 @@
 # required by the tooling that replaced it.
 *.sh text eol=lf
 *.desktop text eol=lf
+
+# Evaluated nuclear data, and the 2018 originals they were audited
+# against. Pin the line endings so a byte comparison between a checkout,
+# a migration archive and assets/ answers the question actually being
+# asked. Without this, core.autocrlf rewrites them on checkout while a
+# file copied straight out of an archive keeps LF, and `cmp` then reports
+# two identical datasets as different -- which it did, costing a session.
+# The parser splits on whitespace, so neither ending changes any result.
+*.sou text eol=lf
