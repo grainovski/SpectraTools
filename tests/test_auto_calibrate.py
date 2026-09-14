@@ -19,7 +19,7 @@ from auto_calibrate import MIN_INLIERS, MatchResult, expected_widths, match
 from peak_fit import FitError
 from sou_io import load_sou
 from synthetic_calibration import (
-    fixture_sou,
+    source_file,
     spectrum_from_source,
     true_fwhm,
     wrong_assignments,
@@ -47,12 +47,12 @@ WRONG_SOURCE = [
 
 
 def _lines(name):
-    lines = load_sou(fixture_sou(name))
+    lines = load_sou(source_file(name))
     return [line.energy for line in lines], [line.intensity for line in lines]
 
 
 def _search_match(spectrum_sou, offered_sou, offset, gain):
-    counts = spectrum_from_source(fixture_sou(spectrum_sou), offset, gain)
+    counts = spectrum_from_source(source_file(spectrum_sou), offset, gain)
     found = peak_search.search(counts)
     energies, intensities = _lines(offered_sou)
     result = match([p.channel for p in found], [p.fwhm for p in found],
@@ -62,7 +62,7 @@ def _search_match(spectrum_sou, offered_sou, offset, gain):
 
 def _pipeline(spectrum_sou, offset, gain):
     """search -> fit -> match, exactly as the dialog runs it."""
-    counts = spectrum_from_source(fixture_sou(spectrum_sou), offset, gain)
+    counts = spectrum_from_source(source_file(spectrum_sou), offset, gain)
     x = np.arange(len(counts), dtype=float)
     found = peak_search.search(counts)
     fitted = auto_calibrate.fit_found_peaks(x, counts, found)
@@ -127,7 +127,7 @@ def test_result_repr_names_the_outcome():
 
 def _ra226_reference_peaks(gain=0.35):
     """The twelve strongest Ra-226 lines as perfectly fitted peaks."""
-    lines = load_sou(fixture_sou("ra226.sou"))
+    lines = load_sou(source_file("ra226.sou"))
     strongest = sorted(lines, key=lambda line: -line.intensity)[:12]
     channels = [line.energy / gain for line in strongest]
     return (channels, [true_fwhm(c) for c in channels],
@@ -423,9 +423,9 @@ def test_settle_on_nothing():
 
 
 def test_calibrate_runs_search_fit_and_match_together():
-    counts = spectrum_from_source(fixture_sou("eu152.sou"), 12.5, 0.40)
+    counts = spectrum_from_source(source_file("eu152.sou"), 12.5, 0.40)
     x = np.arange(len(counts), dtype=float)
-    outcome = auto_calibrate.calibrate(x, counts, load_sou(fixture_sou("eu152.sou")))
+    outcome = auto_calibrate.calibrate(x, counts, load_sou(source_file("eu152.sou")))
     assert outcome.match.ok, outcome.match.reason
     assert len(outcome.results) == (outcome.fits.attempted - outcome.fits.failed
                                     - outcome.fits.runaway - outcome.fits.duplicate)
@@ -440,9 +440,9 @@ def test_calibrate_runs_search_fit_and_match_together():
 
 
 def test_calibrate_with_the_wrong_source_keeps_the_fits_and_gives_the_reason():
-    counts = spectrum_from_source(fixture_sou("eu152.sou"), 0.0, 0.25)
+    counts = spectrum_from_source(source_file("eu152.sou"), 0.0, 0.25)
     x = np.arange(len(counts), dtype=float)
-    outcome = auto_calibrate.calibrate(x, counts, load_sou(fixture_sou("ba133.sou")))
+    outcome = auto_calibrate.calibrate(x, counts, load_sou(source_file("ba133.sou")))
     assert not outcome.match.ok
     assert outcome.match.reason
     assert outcome.results, "the fits are kept even when nothing is identified"
@@ -452,7 +452,7 @@ def test_calibrate_with_the_wrong_source_keeps_the_fits_and_gives_the_reason():
 def test_calibrate_with_no_peaks_found_says_so():
     x = np.arange(500, dtype=float)
     flat = np.full(500, 20.0)
-    outcome = auto_calibrate.calibrate(x, flat, load_sou(fixture_sou("ba133.sou")),
+    outcome = auto_calibrate.calibrate(x, flat, load_sou(source_file("ba133.sou")),
                                        sensitivity=30.0)
     assert outcome.found == []
     assert outcome.results == []
@@ -461,9 +461,9 @@ def test_calibrate_with_no_peaks_found_says_so():
 
 
 def test_summary_reports_every_count_the_status_line_needs():
-    counts = spectrum_from_source(fixture_sou("eu152.sou"), 12.5, 0.40)
+    counts = spectrum_from_source(source_file("eu152.sou"), 12.5, 0.40)
     x = np.arange(len(counts), dtype=float)
-    outcome = auto_calibrate.calibrate(x, counts, load_sou(fixture_sou("eu152.sou")))
+    outcome = auto_calibrate.calibrate(x, counts, load_sou(source_file("eu152.sou")))
     text = outcome.summary(existing_fits=2, source_name="eu152.sou")
     assert f"{len(outcome.found)} peaks found" in text
     assert f"{outcome.fits.attempted} attempted" in text
@@ -482,7 +482,7 @@ def test_summary_reports_every_count_the_status_line_needs():
     if outcome.match.suspect:
         assert f"{len(outcome.match.suspect)} of them left out of the fit as suspect" in text
 
-    refused = auto_calibrate.calibrate(x, counts, load_sou(fixture_sou("ba133.sou")))
+    refused = auto_calibrate.calibrate(x, counts, load_sou(source_file("ba133.sou")))
     text = refused.summary(existing_fits=0, source_name="ba133.sou")
     assert "none identified" in text
     assert refused.match.reason in text
@@ -502,7 +502,7 @@ def test_no_peaks_survived_says_which_way_they_went(monkeypatch):
         return [], len(fitted), 0
 
     monkeypatch.setattr(auto_calibrate, "_settle", all_stray)
-    outcome = auto_calibrate.calibrate(x, y, load_sou(fixture_sou("eu152.sou")))
+    outcome = auto_calibrate.calibrate(x, y, load_sou(source_file("eu152.sou")))
 
     assert not outcome.match.ok
     assert "whose fit strayed" in outcome.match.reason
@@ -515,7 +515,7 @@ def test_the_reason_stays_short_when_there_is_nothing_to_add(monkeypatch):
     x, y, _centres = _eight_line_spectrum()
     monkeypatch.setattr(auto_calibrate, "_settle", lambda fitted: ([], 0, 0))
     monkeypatch.setattr(peak_search, "reject_broad", lambda found, **k: (list(found), []))
-    outcome = auto_calibrate.calibrate(x, y, load_sou(fixture_sou("eu152.sou")))
+    outcome = auto_calibrate.calibrate(x, y, load_sou(source_file("eu152.sou")))
     assert outcome.match.reason.endswith("peaks found could be fitted")
 
 

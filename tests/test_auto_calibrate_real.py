@@ -21,6 +21,7 @@ import calibration as C
 from peak_fit import channel_indices
 from sou_io import load_sou
 from spe_io import load_spe
+from synthetic_calibration import source_file
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 
@@ -28,7 +29,7 @@ FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 @pytest.fixture(scope="module")
 def eu152():
     counts = np.asarray(load_spe(os.path.join(FIXTURES, "eu152_real.spe")), dtype=float)
-    lines = load_sou(os.path.join(FIXTURES, "eu152.sou"))
+    lines = load_sou(source_file("eu152.sou"))
     outcome = auto_calibrate.calibrate(channel_indices(len(counts)), counts, lines)
     return counts, lines, outcome
 
@@ -168,7 +169,7 @@ def test_refit_puts_lines_the_calibration_places_off_the_end_outside(eu152):
 
 def test_refit_with_no_peaks_reports_every_line_invisible():
     flat = np.full(500, 30.0)
-    lines = load_sou(os.path.join(FIXTURES, "co56.sou"))
+    lines = load_sou(source_file("co56.sou"))
     cal = C.Calibration(kind="linear", a=0.0, b=10.0)
     refit = auto_calibrate.refit_source_lines(channel_indices(500), flat, lines, cal)
     assert refit.results == []
@@ -244,7 +245,7 @@ def test_an_unticked_line_still_claims_its_peak(eu152):
 
 def test_every_line_unticked_leaves_a_spectrum_with_no_peaks_accounted_for():
     flat = np.full(500, 30.0)
-    lines = load_sou(os.path.join(FIXTURES, "co56.sou"))
+    lines = load_sou(source_file("co56.sou"))
     cal = C.Calibration(kind="linear", a=0.0, b=10.0)
     refit = auto_calibrate.refit_source_lines(
         channel_indices(500), flat, lines, cal,

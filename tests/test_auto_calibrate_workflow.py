@@ -23,7 +23,7 @@ from energy_assign_dialog import EnergyAssignDialog
 from energy_assignments import EnergyAssignments
 from main_window import MainWindow
 from peak_fit import fit_peaks
-from synthetic_calibration import fixture_sou, spectrum_from_source
+from synthetic_calibration import source_file, spectrum_from_source
 
 ENERGY = EnergyAssignDialog.ENERGY_COLUMN
 SHORTCUT = "Ctrl+Shift+L"
@@ -230,7 +230,7 @@ def test_a_refused_identification_opens_the_dialog_unassigned_with_the_reason(
 ):
     source = _write_sou(tmp_path, EIGHT_LINES, "eight.sou")
     window, active = _window(tmp_path, source)
-    wrong = fixture_sou("am241.sou")
+    wrong = source_file("am241.sou")
     auto_dialogs, assign_dialogs = _run(window, monkeypatch, wrong)
     outcome = auto_dialogs[0].outcome
     assert not outcome.match.ok

@@ -20,12 +20,12 @@ from auto_calibrate_dialog import (
     AutoCalibrateDialog,
 )
 from sou_io import load_sou
-from synthetic_calibration import fixture_sou, spectrum_from_source
+from synthetic_calibration import source_file, spectrum_from_source
 
 
 @pytest.fixture(scope="module")
 def counts():
-    return spectrum_from_source(fixture_sou("eu152.sou"), 12.5, 0.40)
+    return spectrum_from_source(source_file("eu152.sou"), 12.5, 0.40)
 
 
 class _Settings:
@@ -91,7 +91,7 @@ def test_run_needs_a_source(qapp, counts):
 
 def test_loading_a_source_names_it_and_enables_run(qapp, counts):
     dialog = AutoCalibrateDialog(None, counts)
-    path = fixture_sou("eu152.sou")
+    path = source_file("eu152.sou")
     assert dialog.load_source(path)
     assert dialog.source_label.text() == f"eu152.sou: {len(load_sou(path))} lines"
     assert dialog.run_button.isEnabled()
@@ -101,7 +101,7 @@ def test_loading_a_source_names_it_and_enables_run(qapp, counts):
 
 def test_a_bad_source_is_reported_and_the_previous_one_kept(qapp, counts, tmp_path):
     dialog = AutoCalibrateDialog(None, counts)
-    assert dialog.load_source(fixture_sou("eu152.sou"))
+    assert dialog.load_source(source_file("eu152.sou"))
     bad = tmp_path / "bad.sou"
     bad.write_text("60 .1 1\n", encoding="utf-8")
     assert dialog.load_source(str(bad)) is False
@@ -113,12 +113,12 @@ def test_a_bad_source_is_reported_and_the_previous_one_kept(qapp, counts, tmp_pa
 def test_loading_remembers_the_folder_like_the_other_dialogs(qapp, counts):
     settings = _Settings()
     dialog = AutoCalibrateDialog(None, counts, settings=settings)
-    dialog.load_source(fixture_sou("eu152.sou"))
-    assert settings.remembered == [os.path.dirname(fixture_sou("eu152.sou"))]
+    dialog.load_source(source_file("eu152.sou"))
+    assert settings.remembered == [os.path.dirname(source_file("eu152.sou"))]
 
 
 def test_a_remembered_source_is_loaded_up_front(qapp, counts, tmp_path):
-    dialog = AutoCalibrateDialog(None, counts, source_path=fixture_sou("ba133.sou"))
+    dialog = AutoCalibrateDialog(None, counts, source_path=source_file("ba133.sou"))
     assert dialog.source_name() == "ba133.sou"
     assert dialog.run_button.isEnabled()
     # A path that no longer exists is simply not offered.
@@ -132,7 +132,7 @@ def test_a_remembered_source_is_loaded_up_front(qapp, counts, tmp_path):
 
 def test_run_fits_identifies_and_accepts(qapp, counts):
     dialog = AutoCalibrateDialog(None, counts)
-    dialog.load_source(fixture_sou("eu152.sou"))
+    dialog.load_source(source_file("eu152.sou"))
     dialog._on_run()
     outcome = dialog.outcome
     assert outcome is not None
@@ -145,7 +145,7 @@ def test_run_with_the_wrong_source_still_hands_back_the_fits(qapp, counts):
     """A refusal is a result, not an error: the fits are real and the
     caller opens them for assignment by hand with the reason on show."""
     dialog = AutoCalibrateDialog(None, counts)
-    dialog.load_source(fixture_sou("ba133.sou"))
+    dialog.load_source(source_file("ba133.sou"))
     dialog._on_run()
     outcome = dialog.outcome
     assert outcome is not None
@@ -158,7 +158,7 @@ def test_run_with_the_wrong_source_still_hands_back_the_fits(qapp, counts):
 def test_run_with_nothing_found_stays_open_and_says_so(qapp):
     flat = np.full(3000, 20.0)
     dialog = AutoCalibrateDialog(None, flat)
-    dialog.load_source(fixture_sou("eu152.sou"))
+    dialog.load_source(source_file("eu152.sou"))
     assert dialog.found_count() == 0
     dialog._on_run()
     assert dialog.outcome is None
@@ -178,7 +178,7 @@ def test_run_passes_the_sensitivity_and_variance_through(qapp, counts, monkeypat
     monkeypatch.setattr(auto_calibrate, "calibrate", spy)
     variance = 2.0 * np.maximum(counts, 1.0)
     dialog = AutoCalibrateDialog(None, counts, variance=variance)
-    dialog.load_source(fixture_sou("eu152.sou"))
+    dialog.load_source(source_file("eu152.sou"))
     dialog.sensitivity.setValue(7.5)
     dialog._on_run()
     assert seen["sensitivity"] == 7.5
@@ -196,7 +196,7 @@ def test_an_unexpected_failure_reaches_the_status_line(qapp, counts, monkeypatch
     Qt slot prints to a stderr the packaged executable does not have and
     leaves Run looking as though it did nothing."""
     dialog = AutoCalibrateDialog(None, counts)
-    dialog.load_source(fixture_sou("eu152.sou"))
+    dialog.load_source(source_file("eu152.sou"))
 
     def boom(*args, **kwargs):
         raise MemoryError("not enough memory to fit")
@@ -214,7 +214,7 @@ def test_the_wait_cursor_is_restored_even_when_the_run_raises(qapp, counts, monk
     from PySide6.QtWidgets import QApplication
 
     dialog = AutoCalibrateDialog(None, counts)
-    dialog.load_source(fixture_sou("eu152.sou"))
+    dialog.load_source(source_file("eu152.sou"))
     monkeypatch.setattr(auto_calibrate, "calibrate",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
     dialog._on_run()

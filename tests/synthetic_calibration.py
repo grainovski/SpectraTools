@@ -17,7 +17,8 @@ import numpy as np
 
 from sou_io import load_sou
 
-FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
+SOURCES = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sources")
 
 #: sigma = SIGMA_AT_ZERO + SIGMA_PER_CHANNEL * channel, in channels. The
 #: widening with channel matters: a rule that held every peak to one
@@ -27,9 +28,15 @@ SIGMA_AT_ZERO = 1.5
 SIGMA_PER_CHANNEL = 0.0012
 
 
-def fixture_sou(name):
-    """Path of one of the tracked sample sources in tests/fixtures."""
-    return os.path.join(FIXTURES, name)
+def source_file(name):
+    """Path of one of the calibration sources in the repository's sources/.
+
+    That directory is the one tracked home for all ten of them. They used
+    to sit untracked at the repository root as well, which is how a machine
+    that cannot carry untracked files ended up holding the 2018 originals
+    while the tests ran against the 2026 ENSDF rebuild.
+    """
+    return os.path.join(SOURCES, name)
 
 
 def true_fwhm(channel):
