@@ -4,6 +4,61 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [5.2.4] - 2026-09-15
+
+### Fixed
+
+- **The reduced chi-squared could report a wrong number instead of
+  refusing.** The calculation checked that the channel uncertainties
+  matched the number of points but never checked the energies. A shorter
+  energy list made the sum stop early while the divisor still used the
+  full count, so the result was not an error but a plausible value that
+  was simply too small. Mismatched inputs are now refused, which is what
+  the rest of the module already promised.
+
+- **The CalEnEff export could write a row CalEnEff refuses to load.** The
+  export documents that a row whose area error and intensity error are
+  both zero is useless -- the efficiency would carry no uncertainty at
+  all -- and gave that as its reason for skipping peaks with no matching
+  source line. It never applied the rule to the rows it did write. Such
+  rows are now skipped and counted like any other.
+
+- **A peak with a non-finite area was exported as the text "nan".**
+  CalEnEff reads the file with `np.loadtxt`, which turns that back into a
+  number and computes with it. The export now refuses and names the peak
+  and the field instead.
+
+- **The calibration plot's residual strip drew no error bars.** The strip
+  exists to show whether a point sits further off the line than its own
+  uncertainty allows, and without bars a 2-sigma outlier and a 0.2-sigma
+  one looked identical. Each point now carries its own uncertainty: the
+  centroid uncertainty converted to keV through the calibration's slope,
+  combined with the energy uncertainty the source file states -- the same
+  combination the reduced chi-squared is weighted with.
+
+- **The fitted coefficients could not be selected for copying.** The call
+  meant to make them selectable handed the label its own current setting
+  back, so it changed nothing.
+
+### Internal
+
+- The test suite no longer writes into the real per-user settings. Every
+  test that opened a dialog was writing to the installed application's
+  own stored settings, which put temporary test paths into the remembered
+  folders and the recent-files list. On this machine that sent the
+  installed application's **Load source...** dialog into a test directory
+  instead of the calibration sources shipped with it.
+
+  Fixing it also made the suite **eight times faster** -- a full run falls
+  from 16m15s to 2m08s on the machine this was measured on, 11.4x on a
+  controlled subset -- because each of those writes was committed to the
+  Windows registry one at a time. That accounts for a long-standing and
+  previously unexplained difference in suite duration between machines.
+
+- Nine defects parked during the v5.0.0 build are closed, including the
+  five user-visible ones above. A developer's absolute path is out of the
+  shipped source, and three tests that could not fail now can.
+
 ## [5.2.3] - 2026-09-14
 
 ### Added
