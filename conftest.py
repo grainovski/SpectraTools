@@ -11,8 +11,57 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import atexit
+import shutil
+import tempfile
+
 import pytest
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
+
+# --- keep the suite out of the user's real settings --------------------
+#
+# settings.Settings is QSettings(ORG_NAME, APP_NAME) with no injection
+# point, so every test that opens a dialog wrote to the developer's own
+# per-user store -- the registry on Windows, under
+# HKCU\SOFTWARE\PeakFinderFitting\SpectraTools.
+#
+# That is not hypothetical. It put pytest temp paths into last_folder,
+# last_source_folder and recent_files on this machine, and the stale
+# last_source_folder then sent the real application's "Load source..."
+# dialog into a pytest temp directory instead of the .sou files shipped
+# with it -- breaking a hand-verification of v5.2.3 that was supposed to
+# catch exactly what the tests cannot.
+#
+# Redirecting has to happen HERE, at import, before anything constructs a
+# Settings(). settings.py:10 is the ONLY QSettings construction in the
+# application, which is what makes one seam enough.
+#
+# QSettings.setDefaultFormat(IniFormat) looks like the obvious lever and
+# does NOT work: PySide6's two-argument QSettings(organization,
+# application) still resolves to NativeFormat, i.e. the registry on
+# Windows, even after the default reports Ini. Measured, not assumed --
+# the explicit four-argument form is the one that honours setPath. So the
+# constructor settings.py reaches for is replaced with that form.
+_SETTINGS_DIR = tempfile.mkdtemp(prefix="spectratools-qsettings-")
+QSettings.setPath(
+    QSettings.Format.IniFormat, QSettings.Scope.UserScope, _SETTINGS_DIR
+)
+
+import settings as _settings
+
+_REAL_QSETTINGS = _settings.QSettings
+
+
+def _isolated_qsettings(*args, **kwargs):
+    """QSettings(ORG, APP) -> an Ini file under the temp directory."""
+    return _REAL_QSETTINGS(
+        QSettings.Format.IniFormat, QSettings.Scope.UserScope, *args, **kwargs
+    )
+
+
+_settings.QSettings = _isolated_qsettings
+atexit.register(shutil.rmtree, _SETTINGS_DIR, True)
 
 
 @pytest.fixture(scope="session")
