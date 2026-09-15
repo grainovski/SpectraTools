@@ -12,7 +12,7 @@ import os
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -85,8 +85,11 @@ class CalibrationPlotDialog(QDialog):
 
         self.summary_label = QLabel()
         self.summary_label.setWordWrap(True)
+        # Selectable, so the fitted coefficients can be copied out of
+        # the window. The previous call handed the label its own
+        # current flags straight back and therefore changed nothing.
         self.summary_label.setTextInteractionFlags(
-            self.summary_label.textInteractionFlags()
+            Qt.TextInteractionFlag.TextSelectableByMouse
         )
         layout.addWidget(self.summary_label)
 
@@ -171,11 +174,19 @@ class CalibrationPlotDialog(QDialog):
             self.axes.plot(grid, calibration.apply(grid), "-", label="calibration")
             residuals = [e - calibration.apply(c) for c, e in zip(channels, energies)]
             self.residual_axes.axhline(0.0, linewidth=0.8)
-            self.residual_axes.errorbar(channels, residuals, fmt="o", capsize=3)
+            self.residual_axes.errorbar(
+                channels, residuals,
+                yerr=self._residual_errors(channels, errors, energies),
+                fmt="o", capsize=3,
+            )
             if left:
                 self.residual_axes.errorbar(
                     [p[0] for p in left],
                     [p[4] - calibration.apply(p[0]) for p in left],
+                    yerr=self._residual_errors(
+                        [p[0] for p in left], [p[1] for p in left],
+                        [p[4] for p in left],
+                    ),
                     fmt="o", capsize=3, markerfacecolor="none",
                 )
             # Scaled to the points the fit was made through, not to the
@@ -291,6 +302,30 @@ class CalibrationPlotDialog(QDialog):
             text += " (excluded from the fit)"
         return text
 
+    def _residual_errors(self, channels, channel_errors, energies):
+        """Each residual's own sigma, in keV.
+
+        The strip exists to show whether a point sits off the line by
+        more than it could. Without these bars a 2-sigma outlier and a
+        0.2-sigma one are drawn identically, which is the one
+        distinction the panel is for.
+
+        Same combination calibration_quality.reduced_chi_squared
+        weights with: the centroid uncertainty carried into keV through
+        the calibration's own slope, added in quadrature to what the
+        literature states about the line.
+        """
+        literature = self._literature_errors(energies)
+        out = []
+        for channel, sigma_ch, sigma_e in zip(channels, channel_errors, literature):
+            try:
+                slope = float(self._calibration.derivative(channel))
+                value = math.sqrt((float(sigma_ch) * slope) ** 2 + float(sigma_e) ** 2)
+            except (TypeError, ValueError):
+                value = 0.0
+            out.append(value if math.isfinite(value) else 0.0)
+        return out
+
     def _literature_errors(self, energies):
         """Each point's stated energy uncertainty, from the source lines
         it was assigned from, or zero where it came from nowhere -- a
@@ -333,8 +368,9 @@ class CalibrationPlotDialog(QDialog):
         summary = f"Wrote {len(rows)} rows to {os.path.basename(path)}"
         if skipped:
             summary += (
-                f" — skipped {skipped} peak(s) with no source line, so no "
-                f"intensity was available for them"
+                f" — skipped {skipped} peak(s): no matching source line, "
+                f"or no usable uncertainty on either the area or the "
+                f"intensity"
             )
         return summary
 

@@ -330,3 +330,59 @@ def test_no_source_loaded_leaves_every_uncertainty_at_zero(qapp):
     dialog = _dialog(qapp, calibration=Calibration(kind="linear", a=10.0, b=1.1),
                      lines=[])
     assert dialog._literature_errors([121.783, 344.276]) == [0.0, 0.0]
+
+
+# --- the residual strip has to show how big a residual IS --------------
+
+
+def _residual_yerr(dialog):
+    """The y error bar lengths drawn on the residual strip, if any."""
+    out = []
+    for container in dialog.residual_axes.containers:
+        # An errorbar container holds (line, caplines, barlinecols); the
+        # y bars are a LineCollection in the third slot.
+        bars = container[2]
+        if not bars:
+            continue
+        for collection in bars:
+            for segment in collection.get_segments():
+                out.append(abs(segment[1][1] - segment[0][1]))
+    return out
+
+
+def test_the_residual_strip_draws_y_error_bars(qapp):
+    """Without them a 2-sigma outlier and a 0.2-sigma one look identical,
+    which is the single distinction this strip exists to make. The values
+    were already in hand: the centroid sigma carried into keV by the
+    calibration's slope, plus the line's stated dE.
+    """
+    dialog = _dialog(qapp)
+    lengths = _residual_yerr(dialog)
+    assert lengths, "the residual strip drew no y error bars at all"
+    assert all(v > 0.0 for v in lengths)
+
+
+def test_a_bigger_centroid_uncertainty_draws_a_bigger_bar(qapp):
+    """Control: bars of a fixed size would satisfy the test above just as
+    well, and would say nothing true about any point."""
+    small = _dialog(qapp, points=[
+        (100.0, 0.01, 9000.0, 95.0, 121.783),
+        (300.0, 0.01, 4000.0, 63.0, 344.276),
+        (500.0, 0.01, 2000.0, 45.0, 566.0),
+    ])
+    large = _dialog(qapp, points=[
+        (100.0, 1.00, 9000.0, 95.0, 121.783),
+        (300.0, 1.00, 4000.0, 63.0, 344.276),
+        (500.0, 1.00, 2000.0, 45.0, 566.0),
+    ])
+    assert max(_residual_yerr(large)) > max(_residual_yerr(small)) * 10
+
+
+def test_the_bar_combines_the_centroid_and_the_literature_error(qapp):
+    """The same quadrature reduced_chi_squared weights with. A line with a
+    stated dE must draw a taller bar than the same point without one."""
+    with_de = _dialog(qapp, points=[(100.0, 0.05, 9000.0, 95.0, 121.783)],
+                      lines=[SourceLine(121.783, 5.0, 5000.0, 50.0)])
+    without = _dialog(qapp, points=[(100.0, 0.05, 9000.0, 95.0, 121.783)],
+                      lines=[SourceLine(121.783, 0.0, 5000.0, 50.0)])
+    assert max(_residual_yerr(with_de)) > max(_residual_yerr(without))

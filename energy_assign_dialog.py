@@ -148,9 +148,6 @@ class EnergyAssignDialog(QDialog):
         #: True while this dialog itself is writing cells, so the
         #: itemChanged handler does not mistake its own writes for edits.
         self._writing = False
-        #: Set by Clear so the caller knows to erase the spectrum's
-        #: stored record, not merely to skip writing a new one.
-        self.cleared = False
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
@@ -297,7 +294,6 @@ class EnergyAssignDialog(QDialog):
         # and reopening the dialog silently reloads the rejected source.
         self._source_path = None
         self.source_label.setText("No source loaded")
-        self.cleared = True
         self.status.setText("Cleared all assignments.")
         self._assignments_changed()
 

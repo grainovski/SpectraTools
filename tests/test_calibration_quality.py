@@ -5,7 +5,7 @@ import math
 
 import pytest
 
-from calibration import Calibration, from_points
+from calibration import Calibration
 from calibration_quality import reduced_chi_squared
 
 
@@ -186,3 +186,31 @@ def test_a_wrong_length_list_of_line_uncertainties_is_ignored():
     value, reason = reduced_chi_squared(cal, channels, energies, errors, [0.05])
     assert reason is None
     assert value == pytest.approx(plain)
+
+
+# --- both point lists have to correspond ------------------------------
+
+
+def test_mismatched_energies_length_is_refused_not_silently_truncated():
+    """channel_errors' length was checked and energies' was not, so a short
+    list made zip() stop early while the divisor kept the full count. The
+    result was not an error but a real number that was simply too small --
+    the failure mode the module's (None, reason) contract exists to avoid.
+    """
+    cal = Calibration(kind="linear", a=0.0, b=1.0)
+    channels = [10.0, 20.0, 30.0, 40.0]
+    value, reason = reduced_chi_squared(
+        cal, channels, [10.0, 20.0], [0.1] * 4
+    )
+    assert value is None
+    assert "correspond" in reason
+
+
+def test_matching_lengths_still_compute():
+    """Control: the guard must not refuse well-formed input."""
+    cal = Calibration(kind="linear", a=0.0, b=1.0)
+    channels = [10.0, 20.0, 30.0, 40.0]
+    value, _reason = reduced_chi_squared(
+        cal, channels, [10.5, 20.5, 29.5, 40.5], [0.1] * 4
+    )
+    assert value is not None and value > 0.0

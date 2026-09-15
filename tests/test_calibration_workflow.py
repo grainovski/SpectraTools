@@ -72,7 +72,9 @@ def test_clear_empties_the_table_and_the_record(qapp, tmp_path):
     dialog.clear_button.click()
     assert dialog.table.item(0, ENERGY).text() == ""
     assert dialog.source_lines is None
-    assert dialog.cleared is True
+    # What Clear has to leave behind: no channels, which is what makes
+    # _store_energy_assignments erase the spectrum's stored record.
+    assert dialog.assignments()[0] == []
 
 
 def test_clear_does_not_touch_the_active_calibration(qapp, tmp_path):
@@ -145,7 +147,7 @@ def test_clearing_then_retyping_keeps_the_new_assignments(qapp, tmp_path):
     assert active.energy_assignments is not None
 
     dialog.clear_button.click()
-    assert dialog.cleared is True
+    assert dialog.assignments()[0] == []
     dialog.table.item(0, ENERGY).setText("310")
     dialog.table.item(1, ENERGY).setText("850")
     dialog._on_accept()

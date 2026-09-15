@@ -82,12 +82,21 @@ def test_no_stored_assignments_restores_nothing():
     assert restore(EnergyAssignments(None, ()), [(100.0, 4.0)]) == {}
 
 
-def test_an_unusable_width_falls_back_to_a_fixed_tolerance():
+@pytest.mark.parametrize("width", [
+    float("nan"), float("inf"), float("-inf"), 0.0, -3.0, None, "wide", object(),
+])
+def test_an_unusable_width_falls_back_to_a_fixed_tolerance(width):
     """A peak whose FWHM the fit could not determine still deserves a
-    chance to match, but a narrow one."""
+    chance to match, but a narrow one.
+
+    _tolerance rejects four separate classes -- non-numeric, non-finite,
+    zero and negative -- and only NaN was ever exercised. A width of 0.0
+    is the one that matters most: it would otherwise make the tolerance
+    zero and silently match nothing at all.
+    """
     stored = EnergyAssignments(None, ((100.0, 121.783),))
-    assert restore(stored, [(100.2, float("nan"))]) == {0: 121.783}
-    assert restore(stored, [(103.0, float("nan"))]) == {}
+    assert restore(stored, [(100.2, width)]) == {0: 121.783}
+    assert restore(stored, [(103.0, width)]) == {}
 
 
 def test_the_spectrum_starts_with_no_assignments():

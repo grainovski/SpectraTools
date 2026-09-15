@@ -73,11 +73,27 @@ def test_no_source_lines_skips_everything():
 
 def test_matching_tolerates_float_representation():
     """The energy stored on an assignment came from the same file, so it
-    must match even after a round-trip through text."""
-    rows, skipped = build_rows(
-        [(100.0, 0.01, 900.0, 30.0, float("344.276"))], _lines()
-    )
+    must match even after a round-trip through text.
+
+    The offset is deliberately non-zero and inside the tolerance. The
+    previous version passed float("344.276"), which is bit-identical to
+    344.276, so it would have passed at a tolerance of zero and proved
+    nothing about the slack its own docstring claims to exercise.
+    """
+    inside = 344.276 + 5e-7
+    assert inside != 344.276, "the offset must survive float rounding"
+    rows, skipped = build_rows([(100.0, 0.01, 900.0, 30.0, inside)], _lines())
     assert skipped == 0
+    assert len(rows) == 1
+
+
+def test_an_energy_beyond_the_tolerance_does_not_match():
+    """Control for the above: without this, a tolerance wide enough to
+    match anything would satisfy that test just as well."""
+    outside = 344.276 + 1e-4
+    rows, skipped = build_rows([(100.0, 0.01, 900.0, 30.0, outside)], _lines())
+    assert rows == []
+    assert skipped == 1
 
 
 def test_written_file_reads_back_with_loadtxt(tmp_path):
@@ -129,3 +145,48 @@ def test_zero_max_intensity_is_refused():
     lines = [SourceLine(100.0, 0.1, 0.0, 0.0)]
     with pytest.raises(ExportError, match="intensity"):
         build_rows([(10.0, 0.1, 500.0, 20.0, 100.0)], lines)
+
+
+# --- the rule CalEnEff enforces, now enforced here too -----------------
+
+
+def test_a_row_with_no_uncertainty_at_all_is_skipped():
+    """CalEnEff refuses rows where dN and dI are both zero: eff = N / I_pct
+    would carry no uncertainty, so the point silently anchors the whole
+    efficiency curve. build_rows cited that rule without applying it."""
+    lines = [SourceLine(344.276, 0.004, 10000.0, 0.0)]
+    rows, skipped = build_rows([(100.0, 0.01, 900.0, 0.0, 344.276)], lines)
+    assert rows == []
+    assert skipped == 1
+
+
+def test_a_row_keeps_its_place_when_only_one_uncertainty_is_zero():
+    """Control: the rule is about BOTH being zero. A zero area error with a
+    real intensity error still yields a usable efficiency uncertainty."""
+    lines = [SourceLine(344.276, 0.004, 10000.0, 80.0)]
+    rows, skipped = build_rows([(100.0, 0.01, 900.0, 0.0, 344.276)], lines)
+    assert len(rows) == 1
+    assert skipped == 0
+
+
+def test_a_non_finite_value_is_refused_rather_than_written_as_nan(tmp_path):
+    """A NaN area formatted straight into the file as the text "nan", which
+    np.loadtxt reads back as a float and CalEnEff then computes with."""
+    rows, skipped = build_rows(
+        [(100.0, 0.01, float("nan"), 30.0, 344.276)], _lines()
+    )
+    assert len(rows) == 1 and skipped == 0        # build_rows still makes it
+    with pytest.raises(ExportError) as excinfo:
+        write_caleneff(str(tmp_path / "out.txt"), rows)
+    assert "non-finite" in str(excinfo.value)
+    assert "area" in str(excinfo.value)
+    assert not (tmp_path / "out.txt").exists()
+
+
+def test_an_ordinary_row_still_writes(tmp_path):
+    """Control for the guard above: it must not refuse healthy rows."""
+    rows, _ = build_rows([(100.0, 0.01, 900.0, 30.0, 344.276)], _lines())
+    path = tmp_path / "out.txt"
+    write_caleneff(str(path), rows)
+    assert "nan" not in path.read_text()
+    assert len(path.read_text().strip().splitlines()) == 1

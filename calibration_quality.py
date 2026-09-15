@@ -91,6 +91,13 @@ def reduced_chi_squared(calibration, channels, energies, channel_errors,
     count = len(channels)
     parameters = _PARAMETERS.get(calibration.kind, 2)
 
+    # channel_errors' length is checked in _usable_errors, but energies'
+    # never was: a short list makes the zip() below stop early while the
+    # divisor keeps the full count, so the result is a real number that
+    # is simply too small. Refusing is the module's own contract.
+    if len(energies) != count:
+        return None, "undefined (channels and energies do not correspond)"
+
     if count <= parameters:
         return None, "undefined (no degrees of freedom)"
 

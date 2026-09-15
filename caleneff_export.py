@@ -1,8 +1,8 @@
 """Writes fitted peaks in CalEnEff's efficiency-calibration format.
 
-CalEnEff (C:\\Users\\RIG\\Documents\\Claude\\efficieny) reads seven
-whitespace-separated columns with no header, documented in its own
-ra226_gui.py:18 as carrying ABSOLUTE uncertainties:
+CalEnEff reads seven whitespace-separated columns with no header,
+documented in its own ra226_gui.py:18 as carrying ABSOLUTE
+uncertainties:
 
     ch   delta_ch   N   delta_N   E[keV]   I[%]   delta_I[%]
 
@@ -55,6 +55,10 @@ def build_rows(assignments, source_lines):
     rows where dN and dI are both zero, because the efficiency
     uncertainty would come out zero, and a made-up intensity would
     silently distort the curve.
+
+    That same rule is enforced here rather than merely cited. A matched
+    line whose area error AND intensity error are both zero produces
+    exactly the row CalEnEff rejects, so it is skipped and counted too.
     """
     if source_lines:
         maximum = max(line.intensity for line in source_lines)
@@ -73,14 +77,21 @@ def build_rows(assignments, source_lines):
         if line is None or scale is None:
             skipped += 1
             continue
+        area_err = float(area_err)
+        intensity_pct_err = line.intensity_err * scale
+        if area_err == 0.0 and intensity_pct_err == 0.0:
+            # eff = N / I_pct would carry no uncertainty at all, which is
+            # the row CalEnEff refuses to load.
+            skipped += 1
+            continue
         rows.append(ExportRow(
             channel=float(channel),
             channel_err=float(channel_err),
             area=float(area),
-            area_err=float(area_err),
+            area_err=area_err,
             energy=float(energy),
             intensity_pct=line.intensity * scale,
-            intensity_pct_err=line.intensity_err * scale,
+            intensity_pct_err=intensity_pct_err,
         ))
     return rows, skipped
 
@@ -103,6 +114,21 @@ def write_caleneff(path, rows):
             "There are no rows to export: no assigned peak had an "
             "intensity from a source file."
         )
+    # A non-finite value formats as the literal text "nan" or "inf",
+    # which np.loadtxt reads back as a float and CalEnEff then computes
+    # with. Refusing names the peak while the user can still act on it.
+    for row in rows:
+        for field, value in (
+            ("channel", row.channel), ("channel error", row.channel_err),
+            ("area", row.area), ("area error", row.area_err),
+            ("energy", row.energy), ("intensity", row.intensity_pct),
+            ("intensity error", row.intensity_pct_err),
+        ):
+            if not math.isfinite(value):
+                raise ExportError(
+                    f"The peak at channel {row.channel:.2f} has a "
+                    f"non-finite {field}, which cannot be exported."
+                )
     try:
         with open(path, "w", encoding="utf-8", newline="\n") as handle:
             for row in rows:
