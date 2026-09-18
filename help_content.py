@@ -1238,6 +1238,11 @@ file states for the line itself, the <code>dE</code> column of a
 to a whole keV cannot be held to the precision of a centroid measured to
 a hundredth of a channel. An energy you typed by hand has no dE to
 quote and contributes only the first part.</p>
+<p><b>The residual strip draws this same quantity as an error bar on
+every point.</b> That is what makes the strip readable: a residual twice
+its own bar is a real disagreement, while one well inside its bar is
+only saying the centroid was measured loosely. Without the bars a
+2-sigma outlier and a 0.2-sigma one are drawn identically.</p>
 <p>It is reported as <b>undefined</b> in four cases, three of them
 naming their reason. When any centroid uncertainty is unusable the
 calibration was fitted <b>unweighted</b>, so the weights a chi-squared
@@ -1287,11 +1292,17 @@ line in the loaded source is normalised to <b>100</b> and every other
 line scaled by the same factor. Because efficiency is a ratio to I, a
 constant factor rescales the whole curve without changing its shape, and
 the relative uncertainties are unaffected.</p>
-<p>A peak whose energy you typed by hand has no intensity, so it cannot
-be exported and is <b>skipped</b>, with the count reported. Writing a
-zero instead would be worse: CalEnEff rejects rows whose net-area and
-intensity uncertainties are both zero, because the efficiency
-uncertainty would come out zero.</p>
+<p>Two things get a peak <b>skipped</b>, and the count is reported
+either way. A peak whose energy you typed by hand has no intensity at
+all, so there is nothing to divide by. And a peak whose net-area
+uncertainty and intensity uncertainty are <i>both</i> zero would give an
+efficiency with no uncertainty, which is the row CalEnEff itself
+rejects; writing it with a made-up zero would quietly anchor the whole
+curve. Either way the peak is left out rather than exported wrong.</p>
+<p>The export <b>refuses outright</b>, naming the peak and the column, if
+any value is not a finite number. A fit that failed can leave an area of
+<code>nan</code>, and CalEnEff reads the file with a parser that turns
+that text straight back into a number and computes with it.</p>
 
 <h3>Reading the results columns</h3>
 <p>The Fit Results panel shows <b>Position</b>, <b>Volume</b>,

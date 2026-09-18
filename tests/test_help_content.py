@@ -1257,3 +1257,21 @@ def test_help_says_the_source_files_ship_with_the_program():
     assert "Ten come with the program" in kb
     for nuclide in ("Am-241", "Ba-133", "Eu-152", "Ra-226", "Y-88"):
         assert nuclide in howto, nuclide
+
+
+def test_help_documents_both_reasons_a_peak_is_skipped_on_export():
+    """v5.2.4 made CalEnEff's zero-uncertainty rule an enforced second
+    skip reason and added an outright refusal on non-finite values. The
+    page described only the first reason, so a reader would conclude that
+    every peak with a matched source line gets exported."""
+    kb = build_knowledge_database_html()
+    assert "Two things get a peak" in kb
+    assert "refuses outright" in kb
+
+
+def test_help_says_the_residual_strip_draws_error_bars():
+    """The page explained the two-part uncertainty for the reduced
+    chi-squared without saying the strip now draws it, which is the thing
+    that makes the strip readable at a glance."""
+    kb = build_knowledge_database_html()
+    assert "draws this same quantity as an error bar" in kb

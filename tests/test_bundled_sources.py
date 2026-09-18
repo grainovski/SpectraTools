@@ -174,3 +174,27 @@ def test_the_spectrum_folder_is_not_used_for_sources(qapp, monkeypatch):
 
     dialog = mod.EnergyAssignDialog(None, [], settings=_Settings(""))
     assert _open_directory_for(dialog, mod, monkeypatch) != "C:/some/spectra/folder"
+
+
+def test_a_directory_with_no_sou_in_it_counts_as_absent(monkeypatch, tmp_path):
+    """Steering the dialog into an empty folder is worse than not
+    steering it: the user is shown nothing and has to navigate out."""
+    bundle = tmp_path / "bundle"
+    (bundle / "sources").mkdir(parents=True)
+    (bundle / "sources" / "readme.txt").write_text("not a source file")
+
+    monkeypatch.setattr(bundled_sources.sys, "_MEIPASS", str(bundle), raising=False)
+    assert bundled_sources.bundled_sources_dir() is None
+    assert bundled_sources.bundled_source_files() == []
+
+
+def test_a_directory_holding_one_sou_is_used(monkeypatch, tmp_path):
+    """Control for the above: the emptiness test must be about .sou files
+    specifically, not about the directory being untouched."""
+    bundle = tmp_path / "bundle"
+    (bundle / "sources").mkdir(parents=True)
+    (bundle / "sources" / "readme.txt").write_text("not a source file")
+    (bundle / "sources" / "eu152.sou").write_text("121.7817 0.0003 10000.0 56.1")
+
+    monkeypatch.setattr(bundled_sources.sys, "_MEIPASS", str(bundle), raising=False)
+    assert bundled_sources.bundled_sources_dir() == str(bundle / "sources")

@@ -38,25 +38,42 @@ def _base_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
-def bundled_sources_dir():
-    """Absolute path of the packaged `sources/` directory, or None when it
-    is absent.
-
-    None is a normal answer, not a fault: a developer running from a
-    checkout that never fetched the directory still gets a working file
-    dialog, just one that does not start anywhere in particular.
-    """
+def _sources_path():
+    """The packaged directory if it exists at all, without asking what is
+    in it. Separate from bundled_sources_dir so that one can consult
+    bundled_source_files without the two calling each other."""
     path = os.path.join(_base_dir(), DIRECTORY_NAME)
     return path if os.path.isdir(path) else None
 
 
 def bundled_source_files():
     """The packaged `.sou` files, sorted by name. Empty when none ship."""
-    directory = bundled_sources_dir()
+    directory = _sources_path()
     if directory is None:
+        return []
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        # Readable a moment ago when isdir answered; gone or unreadable
+        # now. An empty answer is the same outcome as shipping none.
         return []
     return sorted(
         os.path.join(directory, name)
-        for name in os.listdir(directory)
+        for name in names
         if name.lower().endswith(".sou")
     )
+
+
+def bundled_sources_dir():
+    """Where a `.sou` file dialog should start, or None when there is no
+    better answer than wherever the dialog would go on its own.
+
+    None is a normal answer, not a fault: a developer running from a
+    checkout that never fetched the directory still gets a working file
+    dialog, just one that does not start anywhere in particular.
+
+    A directory that exists but holds no `.sou` counts as absent. Opening
+    the dialog on an empty folder is worse than not steering it at all --
+    the user is shown nothing and has to navigate out of it.
+    """
+    return _sources_path() if bundled_source_files() else None
