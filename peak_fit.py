@@ -2,7 +2,30 @@ import math
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy.special import erfc, erfcx
+
+# scipy.special is bound on FIRST USE rather than imported here.
+#
+# Importing it costs the whole of scipy -- 13 subpackages, 323 modules,
+# 88 files and 48 MB of the installed bundle -- and nothing in this
+# module needs it until a peak is actually fitted. The application
+# imports peak_fit to put its main window on screen, which is a cold
+# read of all of that before the user has asked for anything. Every
+# call site below goes through _need_special() first.
+erfc = None
+erfcx = None
+
+
+def _need_special():
+    """Bind erfc/erfcx for the rest of the process.
+
+    Rebinding the module globals rather than returning them keeps every
+    call site written the way it reads best, and costs one `is None`
+    test per call afterwards rather than an import lookup.
+    """
+    global erfc, erfcx
+    if erfc is None:
+        from scipy.special import erfc as _erfc, erfcx as _erfcx
+        erfc, erfcx = _erfc, _erfcx
 
 FWHM_FACTOR = 2.3548200450309493  # 2*sqrt(2*ln(2))
 SQRT_2PI = 2.5066282746310002  # sqrt(2*pi)
@@ -109,6 +132,7 @@ def hypermet_left_tail(x, position, sigma, r, beta):
         pass. tests/test_peak_fit.py::
         test_tail_stays_active_where_gf3_would_disable_it locks it in.
     """
+    _need_special()
     x = np.asarray(x, dtype=float)
     dx = x - position
     w = dx / (sigma * np.sqrt(2))
@@ -209,6 +233,7 @@ def hypermet_step(x, position, sigma, step_fraction):
     term and nothing else from the peak -- so the step is excluded from
     the reported area, exactly as the fitted background line is.
     """
+    _need_special()
     w = (np.asarray(x, dtype=float) - position) / (sigma * math.sqrt(2.0))
     return step_fraction * erfc(w) / 2.0
 
@@ -244,6 +269,7 @@ def hypermet_area(amplitude, sigma, r, beta):
     whatever the tail held: measured 5.0% at r=0.1, 13.6% at r=0.3, and
     41.1% for a long tail (sigma=3, beta=10, r=0.3).
     """
+    _need_special()
     y = sigma / (beta * np.sqrt(2.0))
     return amplitude * ((1.0 - r) * sigma * SQRT_2PI + 2.0 * r * beta / erfcx(y))
 

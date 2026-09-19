@@ -3,7 +3,7 @@
 ; Output: packaging\windows\output\SpectraToolsSetup.exe
 
 #define AppName    "SpectraTools"
-#define AppVersion "5.2.4"
+#define AppVersion "5.2.5"
 #define AppExe     "SpectraTools.exe"
 
 [Setup]

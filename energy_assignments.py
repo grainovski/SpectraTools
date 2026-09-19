@@ -10,7 +10,12 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.optimize import linear_sum_assignment
+
+# scipy.optimize is imported on FIRST USE, not here. main_window
+# imports this module to put its window on screen, and importing
+# scipy there means a cold read of 48 MB of DLLs before the user has
+# asked for anything. Nothing here needs it until an assignment is
+# actually restored, which happens only after a refit.
 
 #: Tolerance for a peak whose FWHM the fit could not determine. Narrow
 #: on purpose -- with no width to reason about, only a centroid that
@@ -106,6 +111,8 @@ def restore(assignments, peaks):
                 cost[row, index] = distance
 
     out = {}
+    from scipy.optimize import linear_sum_assignment
+
     for row, index in zip(*linear_sum_assignment(cost)):
         if cost[row, index] >= _IMPOSSIBLE:
             continue  # matched only because the solver needed a full assignment
