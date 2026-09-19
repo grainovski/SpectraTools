@@ -4,6 +4,57 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [5.2.5] - 2026-09-19
+
+### Changed
+
+- **The mouse wheel now zooms around the channel under the pointer.** It
+  used the cursor's channel as the *centre* of the new view, so the bin
+  you pointed at jumped to the middle: zooming into a peak threw that
+  peak to the centre on the first notch, and the next notch zoomed into
+  whatever had landed under the pointer instead. Following a peak in
+  meant chasing it across the window. The channel under the pointer now
+  stays where it is.
+
+- **The wheel zooms more gently, and in proportion to how far it turns.**
+  One notch changed the view by a third, which is a large step for
+  something you roll; it now changes it by a fifth. The toolbar's zoom
+  buttons are unchanged -- a button press is one deliberate action, where
+  the bigger step is what you asked for. High-resolution wheels and
+  trackpads, which send many small scroll events rather than a few large
+  ones, were treated as if every event were a full notch, so a light
+  flick crossed the whole spectrum; the zoom now follows the actual
+  movement.
+
+### Fixed
+
+- **The calibration plot drew an error bar of zero where it had no
+  uncertainty to show.** At the turning point of a quadratic calibration
+  the energy axis momentarily stops changing with channel, so a centroid
+  uncertainty says nothing about the energy there. The reduced
+  chi-squared already refused to use such a point; the residual strip
+  drew it with a zero-length bar, which reads as a perfectly measured
+  point -- the opposite of the truth, on exactly the point least worth
+  trusting. It is now drawn with no bar at all.
+
+- **The CalEnEff export's help page described only one of the two
+  reasons a peak is skipped**, and did not mention that the export
+  refuses outright when a value is not a finite number. Both were added
+  in 5.2.4 and neither was documented.
+
+- **The calibration plot's help did not mention the error bars** added to
+  the residual strip in 5.2.4, although the page already explained the
+  quantity they show.
+
+### Performance
+
+- **The application starts faster, most noticeably the first time it is
+  run after switching the computer on.** It was loading its numerical
+  optimisation library -- 35 MB across 50 files -- before showing its
+  window, although nothing needs that library until a peak is fitted, a
+  spectrum searched, or an assignment restored. A cold start had to read
+  all of it from disk first. Startup now loads 145 files instead of 209.
+
 ## [5.2.4] - 2026-09-15
 
 ### Fixed
