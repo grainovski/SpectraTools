@@ -228,25 +228,3 @@ def load_matrix(path, object_path):
     is worth it; matrices are not.
     """
     return _open_object(path, object_path, "matrix")
-
-
-def livetime_seconds(path):
-    """Live time in seconds if the file records it, else None.
-
-    Written by some acquisition systems as a TTime named LiveTime_N
-    alongside the histograms. Best-effort metadata: a file without it is
-    entirely normal, so this never raises for a missing value.
-    """
-    uproot = _require_uproot()
-    try:
-        with uproot.open(path) as handle:
-            for key, classname in handle.classnames(recursive=True).items():
-                if classname == "TTime" and key.split("/")[-1].startswith("LiveTime"):
-                    millis = handle[key].all_members.get("fMilliSec")
-                    if millis is not None:
-                        return float(millis) / 1000.0
-    except RootError:
-        raise
-    except Exception:
-        return None
-    return None

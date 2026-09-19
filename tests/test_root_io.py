@@ -264,11 +264,3 @@ def test_an_empty_histogram_is_refused(tmp_path):
     with pytest.raises(RootError, match="empty"):
         root_io.load_spectrum(path, "e")
 
-
-# --- metadata ----------------------------------------------------------
-
-
-def test_livetime_is_none_when_the_file_does_not_record_it(simple_file):
-    """Best-effort metadata: a file without a LiveTime object is entirely
-    normal and must not raise."""
-    assert root_io.livetime_seconds(simple_file) is None
