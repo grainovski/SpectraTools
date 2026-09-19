@@ -35,7 +35,11 @@ from PySide6.QtWidgets import (
 
 from calibration import turning_point
 from calibration_plot_dialog import CalibrationPlotDialog
-from calibration_view import CalibrationViewMixin, zoomed_limits
+from calibration_view import (
+    CalibrationViewMixin,
+    wheel_zoom_factor,
+    zoomed_limits,
+)
 from goto_view import GoToMixin
 from combine_dialog import CombineDialog
 from energy_assignments import EnergyAssignments
@@ -2220,8 +2224,9 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
     def _on_scroll(self, event):
         if event.inaxes != self.axes or event.xdata is None:
             return
-        factor = (1 / ZOOM_FACTOR) if event.button == "up" else ZOOM_FACTOR
-        self._zoom_x(factor, center=event.xdata)
+        # Gentler than the toolbar buttons, and proportional to how
+        # far the wheel actually turned -- see wheel_zoom_factor.
+        self._zoom_x(wheel_zoom_factor(event), center=event.xdata)
 
     def _zoom_x(self, factor, center=None):
         visible = [s for s in self.spectra if s.visible]

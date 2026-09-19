@@ -149,3 +149,74 @@ def test_the_main_window_wheel_holds_the_channel_under_the_pointer(qapp):
         % (100 * before, 100 * after)
     )
     window.close()
+
+
+# --- how far one notch goes ---------------------------------------------
+
+
+def test_a_wheel_notch_is_gentler_than_a_toolbar_press():
+    """The buttons are one deliberate action; the wheel is rolled. A
+    third of the view per notch overshoots what you were looking at."""
+    from calibration_view import wheel_zoom_factor, WHEEL_ZOOM_FACTOR
+    from main_window import ZOOM_FACTOR
+
+    class _Ev:
+        button, step = "up", 1.0
+
+    assert WHEEL_ZOOM_FACTOR < ZOOM_FACTOR
+    notch = wheel_zoom_factor(_Ev())
+    assert notch == pytest.approx(1 / WHEEL_ZOOM_FACTOR)
+    assert notch > 1 / ZOOM_FACTOR, "a notch must change less than a button press"
+
+
+def test_the_zoom_follows_how_far_the_wheel_turned():
+    """A trackpad sends many fractional steps instead of a few notches.
+    Reading only the button treated each as a full notch, so a flick
+    crossed the whole spectrum."""
+    from calibration_view import wheel_zoom_factor
+
+    class _Ev:
+        def __init__(self, step):
+            self.step = step
+            self.button = "up" if step > 0 else "down"
+
+    fine = wheel_zoom_factor(_Ev(0.25))
+    full = wheel_zoom_factor(_Ev(1.0))
+    fast = wheel_zoom_factor(_Ev(3.0))
+    assert 1.0 > fine > full > fast, (fine, full, fast)
+    # Four quarter-steps must equal one whole one, or the gesture would
+    # not add up to what the same movement does in one event.
+    assert fine ** 4 == pytest.approx(full)
+
+
+def test_direction_still_comes_from_the_button_when_there_is_no_step():
+    """Older backends and synthetic events report step 0."""
+    from calibration_view import wheel_zoom_factor
+
+    class _Ev:
+        def __init__(self, button):
+            self.button, self.step = button, 0
+
+    assert wheel_zoom_factor(_Ev("up")) < 1.0      # zoom in
+    assert wheel_zoom_factor(_Ev("down")) > 1.0    # zoom out
+
+
+def test_the_toolbar_buttons_are_unchanged(qapp):
+    """Ctrl+= / the zoom-in button still take the bigger step."""
+    import numpy as np
+    from main_window import MainWindow, ZOOM_FACTOR
+    from spectrum import LoadedSpectrum
+
+    window = MainWindow()
+    spectrum = LoadedSpectrum(
+        "b.txt", np.linspace(10.0, 500.0, 4096).astype(np.int64), "#1f77b4"
+    )
+    spectrum.active = True
+    window.spectra.append(spectrum)
+    window._plot_data()
+    window.axes.set_xlim(0.0, 4095.0)
+
+    window.zoom_in_action.trigger()
+    lo, hi = window.axes.get_xlim()
+    assert (hi - lo) == pytest.approx(4095.0 / ZOOM_FACTOR, rel=1e-3)
+    window.close()

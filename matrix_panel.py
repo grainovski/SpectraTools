@@ -19,7 +19,11 @@ from fit_mode import FitModeController, is_bare_key_event
 from matrix_cut import compute_projection
 from mtx_io import load_mtx
 from peak_fit import channel_indices
-from calibration_view import CalibrationViewMixin, zoomed_limits
+from calibration_view import (
+    CalibrationViewMixin,
+    wheel_zoom_factor,
+    zoomed_limits,
+)
 from goto_view import GoToMixin
 from spectrum import (
     LIGHT_COLOR_CYCLE, LoadedSpectrum, pan_button_is_active, panned_xlim,
@@ -484,8 +488,9 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
     def _on_scroll(self, event):
         if event.inaxes != self.axes or event.xdata is None:
             return
-        factor = (1 / ZOOM_FACTOR) if event.button == "up" else ZOOM_FACTOR
-        self._zoom_x(factor, center=event.xdata)
+        # Gentler than the toolbar buttons, and proportional to how
+        # far the wheel actually turned -- see wheel_zoom_factor.
+        self._zoom_x(wheel_zoom_factor(event), center=event.xdata)
 
     def _zoom_x(self, factor, center=None):
         spectrum = self.spectra[0]

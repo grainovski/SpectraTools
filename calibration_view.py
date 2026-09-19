@@ -91,3 +91,34 @@ def zoomed_limits(xlim, factor, center, display_lo, display_hi):
     if new_hi <= new_lo:
         new_hi = min(display_hi, new_lo + 1)
     return (new_lo, new_hi) if ascending else (new_hi, new_lo)
+
+
+#: How much one wheel notch changes the visible width. Deliberately
+#: gentler than the toolbar buttons' ZOOM_FACTOR of 1.5: a button is one
+#: deliberate action, where a big step is what you asked for, while the
+#: wheel is rolled continuously and a third of the view per notch lands
+#: somewhere different from where you were looking. At 1.25 a notch moves
+#: 20%, so following a peak in is a smooth roll rather than three or four
+#: lurches -- about twice the notches for the same total zoom.
+WHEEL_ZOOM_FACTOR = 1.25
+
+
+def wheel_zoom_factor(event, per_notch=WHEEL_ZOOM_FACTOR):
+    """Zoom factor for one scroll event, scaled by how far it actually
+    scrolled.
+
+    matplotlib reports a signed `step`: +1 and -1 for an ordinary wheel
+    notch, but a FRACTION for high-resolution wheels and trackpads, which
+    send many small events instead of a few big ones. Reading only
+    `button` -- as this did -- treats every one of those as a full notch,
+    so a trackpad flick crosses the whole spectrum. Raising the factor to
+    the step makes the zoom proportional to the gesture.
+
+    `step` is 0 on a synthetic event that carries only a button, and on
+    backends that do not report one, so the button decides the direction
+    in that case.
+    """
+    step = getattr(event, "step", 0) or 0.0
+    if not step:
+        step = 1.0 if event.button == "up" else -1.0
+    return per_notch ** -step
