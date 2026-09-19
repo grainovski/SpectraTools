@@ -19,7 +19,7 @@ from fit_mode import FitModeController, is_bare_key_event
 from matrix_cut import compute_projection
 from mtx_io import load_mtx
 from peak_fit import channel_indices
-from calibration_view import CalibrationViewMixin
+from calibration_view import CalibrationViewMixin, zoomed_limits
 from goto_view import GoToMixin
 from spectrum import (
     LIGHT_COLOR_CYCLE, LoadedSpectrum, pan_button_is_active, panned_xlim,
@@ -490,18 +490,12 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
     def _zoom_x(self, factor, center=None):
         spectrum = self.spectra[0]
         xlim = self.axes.get_xlim()
-        if center is None:
-            center = (xlim[0] + xlim[1]) / 2
-        half_width = abs(xlim[1] - xlim[0]) / 2 * factor
         max_channel = len(spectrum.data) - 1
         display_lo = self.channel_to_display(0)
         display_hi = self.channel_to_display(max_channel)
         display_lo, display_hi = min(display_lo, display_hi), max(display_lo, display_hi)
-        new_lo = max(display_lo, center - half_width)
-        new_hi = min(display_hi, center + half_width)
-        if new_hi <= new_lo:
-            new_hi = min(display_hi, new_lo + 1)
-        new_xlim = (new_lo, new_hi) if xlim[0] <= xlim[1] else (new_hi, new_lo)
+        # Shared with the main window -- see calibration_view.zoomed_limits.
+        new_xlim = zoomed_limits(xlim, factor, center, display_lo, display_hi)
         self.axes.set_xlim(new_xlim)
         self._autoscale_y(new_xlim)
         # draw_idle for the same reason as main_window._zoom_x: a mouse

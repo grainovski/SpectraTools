@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 
 from calibration import turning_point
 from calibration_plot_dialog import CalibrationPlotDialog
-from calibration_view import CalibrationViewMixin
+from calibration_view import CalibrationViewMixin, zoomed_limits
 from goto_view import GoToMixin
 from combine_dialog import CombineDialog
 from energy_assignments import EnergyAssignments
@@ -2228,27 +2228,14 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         if not visible:
             return
         xlim = self.axes.get_xlim()
-        if center is None:
-            center = (xlim[0] + xlim[1]) / 2
-        half_width = abs(xlim[1] - xlim[0]) / 2 * factor
         max_channel = max(len(s.data) for s in visible) - 1
         display_lo = self.channel_to_display(0)
         display_hi = self.channel_to_display(max_channel)
         display_lo, display_hi = min(display_lo, display_hi), max(display_lo, display_hi)
-        # Clamp to the valid displayed range -- zooming/scrolling must
-        # never show channels outside the data, whether the axis is
-        # currently in raw channels or calibrated keV.
-        new_lo = max(display_lo, center - half_width)
-        new_hi = min(display_hi, center + half_width)
-        if new_hi <= new_lo:
-            new_hi = min(display_hi, new_lo + 1)
-        # A negative-b calibration makes channel_to_display decreasing,
-        # so the axis may currently be "inverted" (xlim[0] > xlim[1], a
-        # legitimate matplotlib feature -- see _plot_data/_show_full_spectrum).
-        # Preserve that orientation on write-back rather than always
-        # writing ascending order, which would flip the axis direction
-        # on every zoom.
-        new_xlim = (new_lo, new_hi) if xlim[0] <= xlim[1] else (new_hi, new_lo)
+        # Anchored on `center`, clamped to the data, orientation
+        # preserved -- see calibration_view.zoomed_limits, which the
+        # matrix panel's projection shares so the two cannot drift.
+        new_xlim = zoomed_limits(xlim, factor, center, display_lo, display_hi)
         self.axes.set_xlim(new_xlim)
         self._autoscale_y(new_xlim)
         # draw_idle, not draw: this is the one redraw path a user can
