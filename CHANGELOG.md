@@ -4,6 +4,39 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [5.2.6] - 2026-09-19
+
+### Changed
+
+- **Spectra are drawn along a red-to-blue ramp in light theme.** The first
+  spectrum is red and the second blue; every one after that falls between
+  them, each new colour splitting the widest gap the earlier ones left --
+  the third is purple, the fourth and fifth the quarter points, and so on.
+  The previous palette was matplotlib's ten-colour default, which wrapped
+  after ten spectra and drew the eleventh in the first one's colour.
+  Results from a matrix gate are simply the next spectrum, so they take
+  the next colour on the same ramp.
+
+  Because every colour now lies between two fixed endpoints, they crowd as
+  more spectra are loaded: neighbours are about an eighth of the ramp apart
+  by the tenth and a thirty-second by the twentieth. The ordering is chosen
+  so the first several stay as far apart as they can be.
+
+- **A matrix panel's projection now follows the theme.** It was fixed to
+  the light palette's first colour and never changed, so it drew the same
+  blue in both themes. In light theme it now takes the ramp's first colour
+  like any other spectrum, and it keeps that blue in dark theme.
+
+### Unchanged
+
+- **Dark theme.** Its palette is TV's own X11 "colored" resource scheme and
+  is untouched, entry for entry.
+
+- **The application icon.** Its bars were drawn from the light spectrum
+  palette, so this change would have altered the icon on the taskbar and in
+  the installer. It now has its own copy of the previous colours and
+  renders exactly as before.
+
 ## [5.2.5] - 2026-09-19
 
 ### Changed
