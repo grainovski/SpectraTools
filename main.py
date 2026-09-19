@@ -13,7 +13,11 @@ _MIN_USABLE_WINDOW = 2
 def is_wsl():
     """True when running under Windows Subsystem for Linux."""
     try:
-        return "microsoft" in open("/proc/version").read().lower()
+        # Closed explicitly rather than left to refcounting: CPython would
+        # collect it at once, but this is startup code and a ResourceWarning
+        # here is noise in exactly the place it is hardest to notice.
+        with open("/proc/version") as handle:
+            return "microsoft" in handle.read().lower()
     except OSError:
         return False
 

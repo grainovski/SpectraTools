@@ -386,3 +386,59 @@ def test_the_bar_combines_the_centroid_and_the_literature_error(qapp):
     without = _dialog(qapp, points=[(100.0, 0.05, 9000.0, 95.0, 121.783)],
                       lines=[SourceLine(121.783, 0.0, 5000.0, 50.0)])
     assert max(_residual_yerr(with_de)) > max(_residual_yerr(without))
+
+
+
+# --- the strip and the chi-squared must agree on what is undefined -----
+
+
+def _vertex_case():
+    """A quadratic whose turning point sits on a data point, with no
+    stated dE anywhere. There dE/dch is zero, so a channel uncertainty
+    maps to no energy uncertainty and nothing is left to draw."""
+    import math
+    from calibration import Calibration
+    c = -0.001
+    cal = Calibration(kind="quadratic", a=0.0, b=-2 * c * 500.0, c=c)
+    pts = [(500.0, 0.05, 9000.0, 95.0, cal.apply(500.0)),
+           (200.0, 0.05, 4000.0, 63.0, cal.apply(200.0)),
+           (800.0, 0.05, 2000.0, 45.0, cal.apply(800.0)),
+           (300.0, 0.05, 2000.0, 45.0, cal.apply(300.0))]
+    return cal, pts
+
+
+def test_a_point_at_the_turning_point_gets_no_error_bar(qapp):
+    """It used to get a bar of length zero, which reads as an exact
+    measurement -- the opposite of the truth, on precisely the point a
+    reader should trust least."""
+    import math
+    cal, pts = _vertex_case()
+    dialog = _dialog(qapp, calibration=cal, points=pts, lines=[])
+    bars = dialog._residual_errors([p[0] for p in pts], [p[1] for p in pts],
+                                   [p[4] for p in pts])
+    assert math.isnan(bars[0]), "the vertex point must draw no bar, got %r" % bars[0]
+
+
+def test_the_other_points_still_get_real_bars(qapp):
+    """Control: the rule must be about the turning point specifically,
+    not about quadratics in general."""
+    import math
+    cal, pts = _vertex_case()
+    dialog = _dialog(qapp, calibration=cal, points=pts, lines=[])
+    bars = dialog._residual_errors([p[0] for p in pts], [p[1] for p in pts],
+                                   [p[4] for p in pts])
+    assert all(math.isfinite(v) and v > 0.0 for v in bars[1:]), bars
+
+
+def test_the_strip_and_the_chi_squared_agree_on_undefined(qapp):
+    """The two describe the same quantity, so they cannot disagree about
+    which points have one."""
+    import math
+    from calibration_quality import reduced_chi_squared
+    cal, pts = _vertex_case()
+    chans = [p[0] for p in pts]
+    value, _reason = reduced_chi_squared(cal, chans, [p[4] for p in pts],
+                                         [p[1] for p in pts])
+    dialog = _dialog(qapp, calibration=cal, points=pts, lines=[])
+    bars = dialog._residual_errors(chans, [p[1] for p in pts], [p[4] for p in pts])
+    assert value is None and math.isnan(bars[0])

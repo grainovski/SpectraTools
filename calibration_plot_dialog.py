@@ -314,16 +314,29 @@ class CalibrationPlotDialog(QDialog):
         weights with: the centroid uncertainty carried into keV through
         the calibration's own slope, added in quadrature to what the
         literature states about the line.
+
+        NaN where that combination is not defined, which draws the point
+        with no bar at all. It is the same condition reduced_chi_squared
+        refuses on, and the two have to agree: at a quadratic's turning
+        point dE/dch is zero, so a channel uncertainty maps to no energy
+        uncertainty, and if the line carries no stated dE either then
+        nothing is left. Drawing that as a zero-length bar would say the
+        point is exact -- the opposite of undefined, on precisely the
+        point a reader should trust least.
         """
         literature = self._literature_errors(energies)
         out = []
         for channel, sigma_ch, sigma_e in zip(channels, channel_errors, literature):
             try:
                 slope = float(self._calibration.derivative(channel))
-                value = math.sqrt((float(sigma_ch) * slope) ** 2 + float(sigma_e) ** 2)
+                variance = (float(sigma_ch) * slope) ** 2 + float(sigma_e) ** 2
             except (TypeError, ValueError):
-                value = 0.0
-            out.append(value if math.isfinite(value) else 0.0)
+                variance = float("nan")
+            # reduced_chi_squared's own test, so the plot and the number
+            # never disagree about which points are usable.
+            out.append(math.sqrt(variance)
+                       if math.isfinite(variance) and variance > 0.0
+                       else float("nan"))
         return out
 
     def _literature_errors(self, energies):
