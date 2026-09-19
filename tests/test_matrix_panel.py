@@ -771,8 +771,8 @@ def test_matrix_panel_and_main_window_integrate_identically(qapp, monkeypatch):
     panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
     data = panel.spectra[0].data
 
-    from spectrum import LIGHT_COLOR_CYCLE, LoadedSpectrum
-    spectrum = LoadedSpectrum("synthetic.spe", data, color=LIGHT_COLOR_CYCLE[0])
+    from spectrum import LoadedSpectrum, next_color
+    spectrum = LoadedSpectrum("synthetic.spe", data, color=next_color(0, "light"))
     spectrum.active = True
     main_window.spectra = [spectrum]
     # Real usage always calls _plot_data() immediately after adding a
@@ -1415,3 +1415,116 @@ def test_projection_line_is_as_thick_as_the_main_window_spectrum(qapp):
     ]
     assert panel_lines, "no projection line drawn in the matrix panel"
     assert panel_lines[0].get_linewidth() == pytest.approx(expected)
+
+
+# --- spectrum colours, 5.2.6 -------------------------------------------
+#
+# Light theme draws spectra along a red-to-blue ramp. A projection is a
+# spectrum, so it follows the ramp -- except in dark theme, which the
+# change was asked to leave exactly as it was.
+
+
+@pytest.fixture
+def restore_theme():
+    """Toggling the theme writes it to settings, and every MainWindow
+    constructed afterwards anywhere in the suite reads it back."""
+    from settings import Settings
+
+    settings = Settings()
+    original = settings.theme()
+    yield
+    settings.set_theme(original)
+
+
+def _trace_color(panel):
+    """The colour actually drawn, not the one on the model object."""
+    return panel.axes.lines[0].get_color()
+
+
+def test_the_projection_trace_is_red_in_light_theme(qapp, restore_theme):
+    main_window = MainWindow()
+    main_window.dark_theme_action.setChecked(False)
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    assert panel.spectra[0].color == "#FF0000"
+    assert _trace_color(panel) == "#FF0000"
+
+
+def test_the_projection_trace_keeps_its_old_blue_in_dark_theme(qapp, restore_theme):
+    """This trace used to be hardcoded to the light palette's first entry
+    and never followed the theme at all, so before 5.2.6 it drew this blue
+    in BOTH themes -- which made it the one place where changing the light
+    palette could leak into dark."""
+    from spectrum import next_color
+
+    main_window = MainWindow()
+    main_window.dark_theme_action.setChecked(True)
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+
+    assert panel.spectra[0].color == "#1f77b4"
+    assert _trace_color(panel) == "#1f77b4"
+    assert panel.spectra[0].color != next_color(0, "dark"), (
+        "the dark cycle's own first entry is TV's yellow; the projection "
+        "keeps the blue it has always drawn instead"
+    )
+
+
+def test_toggling_the_theme_moves_the_projection_trace(qapp, restore_theme):
+    main_window = MainWindow()
+    main_window.dark_theme_action.setChecked(False)
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    # What main_window's own open-matrix path does, and what _apply_theme's
+    # loop needs in order to reach this panel at all.
+    main_window._matrix_panels.append(panel)
+
+    assert _trace_color(panel) == "#FF0000"
+    main_window.dark_theme_action.setChecked(True)
+    assert _trace_color(panel) == "#1f77b4"
+    main_window.dark_theme_action.setChecked(False)
+    assert _trace_color(panel) == "#FF0000"
+
+
+def test_toggling_the_theme_keeps_the_projection_view(qapp, restore_theme):
+    """Re-colouring the trace means replotting, and a replot can throw away
+    the zoom. preserve_view=True is what stops it, so a panel zoomed into a
+    peak stays there across a theme toggle."""
+    main_window = MainWindow()
+    main_window.dark_theme_action.setChecked(False)
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    main_window._matrix_panels.append(panel)
+
+    panel.axes.set_xlim(1000.0, 2000.0)
+    main_window.dark_theme_action.setChecked(True)
+
+    lo, hi = panel.axes.get_xlim()
+    assert (round(lo), round(hi)) == (1000, 2000)
+
+
+def test_a_gated_spectrum_takes_the_next_colour_on_the_ramp(qapp, restore_theme):
+    """A cut result is just the next spectrum: same counter, same
+    next_color as a loaded file. With nothing else open the first gate
+    comes out red and the second blue."""
+    from spectrum import next_color
+
+    main_window = MainWindow()
+    main_window.dark_theme_action.setChecked(False)
+    panel = MatrixPanel(main_window, os.path.join(FIXTURES, "gg.mtx"))
+    assert not main_window.spectra
+
+    _held_key_click(panel, "cut", 100.0)
+    _held_key_click(panel, "cut", 300.0)
+    panel._activate_cut()
+    assert main_window.spectra[-1].color == "#FF0000"
+
+    panel._clear_marks()
+    _held_key_click(panel, "cut", 400.0)
+    _held_key_click(panel, "cut", 600.0)
+    panel._activate_cut()
+    assert main_window.spectra[-1].color == "#0000FF"
+
+    colors = [s.color for s in main_window.spectra]
+    assert len(set(colors)) == len(colors) == 2, colors
+    # color_index is what lets a theme toggle re-derive them later.
+    assert all(
+        s.color == next_color(s.color_index, "light") for s in main_window.spectra
+    )

@@ -1,11 +1,22 @@
-LIGHT_COLOR_CYCLE = (
-    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
-)
+# Light theme: spectra are coloured along one red-to-blue ramp rather than
+# picked from a fixed list. The first two are the endpoints -- red, then
+# blue -- and every later spectrum falls between them.
+#
+# The ORDER matters more than the endpoints do. Each new colour halves the
+# widest gap the earlier ones left (1/2, then 1/4 and 3/4, then 1/8, 3/8,
+# 5/8, 7/8, ...), so four loaded spectra come out red / blue / purple /
+# red-purple, all easy to tell apart. Marching evenly from red to blue
+# instead would put the third and fourth colours within a tenth of the ramp
+# of the first, which is exactly where they are hardest to separate.
+#
+# Unlike DARK_COLOR_CYCLE there is no wrap -- the subdivision never repeats
+# a value. See light_color for what that costs.
+LIGHT_RAMP_ENDPOINTS = ("#FF0000", "#0000FF")
 
 # TV's own "colored" X11 resource palette (tv-1.9.13/etc/Xtv,
 # Xtv.*colored*foreground0 through foreground15), used against TV's own
-# black background -- the dark-theme analog of LIGHT_COLOR_CYCLE. Values
+# black background -- the dark-theme counterpart to the light ramp above,
+# and deliberately still a fixed list rather than a ramp. Values
 # are the standard X11 rgb.txt colors for each named entry (X11 "green"
 # is pure #00FF00, distinct from CSS's darker #008000), kept verbatim
 # rather than adjusted for "nicer" contrast, to actually match TV's own
@@ -28,8 +39,6 @@ DARK_COLOR_CYCLE = (
     "#00FF00",  # green (X11)
     "#D59027",
 )
-
-COLOR_CYCLE = LIGHT_COLOR_CYCLE  # kept as the default/light-theme cycle
 
 
 class LoadedSpectrum:
@@ -192,6 +201,55 @@ def panned_xlim(xlim, delta, bound_a, bound_b):
     return (start + shift, end + shift)
 
 
+def _ramp_fraction(index):
+    """Where the `index`-th spectrum sits on the ramp: 0.0 at the first
+    endpoint, 1.0 at the second.
+
+    The two endpoints come first, then the gap between them is subdivided
+    level by level -- the odd multiples of 1/2, then of 1/4, then of 1/8:
+
+        index   0    1    2    3    4    5    6    7    8     9
+        t      0/1  1/1  1/2  1/4  3/4  1/8  3/8  5/8  7/8  1/16
+
+    Each level contributes twice as many colours as the one before, so the
+    sequence never runs out and never repeats a value.
+    """
+    if index < 2:
+        return float(index)
+    remaining = index - 2
+    level, at_this_level = 1, 1
+    while remaining >= at_this_level:
+        remaining -= at_this_level
+        level += 1
+        at_this_level *= 2
+    return (2 * remaining + 1) / float(1 << level)
+
+
+def _blend(start, end, fraction):
+    """`start` at fraction 0, `end` at fraction 1, blended per channel.
+    Both are "#RRGGBB" strings, and so is the result."""
+    a = [int(start[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(end[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#%02X%02X%02X" % tuple(
+        round(x + (y - x) * fraction) for x, y in zip(a, b)
+    )
+
+
+def light_color(index):
+    """The light theme's colour for the `index`-th spectrum.
+
+    Never wraps, so no two spectra ever share a colour -- but they do
+    crowd. Neighbours are about an eighth of the ramp apart by the tenth
+    spectrum and a thirty-second by the twentieth, close enough to read as
+    the same colour. That is inherent in confining every colour between two
+    fixed endpoints; it is not a fault of the ordering, which is what keeps
+    the first several as far apart as they can be.
+    """
+    start, end = LIGHT_RAMP_ENDPOINTS
+    return _blend(start, end, _ramp_fraction(index))
+
+
 def next_color(index, theme="light"):
-    cycle = DARK_COLOR_CYCLE if theme == "dark" else LIGHT_COLOR_CYCLE
-    return cycle[index % len(cycle)]
+    if theme == "dark":
+        return DARK_COLOR_CYCLE[index % len(DARK_COLOR_CYCLE)]
+    return light_color(index)

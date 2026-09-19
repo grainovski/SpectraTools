@@ -26,9 +26,16 @@ from calibration_view import (
 )
 from goto_view import GoToMixin
 from spectrum import (
-    LIGHT_COLOR_CYCLE, LoadedSpectrum, pan_button_is_active, panned_xlim,
+    LoadedSpectrum, next_color, pan_button_is_active, panned_xlim,
 )
 from theme import refresh_builtin_toolbar_icons, style_axes, style_nav_toolbar_palette
+
+# The projection trace's colour in dark theme. Pinned rather than taken
+# from next_color(0, "dark"), which is TV's yellow: this panel has always
+# drawn its projection in this blue, and 5.2.6's colour change was asked to
+# leave dark theme alone. Light theme follows the ramp -- see
+# MatrixPanel._projection_color.
+DARK_PROJECTION_COLOR = "#1f77b4"
 
 CUT_REGION_COLOR = "tab:red"
 CUT_REGION_ALPHA = 0.25
@@ -367,18 +374,14 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
         entry, always active and visible -- there is no concept of
         multiple or hidden "spectra" in this window.
 
-        color=LIGHT_COLOR_CYCLE[0], not the matplotlib named color
-        "tab:blue" this used to read (same rendered color either way --
-        "tab:blue" IS "#1f77b4", matplotlib's tab10 palette entry 0,
-        verbatim LIGHT_COLOR_CYCLE[0]) -- FitModeController.draw_committed_fits
-        unconditionally derives its fit/background-line colors from
-        spectrum.color via theme.fit_drawing_colors, which parses it as a
-        strict "#RRGGBB" hex string (_hex_to_rgb01) and raises ValueError
-        on a named color. That call was never reached before fit-mode
-        integration (Task 7) since draw_committed_fits was never invoked
-        for this panel until now -- a plain color= tab:blue value was
-        harmless as long as it only ever reached matplotlib's own
-        axes.plot(color=...), which accepts named colors fine."""
+        The colour comes from _projection_color, and has to stay a strict
+        "#RRGGBB" hex string rather than a matplotlib named colour like
+        "tab:blue" (which this once read): FitModeController.draw_committed_fits
+        unconditionally derives its fit/background-line colours from
+        spectrum.color via theme.fit_drawing_colors, whose _hex_to_rgb01
+        raises ValueError on a named colour. That call is reached whenever a
+        fit is drawn here, so a named colour would be a crash waiting for
+        the first fit rather than a cosmetic difference."""
         data = self.projections[self.working_axis]
         # .path must stay path-shaped, not a free-form label: fit_export.auto_log_path
         # and fit_mode.py's "Export Fit Report" default filename both derive a stem via
@@ -388,9 +391,18 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
         # process's cwd instead of next to this real matrix file.
         root, ext = os.path.splitext(self.path)
         path = f"{root}_{self.working_axis}_projection{ext}"
-        spectrum = LoadedSpectrum(path, data, color=LIGHT_COLOR_CYCLE[0])
+        spectrum = LoadedSpectrum(path, data, color=self._projection_color())
         spectrum.active = True
         self.spectra = [spectrum]
+
+    def _projection_color(self):
+        """A projection is a spectrum, so in light theme it takes the first
+        colour off the same ramp the main window's first spectrum gets.
+        Dark theme keeps the blue this panel has always drawn -- 5.2.6
+        changed the light palette only."""
+        if self._theme == "dark":
+            return DARK_PROJECTION_COLOR
+        return next_color(0, self._theme)
 
     @property
     def _calibration(self):
@@ -433,20 +445,18 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
         bytes and this panel's axes facecolor stayed byte-for-byte
         unchanged across a MainWindow theme toggle before this fix).
 
-        style_axes() + a bare redraw here (rather than a full
-        self._plot_data()) mirrors exactly how MainWindow's own
-        _apply_theme keeps its own axes in sync -- _plot_data-driven
-        extras like recoloring the plotted trace or resetting the
-        nav_toolbar's zoom history are handled separately, by
-        _apply_theme's caller (_on_theme_toggled), only for
-        MainWindow's own canvas/spectra. This panel's single synthetic
-        spectrum is deliberately NOT theme-recolored either way (see
-        _rebuild_spectra's own docstring above), so there is nothing
-        equivalent for this panel to do beyond restyling the axes."""
+        The projection trace IS re-coloured here, which is why this
+        replots rather than restyling the axes and redrawing: since 5.2.6
+        the light theme's first colour is red while dark theme keeps this
+        panel's long-standing blue, so a theme toggle has to move the
+        trace. preserve_view=True keeps the current x range, and the
+        replot's nav_toolbar.update()/push_current() is the same zoom-
+        history reset that MainWindow._on_theme_toggled already performs by
+        calling its own _plot_data(preserve_view=True)."""
         style_nav_toolbar_palette(self.nav_toolbar, self._theme)
         refresh_builtin_toolbar_icons(self.nav_toolbar)
-        style_axes(self.axes, self._theme)
-        self.canvas.draw()
+        self.spectra[0].color = self._projection_color()
+        self._plot_data(preserve_view=True)
 
 
     def _apply_calibration_change(self, new_calibration, new_active):

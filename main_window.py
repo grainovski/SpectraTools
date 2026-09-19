@@ -200,12 +200,20 @@ def _color_swatch_pixmap(color):
 
 _APP_ICON_SIZES = (16, 32, 48, 128, 256)
 _APP_ICON_BAR_HEIGHTS = (0.35, 0.7, 0.5, 0.9, 0.6, 0.8, 0.45)
+# The icon's own palette. It used to read the light spectrum cycle, but
+# that became a red-to-blue ramp in 5.2.6 and the icon has a different job:
+# it is the application's mark, on the taskbar and in the installer, and
+# should not shift when the way traces are coloured changes. These are the
+# ten values the light cycle held before that change, so the icon renders
+# exactly as it always has.
+_APP_ICON_COLORS = (
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+)
 
 
 def _app_icon_pixmap(size):
-    # Bars colored from the app's own spectrum color cycle -- the icon
-    # doubles as a visual reminder of how loaded spectra are distinguished
-    # from one another in the app itself.
+    # Bars coloured from the icon's own palette, _APP_ICON_COLORS.
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -218,7 +226,7 @@ def _app_icon_pixmap(size):
     base_y = size - margin
     radius = bar_width * 0.15
     for i, fraction in enumerate(_APP_ICON_BAR_HEIGHTS):
-        painter.setBrush(QColor(next_color(i)))
+        painter.setBrush(QColor(_APP_ICON_COLORS[i % len(_APP_ICON_COLORS)]))
         height = fraction * (size - 2 * margin)
         x = margin + i * (bar_width + gap)
         painter.drawRoundedRect(x, base_y - height, bar_width, height, radius, radius)
