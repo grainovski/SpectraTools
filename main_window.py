@@ -351,6 +351,11 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
 
         self._calibration = None  # Calibration | None -- last-set coefficients, persist across on/off toggles
         self._calibration_active = False
+        #: The efficiency most recently fitted, held the way the
+        #: calibration is: set once, usable until replaced. Without this it
+        #: would live only as long as its results window, and applying it to
+        #: a spectrum loaded later would mean refitting.
+        self._efficiency = None
 
         self._build_spectrum_panel()
         self._build_menu()
@@ -500,8 +505,34 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self.calibration_active_menu_action.setShortcut("Ctrl+T")
         self.calibration_active_menu_action.setCheckable(True)
         self.calibration_active_menu_action.setEnabled(self._calibration is not None)
+        # This action and Clear Calibration below sound alike, and the
+        # difference between them is the whole point of having both, so
+        # each says plainly what it does to the coefficients.
+        self.calibration_active_menu_action.setToolTip(
+            "Show channels instead of energies. The calibration is kept "
+            "and can be switched back on."
+        )
         self.calibration_active_menu_action.toggled.connect(self._on_calibration_toggle_action)
         self.operations_menu.addAction(self.calibration_active_menu_action)
+
+        self.clear_calibration_action = QAction("Clear Calibration", self)
+        self.clear_calibration_action.setEnabled(self._calibration is not None)
+        self.clear_calibration_action.setToolTip(
+            "Discard the calibration coefficients entirely. Unlike the "
+            "toggle above there is nothing left to switch back on, so you "
+            "would have to calibrate again from scratch."
+        )
+        self.clear_calibration_action.triggered.connect(self.clear_calibration)
+        self.operations_menu.addAction(self.clear_calibration_action)
+
+        self.show_efficiency_action = QAction("Show Efficiency...", self)
+        self.show_efficiency_action.setEnabled(False)
+        self.show_efficiency_action.setToolTip(
+            "Reopen the efficiency fitted earlier, to examine it or apply "
+            "it to another spectrum"
+        )
+        self.show_efficiency_action.triggered.connect(self.show_efficiency)
+        self.operations_menu.addAction(self.show_efficiency_action)
 
         # After the two existing calibration entries rather than between
         # them: those two are the primitives (set the coefficients, turn
@@ -631,6 +662,38 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             for heatmap_window in panel._heatmap_windows:
                 heatmap_window._refresh_theme(theme)
 
+    def clear_calibration(self):
+        """Discard the calibration coefficients, back to the state before
+        any calibration was set.
+
+        Distinct from the Ctrl+T toggle, which reverts the axis to channels
+        but keeps the coefficients so they can be switched on again. This
+        one leaves nothing to switch on -- which is exactly why it asks
+        first, and why the toggle does not: a toggle is its own undo, and
+        this has none.
+
+        An efficiency fitted under this calibration is deliberately left
+        alone. It is still a valid curve; it simply cannot be applied until
+        some calibration is active again, which the Apply control explains
+        on its own.
+        """
+        if self._calibration is None:
+            return
+        choice = QMessageBox.question(
+            self,
+            "Clear calibration",
+            "Discard the energy calibration?\n\n"
+            "The coefficients are forgotten entirely and the axis returns "
+            "to channels. This cannot be undone -- calibrating again means "
+            "starting from scratch. To simply show channels while keeping "
+            "the calibration, use Toggle Calibration Active instead.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if choice != QMessageBox.StandardButton.Yes:
+            return
+        self._apply_calibration_change(None, False)
+
     def _apply_calibration_change(self, new_calibration, new_active):
         """Applies a new calibration/active state and replots, keeping
         the same detector-channel region in view across the unit change
@@ -672,6 +735,10 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self.calibration_toggle_action.setChecked(new_active)
         self.calibration_active_menu_action.setEnabled(new_calibration is not None)
         self.calibration_active_menu_action.setChecked(new_active)
+        # Guarded: _apply_calibration_change runs during __init__, before
+        # the menu exists.
+        if hasattr(self, "clear_calibration_action"):
+            self.clear_calibration_action.setEnabled(new_calibration is not None)
         if self.spectra:
             new_xlim = (
                 self.channel_to_display(channel_bounds[0]),
@@ -924,6 +991,48 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self._sync_active_radios()
         self._plot_data()
 
+    def set_efficiency(self, result):
+        """Remember a fitted efficiency so it can be reopened and reapplied.
+
+        Held on the window rather than in the dialog that produced it, for
+        the same reason the calibration is: the useful lifetime of a fit is
+        the session, not one window.
+        """
+        self._efficiency = result
+        self.show_efficiency_action.setEnabled(result is not None)
+
+    def show_efficiency(self):
+        """Reopen the held efficiency's results window."""
+        if self._efficiency is None:
+            return
+        from efficiency_dialog import EfficiencyDialog
+
+        previous = getattr(self, "_efficiency_dialog", None)
+        if previous is not None:
+            previous.close()
+            previous.deleteLater()
+        errors = [0.0] * len(self._efficiency.fit.E)
+        self._efficiency_dialog = EfficiencyDialog(
+            self, self._efficiency, errors, theme=self._theme,
+            channels=(len(active_spectrum(self.spectra).data)
+                      if active_spectrum(self.spectra) is not None else 4096),
+        )
+        self._efficiency_dialog.setAttribute(
+            Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._efficiency_dialog.show()
+
+    @staticmethod
+    def efficiency_label(spectrum, result):
+        """The name a correction of `spectrum` under `result` would take.
+
+        A single definition because two callers need to agree on it: this
+        is what the new spectrum is called, and it is also how Apply to all
+        recognises that a correction already exists and skips making a
+        second identical one.
+        """
+        return "%s [eff-corrected %s]" % (
+            spectrum.path, "KFR" if result.model == "kfr" else "RW")
+
     def can_apply_efficiency(self):
         """An efficiency correction needs an energy per bin, which only an
         active calibration provides."""
@@ -941,9 +1050,12 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
 
         out = _apply(spectrum.data, self._calibration, result,
                      variance=getattr(spectrum, "variance", None))
-        label = "%s [eff-corrected %s]" % (
-            spectrum.path, "KFR" if result.model == "kfr" else "RW")
-        self._add_combined_spectrum(label, out.counts, variance=out.variance)
+        self._add_combined_spectrum(
+            self.efficiency_label(spectrum, result), out.counts,
+            variance=out.variance)
+        # Flagged rather than recognised by name: Apply to all skips these,
+        # and a name is something the user can change.
+        self.spectra[-1].efficiency_corrected = True
         if out.zeroed:
             QMessageBox.information(
                 self, "Efficiency applied",
