@@ -98,6 +98,23 @@ window and written into the file headers — a band computed from 200
 surviving samples means something different from one computed from 9 900,
 and hiding that would be dishonest.
 
+**Which curve is "the efficiency".** The Monte Carlo is how the uncertainty
+is obtained; the curve itself is the **best fit**. That is the reference's
+own division — `_draw_efficiency` plots `f_kfr(E_g, *eff_popt)`, the best
+fit, and draws the MC family as a band around it, while
+`predict_efficiency` returns the best-fit value and the MC mean ± σ
+side by side. So: the curve written to file, drawn in the window and divided
+into a spectrum is the best fit, and every `deff` comes from the MC. The two
+differ slightly but really — on the reference's own Ra-226 data at 1155 keV
+the best fit gives 534.562 against an MC mean of 534.762 — so this is a
+choice to state rather than leave to whichever the implementer reaches for.
+
+**The MC refits against the ORIGINAL `deff`,** not one recomputed from each
+resampled `N_s`/`I_s`. The reference passes `sigma=deff` unchanged inside the
+loop. Recomputing it per sample looks like a correction and is not one: the
+weights would then vary with the noise draw, which changes what the spread
+of fitted parameters measures. Port it as it is.
+
 Uncertainty bands are the 15.87 / 84.13 percentiles of the MC curve family,
 **Birge-scaled** about the best-fit curve, exactly as the reference does.
 Two details of that, both checked against the source rather than assumed:

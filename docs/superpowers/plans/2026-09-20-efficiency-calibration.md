@@ -863,6 +863,11 @@ def run_monte_carlo(fit, N, dN, I, dI, iterations=N_MC_EFFICIENCY,
     """
     _need_scipy()
     E = fit.E
+    # The ORIGINAL deff, deliberately not recomputed from each resampled
+    # N_s/I_s. The reference passes sigma=deff unchanged inside the loop.
+    # Recomputing per sample looks like a correction and is not one: the fit
+    # weights would then vary with the noise draw, which changes what the
+    # spread of fitted parameters measures.
     deff = fit.deff
     rng = np.random.default_rng(seed)
     kfr_store, rw_store, rejected = [], [], 0
@@ -1002,6 +1007,19 @@ def test_the_normalised_curve_ignores_the_intensity_scale():
     assert a.curve(grid) == pytest.approx(b.curve(grid), rel=1e-6)
 
 
+def test_the_curve_is_the_best_fit_not_the_mc_mean():
+    """The MC gives the band; the best fit gives the curve. That is the
+    reference's own division, and the two differ by enough to matter, so a
+    later "improvement" that returned the MC mean here would silently change
+    every saved number and every corrected spectrum."""
+    from efficiency import f_kfr
+
+    r = _demo_result()
+    grid = np.linspace(r.fit.E.min(), r.fit.E.max(), 40)
+    expected = f_kfr(grid, *r.fit.kfr_params) * r.normalisation
+    assert r.curve(grid) == pytest.approx(expected, rel=1e-12)
+
+
 def test_an_unnormalised_curve_would_fail_that():
     """Control: raw eps does depend on the intensity scale, by exactly the
     factor applied."""
@@ -1078,7 +1096,16 @@ class EfficiencyResult:
 
     def curve(self, grid, model=None):
         """The normalised efficiency at `grid`, for the selected model
-        unless another is named."""
+        unless another is named.
+
+        This is the BEST-FIT curve, not the Monte Carlo mean. The MC is how
+        the uncertainty is obtained, not the curve: the reference plots
+        f_kfr(E, *eff_popt) and draws the MC family as a band around it. The
+        two really do differ -- on the reference's Ra-226 data at 1155 keV,
+        534.562 best-fit against an MC mean of 534.762 -- so this is what
+        gets written to file, drawn, and divided into a spectrum, while
+        every deff comes from the MC.
+        """
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
             return self._raw(grid, model or self._model) * self.normalisation
 
@@ -1118,7 +1145,7 @@ class EfficiencyResult:
 - [ ] **Step 4: Run the tests**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_efficiency_fit.py tests/test_efficiency_mc.py -q`
-Expected: `18 passed`  (11 in the fit file, 7 in the MC file)
+Expected: `19 passed`  (12 in the fit file, 7 in the MC file)
 
 - [ ] **Step 5: Commit**
 
