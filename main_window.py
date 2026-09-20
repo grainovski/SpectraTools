@@ -924,6 +924,35 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self._sync_active_radios()
         self._plot_data()
 
+    def can_apply_efficiency(self):
+        """An efficiency correction needs an energy per bin, which only an
+        active calibration provides."""
+        return bool(self._calibration_active and self._calibration is not None)
+
+    def apply_efficiency(self, spectrum, result):
+        """Divide `spectrum` by `result`'s selected curve and add the answer
+        as a new spectrum beside it.
+
+        The original is untouched: a correction you cannot compare against
+        the thing it corrected is much less useful, and an in-place change
+        would be unrecoverable without reloading the file.
+        """
+        from efficiency_apply import apply_efficiency as _apply
+
+        out = _apply(spectrum.data, self._calibration, result,
+                     variance=getattr(spectrum, "variance", None))
+        label = "%s [eff-corrected %s]" % (
+            spectrum.path, "KFR" if result.model == "kfr" else "RW")
+        self._add_combined_spectrum(label, out.counts, variance=out.variance)
+        if out.zeroed:
+            QMessageBox.information(
+                self, "Efficiency applied",
+                "%d of %d bins were zeroed: %d had a non-positive efficiency "
+                "and %d a non-finite one. Both lie outside the range the "
+                "curve was fitted over."
+                % (out.zeroed, len(spectrum.data), out.zeroed_nonpositive,
+                   out.zeroed_nonfinite))
+
     def _open_save_spectrum_dialog(self):
         active = active_spectrum(self.spectra)
         if active is None:

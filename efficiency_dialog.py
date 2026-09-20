@@ -98,6 +98,10 @@ class EfficiencyDialog(QDialog):
         self.save_button = buttons.addButton(
             "Save efficiency...", QDialogButtonBox.ButtonRole.ActionRole)
         self.save_button.clicked.connect(self._on_save)
+        self.apply_button = buttons.addButton(
+            "Apply to active spectrum",
+            QDialogButtonBox.ButtonRole.ActionRole)
+        self.apply_button.clicked.connect(self._on_apply)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
@@ -245,6 +249,55 @@ class EfficiencyDialog(QDialog):
             "Wrote %s_peaks%s%s" % (os.path.basename(stem), ext,
                                     "" if self.result.calibration is None
                                     else " and _bins" + ext))
+
+    def _main_window(self):
+        """Walk up to whatever can apply an efficiency.
+
+        This window is opened by the calibration dialog, which is itself
+        parented to the main window, so the target is two levels up -- but
+        walking by capability rather than by counting parents survives
+        anyone re-parenting either dialog later.
+        """
+        widget = self.parent()
+        while widget is not None and not hasattr(widget, "apply_efficiency"):
+            widget = widget.parent()
+        return widget
+
+    def _on_apply(self):
+        """Divide the active spectrum by this curve, into a new spectrum."""
+        from spectrum import active_spectrum
+
+        window = self._main_window()
+        if window is None:
+            QMessageBox.warning(
+                self, "Nothing to apply to",
+                "This efficiency window is not attached to a main window.")
+            return
+        if not window.can_apply_efficiency():
+            QMessageBox.warning(
+                self, "No active calibration",
+                "Applying an efficiency needs an energy for every bin, "
+                "which only an active energy calibration provides.")
+            return
+        spectrum = active_spectrum(window.spectra)
+        if spectrum is None:
+            QMessageBox.warning(self, "No active spectrum",
+                                "Select a spectrum to correct first.")
+            return
+        if (self.result.calibration is not None
+                and window._calibration != self.result.calibration):
+            # The same eps(E) applied through a different channel-to-energy
+            # map is a different correction, and nothing else would reveal
+            # it: the numbers all look reasonable either way.
+            answer = QMessageBox.question(
+                self, "Calibration has changed",
+                "This efficiency was derived under a different energy "
+                "calibration than the one now active. The same curve "
+                "applied through a different channel-to-energy map is a "
+                "different correction.\n\nApply it anyway?")
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        window.apply_efficiency(spectrum, self.result)
 
 
 def _fg(theme):
