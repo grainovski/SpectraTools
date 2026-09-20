@@ -277,3 +277,23 @@ def _rows_for(points, lines):
 
     rows, _skipped = build_rows(points, lines)
     return rows
+
+
+def test_the_worker_does_not_shadow_qthreads_finished_signal():
+    """QThread already defines `finished`. A custom signal of that name
+    shadows it, and the connection then goes somewhere else with no error at
+    all -- nothing raises, nothing warns, the handler simply never runs.
+
+    This is pinned directly rather than through behaviour, because the other
+    threading tests monkeypatch start() and so never exercise the real
+    threaded path: mutating `succeeded` to `finished` leaves all of them
+    passing. A structural assertion is the only cheap way to catch it.
+    """
+    from PySide6.QtCore import QThread
+
+    from calibration_plot_dialog import EfficiencyWorker
+
+    assert EfficiencyWorker.finished is QThread.finished, (
+        "EfficiencyWorker defines its own 'finished', shadowing QThread's")
+    for name in ("progressed", "succeeded", "failed"):
+        assert hasattr(EfficiencyWorker, name), name
