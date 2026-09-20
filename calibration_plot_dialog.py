@@ -596,6 +596,13 @@ class CalibrationPlotDialog(QDialog):
         # off the UI thread; these two are provenance and cost nothing.
         result.calibration = self._calibration
         result.source = os.path.basename(self._default_path or "")
+        # Hand it to the main window so it outlives this dialog and can be
+        # reopened from the menu later.
+        window = self.parent()
+        while window is not None and not hasattr(window, "set_efficiency"):
+            window = window.parent()
+        if window is not None:
+            window.set_efficiency(result)
         energy_errors = self._literature_errors(result.fit.E)
         previous = getattr(self, "_efficiency_dialog", None)
         if previous is not None:

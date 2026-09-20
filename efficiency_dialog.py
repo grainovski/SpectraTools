@@ -15,8 +15,9 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from PySide6.QtWidgets import (
-    QButtonGroup, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel,
-    QLineEdit, QMessageBox, QPushButton, QRadioButton, QVBoxLayout,
+    QButtonGroup, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QRadioButton,
+    QVBoxLayout,
 )
 
 from efficiency_io import write_per_bin, write_per_peak
@@ -89,6 +90,24 @@ class EfficiencyDialog(QDialog):
         self.examine_label = QLabel()
         self.examine_label.setWordWrap(True)
         layout.addWidget(self.examine_label)
+
+        # Aim at any loaded spectrum, not only the active one: the spectrum
+        # you want corrected is often not the one you were looking at when
+        # the calibration finished.
+        target_row = QHBoxLayout()
+        target_row.addWidget(QLabel("Apply to:"))
+        self.target_combo = QComboBox()
+        self.target_combo.setMinimumWidth(220)
+        target_row.addWidget(self.target_combo)
+        self.apply_button = QPushButton("Apply")
+        self.apply_button.clicked.connect(self._on_apply)
+        target_row.addWidget(self.apply_button)
+        self.apply_all_button = QPushButton("Apply to all")
+        self.apply_all_button.clicked.connect(self._on_apply_all)
+        target_row.addWidget(self.apply_all_button)
+        target_row.addStretch(1)
+        layout.addLayout(target_row)
+        self.refresh_targets()
 
         self.summary_label = QLabel()
         self.summary_label.setWordWrap(True)
@@ -254,6 +273,64 @@ class EfficiencyDialog(QDialog):
                                     "" if self.result.calibration is None
                                     else " and _bins" + ext))
 
+    def refresh_targets(self):
+        """Rebuild the target list from the window's current spectra.
+
+        Called on open and after every Apply, because applying ADDS a
+        spectrum -- the list the user is looking at goes stale the moment
+        they use it.
+        """
+        window = self._main_window()
+        self.target_combo.clear()
+        if window is None:
+            return
+        active_index = 0
+        for index, spectrum in enumerate(window.spectra):
+            self.target_combo.addItem(spectrum.path)
+            if getattr(spectrum, "active", False):
+                active_index = index
+        if self.target_combo.count():
+            self.target_combo.setCurrentIndex(active_index)
+
+    def _selected_spectrum(self):
+        window = self._main_window()
+        index = self.target_combo.currentIndex()
+        if window is None or index < 0 or index >= len(window.spectra):
+            return None
+        return window.spectra[index]
+
+    def _ready(self):
+        """The window and its calibration, or None after explaining why."""
+        window = self._main_window()
+        if window is None:
+            QMessageBox.warning(
+                self, "Nothing to apply to",
+                "This efficiency window is not attached to a main window.")
+            return None
+        if not window.can_apply_efficiency():
+            QMessageBox.warning(
+                self, "No active calibration",
+                "Applying an efficiency needs an energy for every bin, "
+                "which only an active energy calibration provides.")
+            return None
+        return window
+
+    def _drift_accepted(self, window):
+        """Ask before applying through a calibration this was not fitted
+        under. The same eps(E) through a different channel-to-energy map is
+        a different correction, and nothing else would reveal it: the
+        numbers look reasonable either way."""
+        if (self.result.calibration is None
+                or window._calibration == self.result.calibration):
+            return True
+        answer = QMessageBox.question(
+            self, "Calibration has changed",
+            "This efficiency was derived under a different energy "
+            "calibration than the one now active. The same curve applied "
+            "through a different channel-to-energy map is a different "
+            "correction.\n\nApply it anyway?")
+        return answer == QMessageBox.StandardButton.Yes
+
     def _main_window(self):
         """Walk up to whatever can apply an efficiency.
 
@@ -268,40 +345,58 @@ class EfficiencyDialog(QDialog):
         return widget
 
     def _on_apply(self):
-        """Divide the active spectrum by this curve, into a new spectrum."""
-        from spectrum import active_spectrum
-
-        window = self._main_window()
+        """Divide the PICKED spectrum by this curve, into a new spectrum."""
+        window = self._ready()
         if window is None:
-            QMessageBox.warning(
-                self, "Nothing to apply to",
-                "This efficiency window is not attached to a main window.")
             return
-        if not window.can_apply_efficiency():
-            QMessageBox.warning(
-                self, "No active calibration",
-                "Applying an efficiency needs an energy for every bin, "
-                "which only an active energy calibration provides.")
-            return
-        spectrum = active_spectrum(window.spectra)
+        spectrum = self._selected_spectrum()
         if spectrum is None:
-            QMessageBox.warning(self, "No active spectrum",
-                                "Select a spectrum to correct first.")
+            QMessageBox.warning(self, "No spectrum selected",
+                                "Choose a spectrum to correct first.")
             return
-        if (self.result.calibration is not None
-                and window._calibration != self.result.calibration):
-            # The same eps(E) applied through a different channel-to-energy
-            # map is a different correction, and nothing else would reveal
-            # it: the numbers all look reasonable either way.
-            answer = QMessageBox.question(
-                self, "Calibration has changed",
-                "This efficiency was derived under a different energy "
-                "calibration than the one now active. The same curve "
-                "applied through a different channel-to-energy map is a "
-                "different correction.\n\nApply it anyway?")
-            if answer != QMessageBox.StandardButton.Yes:
-                return
+        if not self._drift_accepted(window):
+            return
         window.apply_efficiency(spectrum, self.result)
+        self.refresh_targets()
+
+    def _on_apply_all(self):
+        """Correct every loaded spectrum that is not already a correction.
+
+        Dividing an already-corrected spectrum a second time is physically
+        meaningless, and pressing this twice is an easy thing to do, so
+        those are skipped and counted rather than silently doubled.
+        """
+        window = self._ready()
+        if window is None:
+            return
+        if not self._drift_accepted(window):
+            return
+        # Two reasons to skip, and they are different mistakes. A
+        # correction must never be corrected again -- that is a double
+        # correction and physically meaningless. And a spectrum whose
+        # correction under this model already exists is skipped so that
+        # pressing this button twice is a no-op rather than a way to fill
+        # the plot with identical copies.
+        existing = {s.path for s in window.spectra}
+        targets = [
+            s for s in list(window.spectra)
+            if not getattr(s, "efficiency_corrected", False)
+            and window.efficiency_label(s, self.result) not in existing
+        ]
+        skipped = len(window.spectra) - len(targets)
+        if not targets:
+            QMessageBox.information(
+                self, "Nothing to correct",
+                "Every loaded spectrum is already an efficiency correction.")
+            return
+        for spectrum in targets:
+            window.apply_efficiency(spectrum, self.result)
+        self.refresh_targets()
+        if skipped:
+            QMessageBox.information(
+                self, "Efficiency applied",
+                "Corrected %d spectrum(s). Skipped %d that were already "
+                "efficiency corrections." % (len(targets), skipped))
 
 
 def _fg(theme):
