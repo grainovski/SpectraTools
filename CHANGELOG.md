@@ -4,6 +4,54 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [6.0.2] - 2026-09-20
+
+### Added
+
+- **Clear Calibration** (Operations) discards the energy calibration
+  coefficients entirely, returning the axis to channels and greying out the
+  Toggle Calibration Active entry, since there is then nothing to toggle.
+  It asks first: unlike the toggle, which is its own undo, this cannot be
+  reversed. The toggle is unchanged and still keeps the coefficients so
+  they can be switched back on -- both entries now carry tooltips saying
+  which of the two they are.
+
+- **An efficiency is kept after its window is closed**, the way the energy
+  calibration already is. **Show Efficiency...** (Operations) reopens it,
+  so a spectrum loaded later can be corrected without refitting.
+
+- **The efficiency window can apply to any loaded spectrum**, not only the
+  active one, through a target list beside the Apply button; and **Apply to
+  all** corrects every loaded spectrum at once. A spectrum that is itself a
+  correction is never corrected again, and one whose correction already
+  exists is skipped, so pressing Apply to all twice does nothing the second
+  time rather than filling the plot with copies.
+
+### Fixed
+
+- **Clear could not reach fit curves on a spectrum that was no longer
+  active.** The plot draws committed fits for every visible spectrum, but
+  Clear only hid them on the active one. Applying an efficiency correction
+  makes the corrected copy active while the original keeps its fits, so
+  Clear was faithfully clearing a spectrum that had none while the visible
+  curves belonged to one it never looked at -- from the outside, a button
+  that did nothing.
+
+  This was never specific to efficiency: Add/Subtract Spectra and Activate
+  Cut leave things in exactly the same state, and have since they were
+  added. Clear now hides fits on every spectrum, which is what the plot
+  draws.
+
+### Changed
+
+- **Switching between the KFR and Radware efficiency models is about three
+  times faster**, and no longer slower the first time than afterwards.
+  1.25-2.11 s per switch is now a steady 0.60 s. Most of the old cost was
+  recomputing the normalisation -- evaluating the Monte Carlo mean across
+  all 10,000 stored samples -- on every switch; it is now computed once per
+  model, both models are prepared during the Monte Carlo you are already
+  waiting on, and the redraw no longer evaluates the same mean twice.
+
 ## [6.0.0] - 2026-09-20
 
 ### Added
