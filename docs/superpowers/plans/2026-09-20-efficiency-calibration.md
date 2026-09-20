@@ -798,6 +798,11 @@ EFFICIENCY_SEED = 42
 MC_MAXFEV = 1500
 MC_TOL = 1e-5
 
+#: Fewest finite MC samples that can support a reported value. Below this
+#: a mean is an average over whichever handful happened not to diverge,
+#: which is worse than reporting nothing.
+MIN_MC_SAMPLES = 10
+
 
 def finite_mean_std(values, min_n=1):
     """Mean and standard deviation over the finite entries, or (nan, nan)
@@ -825,7 +830,13 @@ class EfficiencyMC:
     rejected: int
 
     def _band(self, grid, centre, samples, func, birge_factor):
-        """Percentile envelope, Birge-scaled about the best-fit curve."""
+        """Percentile envelope, Birge-scaled about `centre`.
+
+        `centre` is the MC mean, because that is now the curve being
+        reported. The reference centres on its best fit instead; the two
+        differ by far less than the band's own width, but centring on the
+        curve actually drawn is what keeps the band symmetric about it.
+        """
         if samples is None or len(samples) == 0:
             return centre, centre
         p = samples[:N_BAND]
@@ -836,15 +847,18 @@ class EfficiencyMC:
         return (centre - birge_factor * (centre - lo),
                 centre + birge_factor * (hi - centre))
 
-    def kfr_band(self, grid, fit):
-        centre = f_kfr(np.asarray(grid, dtype=float), *fit.kfr_params)
+    def kfr_band(self, grid, fit, centre=None):
+        if centre is None:
+            centre = f_kfr(np.asarray(grid, dtype=float), *fit.kfr_params)
         return self._band(grid, centre, self.kfr_samples, f_kfr, fit.kfr_birge)
 
-    def rw_band(self, grid, fit):
+    def rw_band(self, grid, fit, centre=None):
         if fit.rw_params is None:
             nan = np.full(len(np.asarray(grid)), float("nan"))
             return nan, nan
-        centre = f_radware_5p(np.asarray(grid, dtype=float), *fit.rw_params)
+        if centre is None:
+            centre = f_radware_5p(np.asarray(grid, dtype=float),
+                                  *fit.rw_params)
         return self._band(grid, centre, self.rw_samples, f_radware_5p,
                           fit.rw_birge)
 
@@ -1007,17 +1021,35 @@ def test_the_normalised_curve_ignores_the_intensity_scale():
     assert a.curve(grid) == pytest.approx(b.curve(grid), rel=1e-6)
 
 
-def test_the_curve_is_the_best_fit_not_the_mc_mean():
-    """The MC gives the band; the best fit gives the curve. That is the
-    reference's own division, and the two differ by enough to matter, so a
-    later "improvement" that returned the MC mean here would silently change
-    every saved number and every corrected spectrum."""
+def test_the_curve_is_the_mc_mean_not_the_best_fit():
+    """The reported efficiency is the Monte Carlo mean (user decision). The
+    best fit is a different curve and the difference is small but real, so
+    returning it here would silently change every saved number and every
+    corrected spectrum."""
+    r = _demo_result()
+    grid = np.linspace(r.fit.E.min(), r.fit.E.max(), 40)
+    expected = r._mc_mean_raw(grid, "kfr") * r.normalisation
+    assert r.curve(grid) == pytest.approx(expected, rel=1e-12, nan_ok=True)
+
+
+def test_the_best_fit_would_fail_that():
+    """Control, and the reason the test above is not vacuous: the two curves
+    really are different. If this ever passes, the MC has collapsed onto the
+    best fit and neither test is testing anything."""
     from efficiency import f_kfr
 
     r = _demo_result()
     grid = np.linspace(r.fit.E.min(), r.fit.E.max(), 40)
-    expected = f_kfr(grid, *r.fit.kfr_params) * r.normalisation
-    assert r.curve(grid) == pytest.approx(expected, rel=1e-12)
+    best = f_kfr(grid, *r.fit.kfr_params) * r.normalisation
+    assert r.curve(grid) != pytest.approx(best, rel=1e-12)
+
+
+def test_the_applied_curve_is_the_one_that_peaks_at_one():
+    """The normalisation divides by the MC mean's peak, not the best fit's,
+    so that the curve actually applied is the one bounded by 1."""
+    r = _demo_result()
+    grid = np.linspace(r.fit.E.min(), r.fit.E.max(), 2000)
+    assert np.nanmax(r.curve(grid)) == pytest.approx(1.0, rel=1e-6)
 
 
 def test_an_unnormalised_curve_would_fail_that():
@@ -1072,42 +1104,110 @@ class EfficiencyResult:
         self._model = value
         self.normalisation = self._compute_normalisation()
 
-    def _raw(self, grid, model):
+    def _samples(self, model):
+        if self.mc is None:
+            return None
+        return self.mc.kfr_samples if model == "kfr" else self.mc.rw_samples
+
+    def best_fit_raw(self, grid, model):
+        """The best-fit curve, un-normalised.
+
+        Kept because the fit-quality statistics describe it and because
+        examining an energy reports it beside the MC mean, as CalEnEff does.
+        It is NOT what gets applied or saved -- see curve().
+        """
         grid = np.asarray(grid, dtype=float)
         if model == "kfr":
             return f_kfr(grid, *self.fit.kfr_params)
         return f_radware_5p(grid, *self.fit.rw_params)
 
+    def _mc_mean_raw(self, grid, model):
+        """Mean of the Monte Carlo family at each energy, un-normalised.
+
+        This is THE efficiency: applied to a spectrum, written to both files
+        and drawn.
+
+        Evaluated in chunks over energy on purpose. A per-bin file covers
+        16,384 channels and the MC holds 10,000 parameter sets, so the whole
+        family at once is 1.6e8 doubles -- about 1.3 GB in a single
+        allocation. Chunking holds it to a few MB at a time and costs
+        nothing else.
+
+        A bin where fewer than MIN_MC_SAMPLES of the family are finite gets
+        NaN, not a mean over the survivors. Far outside the fitted range most
+        samples diverge, and averaging the few that happened not to would be
+        a number with nothing behind it. efficiency_apply then zeroes those
+        bins, which is the right outcome.
+        """
+        grid = np.atleast_1d(np.asarray(grid, dtype=float))
+        samples = self._samples(model)
+        if samples is None or len(samples) == 0:
+            return np.full(grid.shape, float("nan"))
+        func = f_kfr if model == "kfr" else f_radware_5p
+        out = np.empty(grid.shape, dtype=float)
+        step = max(1, 2000000 // max(len(samples), 1))
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            for start in range(0, len(grid), step):
+                chunk = grid[start:start + step]
+                family = func(chunk[None, :],
+                              *[samples[:, i:i + 1]
+                                for i in range(samples.shape[1])])
+                finite = np.isfinite(family)
+                n_ok = finite.sum(axis=0)
+                total = np.where(finite, family, 0.0).sum(axis=0)
+                out[start:start + step] = np.where(
+                    n_ok >= MIN_MC_SAMPLES, total / np.maximum(n_ok, 1),
+                    np.nan)
+        return out
+
     def _compute_normalisation(self):
-        """1 / peak of the selected curve over the fitted range.
+        """1 / peak of the selected model's MC MEAN over the fitted range.
+
+        It must be the MC mean and not the best fit, because the MC mean is
+        the curve that gets applied: normalising by the other one would leave
+        the applied curve slightly off 1 at its peak, and "always less than
+        1" is the whole point of normalising.
 
         The peak is found on a fine grid rather than at the data energies:
         the curve can crest between two measured points, and normalising by
         a value that is not the real maximum would leave the curve above 1.
+
+        Falls back to the best fit only when there is no Monte Carlo at all,
+        which happens in tests that construct a result with mc=None.
         """
         lo = max(float(self.fit.E.min()) * 0.9, 1.0)
         hi = float(self.fit.E.max()) * 1.1
         grid = np.linspace(lo, hi, 2000)
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-            values = self._raw(grid, self._model)
+            values = (self._mc_mean_raw(grid, self._model)
+                      if self.mc is not None
+                      else self.best_fit_raw(grid, self._model))
         finite = values[np.isfinite(values) & (values > 0)]
         peak = float(np.max(finite)) if len(finite) else 1.0
         return 1.0 / max(peak, 1e-30)
 
     def curve(self, grid, model=None):
-        """The normalised efficiency at `grid`, for the selected model
-        unless another is named.
+        """The normalised efficiency at `grid` -- the **Monte Carlo mean**.
 
-        This is the BEST-FIT curve, not the Monte Carlo mean. The MC is how
-        the uncertainty is obtained, not the curve: the reference plots
-        f_kfr(E, *eff_popt) and draws the MC family as a band around it. The
-        two really do differ -- on the reference's Ra-226 data at 1155 keV,
-        534.562 best-fit against an MC mean of 534.762 -- so this is what
-        gets written to file, drawn, and divided into a spectrum, while
-        every deff comes from the MC.
+        This is what is applied to a spectrum, written to both files and
+        drawn (user decision, 2026-09-20). It is deliberately NOT the
+        best-fit curve, which is what the reference plots: the two differ by
+        a small but real amount -- on the reference's Ra-226 data at 1155
+        keV, 534.762 MC mean against 534.562 best fit -- so which one is
+        returned here changes every saved number and every corrected
+        spectrum.
+
+        The best fit stays available through best_fit_raw and is reported
+        beside the MC mean when examining an energy, as CalEnEff does. The
+        fit-quality statistics (chi2, ndf, Birge, RMS) remain best-fit
+        quantities: they describe the fit, not this curve, and the CalEnEff
+        oracle in Task 3 compares them.
         """
+        which = model or self._model
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-            return self._raw(grid, model or self._model) * self.normalisation
+            if self.mc is None:
+                return self.best_fit_raw(grid, which) * self.normalisation
+            return self._mc_mean_raw(grid, which) * self.normalisation
 
     def band(self, grid, model=None):
         """The normalised 1-sigma band, or (nan, nan) without a Monte Carlo."""
@@ -1115,12 +1215,17 @@ class EfficiencyResult:
         if self.mc is None:
             nan = np.full(len(np.asarray(grid)), float("nan"))
             return nan, nan
-        lo, hi = (self.mc.kfr_band(grid, self.fit) if which == "kfr"
-                  else self.mc.rw_band(grid, self.fit))
+        centre = self._mc_mean_raw(grid, which)
+        lo, hi = (self.mc.kfr_band(grid, self.fit, centre) if which == "kfr"
+                  else self.mc.rw_band(grid, self.fit, centre))
         return lo * self.normalisation, hi * self.normalisation
 
     def predict(self, energy, model=None):
-        """(best_fit, mc_mean, mc_sigma) at one energy, all normalised.
+        """(mc_mean, mc_sigma, best_fit) at one energy, all normalised.
+
+        The MC mean comes first because it is the reported efficiency.
+        The best fit is shown next to it, which is what CalEnEff's own
+        examine panel does.
 
         Fewer than 10 surviving finite samples gives nan for the mean and
         sigma rather than a number computed from a handful of points.
@@ -1145,7 +1250,7 @@ class EfficiencyResult:
 - [ ] **Step 4: Run the tests**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_efficiency_fit.py tests/test_efficiency_mc.py -q`
-Expected: `19 passed`  (12 in the fit file, 7 in the MC file)
+Expected: `21 passed`  (14 in the fit file, 7 in the MC file)
 
 - [ ] **Step 5: Commit**
 

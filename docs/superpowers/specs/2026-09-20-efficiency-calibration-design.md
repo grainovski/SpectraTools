@@ -98,16 +98,38 @@ window and written into the file headers — a band computed from 200
 surviving samples means something different from one computed from 9 900,
 and hiding that would be dishonest.
 
-**Which curve is "the efficiency".** The Monte Carlo is how the uncertainty
-is obtained; the curve itself is the **best fit**. That is the reference's
-own division — `_draw_efficiency` plots `f_kfr(E_g, *eff_popt)`, the best
-fit, and draws the MC family as a band around it, while
-`predict_efficiency` returns the best-fit value and the MC mean ± σ
-side by side. So: the curve written to file, drawn in the window and divided
-into a spectrum is the best fit, and every `deff` comes from the MC. The two
-differ slightly but really — on the reference's own Ra-226 data at 1155 keV
-the best fit gives 534.562 against an MC mean of 534.762 — so this is a
-choice to state rather than leave to whichever the implementer reaches for.
+**Which curve is "the efficiency" -- the MC MEAN** (user decision,
+2026-09-20). The curve applied to a spectrum, written to both files and
+drawn is the **mean of the Monte Carlo family** at each energy, not the
+best-fit curve.
+
+This is a deliberate departure from the reference, which plots
+`f_kfr(E_g, *eff_popt)` -- the best fit -- and draws the MC family as a band
+around it. The two differ by a small but real amount: on the reference's own
+Ra-226 data at 1155 keV, 534.762 MC mean against 534.562 best fit. Which one
+is returned changes every saved number and every corrected spectrum, so it is
+stated here rather than left to whichever an implementer reaches for, and a
+test pins it with a control proving the two curves are genuinely different.
+
+Four consequences follow, none of them a free substitution:
+
+- **The normalisation (§4) divides by the MC mean's peak**, not the best
+  fit's. Otherwise the curve actually applied would sit slightly off 1 at its
+  peak, and being bounded by 1 is the whole point of normalising.
+- **The band is centred on the MC mean**, since that is the curve drawn.
+- **A bin needs at least `MIN_MC_SAMPLES = 10` finite samples** to report a
+  mean. Far outside the fitted range most of the family diverges, and
+  averaging the few that happened not to would be a number with nothing
+  behind it. Such bins come back NaN and §7 then zeroes them -- the correct
+  outcome, and one that makes the zeroing rule fire more often than it would
+  for a best-fit curve.
+- **Cost.** The mean is an average over the whole family, so a per-bin file
+  over 16,384 channels against 10,000 parameter sets is 1.6e8 values, about
+  1.3 GB in a single allocation. It is computed in chunks over energy.
+
+**The fit-quality statistics stay best-fit quantities.** chi2, ndf, Birge and
+RMS describe the fit, not the reported curve, and the CalEnEff oracle in §12
+compares them. They are not recomputed against the MC mean.
 
 **The MC refits against the ORIGINAL `deff`,** not one recomputed from each
 resampled `N_s`/`I_s`. The reference passes `sigma=deff` unchanged inside the
@@ -116,7 +138,11 @@ weights would then vary with the noise draw, which changes what the spread
 of fitted parameters measures. Port it as it is.
 
 Uncertainty bands are the 15.87 / 84.13 percentiles of the MC curve family,
-**Birge-scaled** about the best-fit curve, exactly as the reference does.
+**Birge-scaled about the MC mean** -- the curve being reported. The
+reference centres its band on the best fit instead, because that is what
+it reports; the two centres differ by far less than the band's own width,
+but centring on the curve actually drawn is what keeps the band symmetric
+about it.
 Two details of that, both checked against the source rather than assumed:
 
 - The band is evaluated from the first `N_BAND = 4000` stored samples, not
@@ -140,10 +166,15 @@ precedent.
 **Decision (user, 2026-09-20): scale by the peak of the model the user has
 selected to apply.**
 
-`norm = 1 / max(selected_curve)`, evaluated on a fine grid over the fitted
-energy range. **Both** curves are multiplied by that one factor, so the
-selected curve peaks at exactly 1.0 and the other is drawn on the same scale
-and stays directly comparable to it.
+`norm = 1 / max(MC mean of the selected model)`, evaluated on a fine grid
+over the fitted energy range. **Both** curves are multiplied by that one
+factor, so the selected curve peaks at exactly 1.0 and the other is drawn
+on the same scale and stays directly comparable to it.
+
+It is the MC mean's peak and not the best fit's, because the MC mean is
+the curve that gets applied (§3). Normalising by the other one would
+leave the applied curve slightly off 1 at its peak, and being bounded by 1
+is the entire purpose of normalising.
 
 Consequences, all intended:
 
@@ -324,7 +355,10 @@ No decision in this document is still open.
 
 | decision | choice | source |
 |---|---|---|
-| Normalisation | peak of the **selected** model = 1.0 | user, 2026-09-20 |
+| The reported efficiency | the **MC mean**, not the best fit — applied, saved and drawn | user, 2026-09-20 |
+| Normalisation | peak of the **selected** model's MC mean = 1.0 | user, 2026-09-20; MC mean follows from the row above |
+| Band centre | the MC mean | §3, following the row above |
+| chi2, ndf, Birge, RMS | stay **best-fit** quantities | §3 — they describe the fit, and the CalEnEff oracle compares them |
 | Extrapolation | unrestricted, outside the fitted range | user, 2026-09-20 |
 | Files | two — per-peak and per-bin, each carrying both curves | user, 2026-09-20 |
 | Channel columns | not stored; the calibration is available | user, 2026-09-20 |
