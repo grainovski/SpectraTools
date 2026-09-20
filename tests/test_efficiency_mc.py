@@ -103,3 +103,56 @@ def test_cancelling_stops_the_run():
 
 def test_the_default_iteration_count_matches_the_reference():
     assert N_MC_EFFICIENCY == 10000
+
+
+def test_the_mc_weights_never_change_between_samples():
+    """Every refit must use the ORIGINAL deff, not one recomputed from the
+    resampled N and I.
+
+    Recomputing looks like a correction and is not one: the fit weights
+    would then vary with the noise draw, which changes what the spread of
+    fitted parameters actually measures. The reference passes sigma=deff
+    unchanged inside its loop.
+
+    Nothing else in this file would notice if that stopped being true. The
+    samples would still be finite, still reproducible under a fixed seed,
+    and still bracketed by their own band -- so this invariant needs its own
+    test or it is guarded by nothing.
+    """
+    import efficiency
+
+    N, dN, E, I, dI = _load("demo1.txt")
+    fit = fit_efficiency(E, N, dN, I, dI)
+
+    efficiency._need_scipy()
+    real = efficiency.curve_fit
+    seen = []
+
+    def recording(*args, **kwargs):
+        seen.append(np.asarray(kwargs["sigma"], dtype=float).copy())
+        return real(*args, **kwargs)
+
+    efficiency.curve_fit = recording
+    try:
+        run_monte_carlo(fit, N, dN, I, dI, iterations=25)
+    finally:
+        efficiency.curve_fit = real
+
+    assert len(seen) > 25, "expected roughly two refits per iteration"
+    for sigma in seen:
+        assert sigma == pytest.approx(fit.deff), (
+            "a refit used weights other than the original deff")
+
+
+def test_recomputed_weights_really_would_differ():
+    """Control for the test above. If resampling happened not to move deff,
+    that assertion would hold no matter how the weights were computed and
+    would be pinning nothing."""
+    from efficiency import efficiency_points
+
+    N, dN, E, I, dI = _load("demo1.txt")
+    _eff, deff = efficiency_points(N, dN, I, dI)
+    rng = np.random.default_rng(1)
+    _eff_s, deff_s = efficiency_points(rng.normal(N, dN), dN,
+                                       rng.normal(I, dI), dI)
+    assert deff_s != pytest.approx(deff)
