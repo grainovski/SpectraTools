@@ -12,13 +12,14 @@ import os
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QLabel,
     QMessageBox,
+    QProgressDialog,
     QVBoxLayout,
 )
 
@@ -44,6 +45,71 @@ _PICK_RADIUS_PX = 12.0
 #: through the table's text, so this only has to absorb that -- it is
 #: the same tolerance caleneff_export matches on, for the same reason.
 _ENERGY_MATCH_KEV = 1e-6
+
+
+class EfficiencyWorker(QThread):
+    """Runs the efficiency Monte Carlo off the UI thread.
+
+    Ten thousand iterations across two models takes about a minute. Doing
+    that in the click handler would freeze the window for the whole of it,
+    with no way to stop, and a frozen window is indistinguishable from a
+    crashed one.
+
+    The signals are progressed, succeeded and failed rather than the more
+    obvious "finished", because QThread already defines a signal of that
+    name and shadowing it sends the connection somewhere else with no error.
+    """
+
+    progressed = Signal(int, int)
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, parent, rows):
+        super().__init__(parent)
+        self._rows = rows
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def compute(self, iterations=None):
+        """The fit and the Monte Carlo, synchronously.
+
+        Separate from run() so it can be tested without a thread: what the
+        thread does and the fact that it is a thread are two claims, and
+        they are worth checking apart.
+        """
+        from efficiency import (N_MC_EFFICIENCY, fit_efficiency,
+                                run_monte_carlo)
+
+        rows = self._rows
+        E = np.array([r.energy for r in rows], dtype=float)
+        N = np.array([r.area for r in rows], dtype=float)
+        dN = np.array([r.area_err for r in rows], dtype=float)
+        I = np.array([r.intensity_pct for r in rows], dtype=float)
+        dI = np.array([r.intensity_pct_err for r in rows], dtype=float)
+        fit = fit_efficiency(E, N, dN, I, dI)
+        mc = run_monte_carlo(
+            fit, N, dN, I, dI,
+            iterations=N_MC_EFFICIENCY if iterations is None else iterations,
+            progress=self._progress)
+        return fit, mc
+
+    def run(self):
+        try:
+            fit, mc = self.compute()
+        except Exception as exc:          # noqa: BLE001 - reported, not raised
+            # A raise here would cross a thread boundary and vanish; in a
+            # --windowed build there is no stderr to carry it either.
+            self.failed.emit(str(exc))
+            return
+        if self._cancelled:
+            return
+        self.succeeded.emit((fit, mc))
+
+    def _progress(self, done, total):
+        self.progressed.emit(done, total)
+        return not self._cancelled
 
 
 class CalibrationPlotDialog(QDialog):
@@ -468,6 +534,67 @@ class CalibrationPlotDialog(QDialog):
             reason or "Fit a relative efficiency curve from these peaks.")
 
     def _on_efficiency_clicked(self):
-        """Filled in by Task 10, which runs the Monte Carlo on a worker
-        thread. Task 8 only puts the button there and decides when it is
-        usable."""
+        """Fit the efficiency curves, then show them.
+
+        Re-checks the gate rather than trusting the button: the handler is
+        reachable by keyboard and by code even when the button is disabled,
+        and refusing here is cheaper than a fitter error later.
+        """
+        reason = self._efficiency_blocked_reason()
+        if reason is not None:
+            QMessageBox.warning(self, "Cannot fit an efficiency", reason)
+            return
+
+        rows = self._efficiency_rows()
+        progress = QProgressDialog(
+            "Fitting efficiency curves (Monte Carlo)...", "Cancel",
+            0, 100, self)
+        progress.setWindowTitle("Efficiency calibration")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        worker = EfficiencyWorker(self, rows)
+        # Held on self: a QThread that goes out of scope while running is
+        # destroyed mid-run, which Qt reports as a crash rather than an
+        # error.
+        self._efficiency_worker = worker
+
+        def on_progress(done, total):
+            progress.setValue(int(100 * done / max(total, 1)))
+
+        def on_succeeded(payload):
+            progress.close()
+            self._show_efficiency(*payload)
+
+        def on_failed(message):
+            progress.close()
+            QMessageBox.warning(self, "Efficiency fit failed", message)
+
+        worker.progressed.connect(on_progress)
+        worker.succeeded.connect(on_succeeded)
+        worker.failed.connect(on_failed)
+        progress.canceled.connect(worker.cancel)
+        worker.start()
+
+    def _show_efficiency(self, fit, mc):
+        from efficiency import EfficiencyResult
+        from efficiency_dialog import EfficiencyDialog
+
+        result = EfficiencyResult(
+            fit=fit, mc=mc, model="kfr",
+            calibration=self._calibration,
+            source=os.path.basename(self._default_path or ""))
+        energy_errors = self._literature_errors(result.fit.E)
+        previous = getattr(self, "_efficiency_dialog", None)
+        if previous is not None:
+            previous.close()
+            previous.deleteLater()
+        self._efficiency_dialog = EfficiencyDialog(
+            self, result, energy_errors,
+            theme=getattr(self.parent(), "_theme", "light"),
+            default_path=self._default_path,
+            channels=(self._max_channel or 4095) + 1)
+        self._efficiency_dialog.setAttribute(
+            Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._efficiency_dialog.show()

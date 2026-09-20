@@ -196,3 +196,84 @@ def test_it_survives_radware_not_converging(qapp):
     assert "did not converge" in dialog.summary_text().lower()
     assert "did not converge" in dialog.examine(250.0).lower()
     dialog.close()
+
+
+# --- running it off the UI thread ---------------------------------------
+
+
+def test_the_mc_runs_off_the_ui_thread(qapp, monkeypatch):
+    """10,000 iterations across two models is about a minute. Running it in
+    the handler would freeze the window for that whole time, and a frozen
+    window is indistinguishable from a crashed one."""
+    import calibration_plot_dialog as mod
+
+    seen = {}
+    monkeypatch.setattr(mod.EfficiencyWorker, "start",
+                        lambda self, *a, **k: seen.setdefault("started", True),
+                        raising=False)
+    d = _dialog(qapp, _points(), _lines())
+    d._on_efficiency_clicked()
+    assert seen.get("started"), "the Monte Carlo was not handed to a worker"
+    d.close()
+
+
+def test_the_worker_really_is_a_thread(qapp):
+    """Control for the test above. A plain object with a start() method
+    would satisfy it while still running everything on the UI thread."""
+    from PySide6.QtCore import QThread
+
+    from calibration_plot_dialog import EfficiencyWorker
+
+    assert issubclass(EfficiencyWorker, QThread)
+
+
+def test_cancelling_tells_the_worker_to_stop(qapp):
+    """The progress dialog's Cancel has to reach the loop. run_monte_carlo
+    stops when its progress callback returns False, so the worker's callback
+    must start returning False once cancelled."""
+    from calibration_plot_dialog import EfficiencyWorker
+
+    worker = EfficiencyWorker(None, _rows_for(_points(), _lines()))
+    assert worker._progress(0, 100) is True
+    worker.cancel()
+    assert worker._progress(1, 100) is False
+    worker.deleteLater()
+
+
+def test_a_blocked_calibration_never_starts_a_worker(qapp, monkeypatch):
+    """The button is disabled in that case, but the handler is still
+    reachable by keyboard and by code. It must refuse rather than run a fit
+    the dialog already said was impossible."""
+    import calibration_plot_dialog as mod
+
+    seen = {}
+    monkeypatch.setattr(mod.EfficiencyWorker, "start",
+                        lambda self, *a, **k: seen.setdefault("started", True),
+                        raising=False)
+    monkeypatch.setattr(mod.QMessageBox, "warning",
+                        staticmethod(lambda *a, **k: None))
+    d = _dialog(qapp, _points(4), _lines(4))       # too few points
+    d._on_efficiency_clicked()
+    assert not seen.get("started")
+    d.close()
+
+
+def test_the_worker_computes_a_usable_result(qapp):
+    """Run the worker's own computation synchronously, on the same rows the
+    dialog would hand it. Threading is tested above; this checks the thing
+    the thread exists to do actually works."""
+    from calibration_plot_dialog import EfficiencyWorker
+
+    worker = EfficiencyWorker(None, _rows_for(_points(), _lines()))
+    fit, mc = worker.compute(iterations=50)
+    assert fit.kfr_params is not None
+    assert mc.kfr_accepted > 0
+    worker.deleteLater()
+
+
+def _rows_for(points, lines):
+    """The same rows _efficiency_rows would produce for these inputs."""
+    from caleneff_export import build_rows
+
+    rows, _skipped = build_rows(points, lines)
+    return rows
