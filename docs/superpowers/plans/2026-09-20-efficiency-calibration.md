@@ -1465,7 +1465,8 @@ def test_a_real_efficiency_result_plugs_in():
     slope = (float(E.max()) - float(E.min())) / 511.0
     counts = np.full(512, 1000.0)
 
-    out = apply_efficiency(counts, Calibration(float(E.min()), slope), result)
+    out = apply_efficiency(
+        counts, Calibration("linear", float(E.min()), slope), result)
 
     assert np.all(np.isfinite(out.counts))
     assert out.zeroed == 0, "nothing should be zeroed inside the fitted range"
@@ -1491,14 +1492,16 @@ def test_a_negative_calibration_offset_zeroes_those_bins():
     result = _real_result()
     counts = np.full(64, 500.0)
     # -20 keV at channel 0, reaching 400 keV at the top.
-    out = apply_efficiency(counts, Calibration(-20.0, 420.0 / 63.0), result)
+    out = apply_efficiency(
+        counts, Calibration("linear", -20.0, 420.0 / 63.0), result)
 
     assert np.all(np.isfinite(out.counts)), "a bad energy produced a bad count"
     assert out.zeroed > 0, "negative energies were silently corrected"
     assert out.zeroed_nonpositive > 0, "expected KFR's finite <= 0 branch"
 
     result.model = "rw"
-    out_rw = apply_efficiency(counts, Calibration(-20.0, 420.0 / 63.0), result)
+    out_rw = apply_efficiency(
+        counts, Calibration("linear", -20.0, 420.0 / 63.0), result)
     assert np.all(np.isfinite(out_rw.counts))
     assert out_rw.zeroed_nonfinite > 0, "expected Radware's NaN branch"
 
