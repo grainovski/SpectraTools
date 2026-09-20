@@ -58,6 +58,10 @@ class CalibrationPlotDialog(QDialog):
     #: without counting rows.
     pointPicked = Signal(int)
 
+    #: Radware has five free parameters, so ndf = n - 5 must exceed zero.
+    #: Six is the smallest n leaving any redundancy at all.
+    MIN_EFFICIENCY_POINTS = 6
+
     def __init__(self, parent, calibration, points, source_lines,
                  max_channel, default_path, excluded=(), reason=None):
         super().__init__(parent)
@@ -109,6 +113,11 @@ class CalibrationPlotDialog(QDialog):
             QDialogButtonBox.ButtonRole.ActionRole,
         )
         self.finish_button.clicked.connect(self._on_finish)
+        self.efficiency_button = buttons.addButton(
+            "Auto MC Efficiency Calibration...",
+            QDialogButtonBox.ButtonRole.ActionRole,
+        )
+        self.efficiency_button.clicked.connect(self._on_efficiency_clicked)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
@@ -218,6 +227,8 @@ class CalibrationPlotDialog(QDialog):
             self.summary_label.setText(
                 f"no calibration: {reason}" if reason else "no calibration yet"
             )
+
+        self._refresh_efficiency_button()
 
     def _scale_residuals(self, residuals):
         """Fit the residual strip's y axis around `residuals` alone."""
@@ -400,3 +411,63 @@ class CalibrationPlotDialog(QDialog):
             QMessageBox.warning(self, "Could not export", str(exc))
             return
         QMessageBox.information(self, "Saved", summary)
+
+    # --- Auto MC efficiency calibration ------------------------------------
+
+    def _efficiency_rows(self):
+        """The peaks usable for an efficiency fit, as CalEnEff's own seven
+        columns.
+
+        Built on caleneff_export.build_rows rather than pairing points to
+        source lines again here. That is what makes the in-app fit and the
+        exported file agree by construction: a user who exports these peaks
+        and runs CalEnEff on them gets the numbers this dialog showed.
+
+        Excluded points are dropped FIRST. One the user rejected from the
+        energy calibration must not silently steer the efficiency curve.
+        """
+        def is_out(energy):
+            return any(abs(energy - e) < 1e-9 for e in self._excluded)
+
+        used = [p for p in self._points if not is_out(p[4])]
+        try:
+            rows, _skipped = build_rows(used, self._source_lines)
+        except ExportError:
+            return []
+        return rows
+
+    def _efficiency_blocked_reason(self):
+        """Why the efficiency calibration cannot run, or None.
+
+        Checked here rather than left to fail inside scipy: a fitter's error
+        points at the fit, not at the row of data that caused it.
+        """
+        rows = self._efficiency_rows()
+        if len(rows) < self.MIN_EFFICIENCY_POINTS:
+            return (
+                "Needs at least %d peaks matched to source lines with a "
+                "usable uncertainty; this calibration has %d. The Radware "
+                "model has 5 free parameters."
+                % (self.MIN_EFFICIENCY_POINTS, len(rows)))
+        for row in rows:
+            if not row.area > 0:
+                return ("Every peak needs a positive area; the one at "
+                        "%.2f keV does not." % row.energy)
+            if not row.energy > 0:
+                return ("Every energy must be above 0 keV; both models "
+                        "evaluate ln(E) and b/E.")
+            if not row.intensity_pct > 0:
+                return ("Every source line needs a positive intensity; the "
+                        "one at %.2f keV does not." % row.energy)
+        return None
+
+    def _refresh_efficiency_button(self):
+        reason = self._efficiency_blocked_reason()
+        self.efficiency_button.setEnabled(reason is None)
+        self.efficiency_button.setToolTip(
+            reason or "Fit a relative efficiency curve from these peaks.")
+
+    def _on_efficiency_clicked(self):
+        """Filled in by Task 10, which runs the Monte Carlo on a worker
+        thread. Task 8 only puts the button there and decides when it is
+        usable."""
