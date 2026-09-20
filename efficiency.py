@@ -259,3 +259,150 @@ def fit_efficiency(E, N, dN, I, dI):
         out.rw_rms = float(np.sqrt(np.mean(res_r ** 2)))
         out.rw_birge = birge(out.rw_chi2, out.rw_ndf)
     return out
+
+
+#: Reference values (ra226_gui.py). N_BAND caps how many stored samples are
+#: evaluated on the plotting grid -- evaluating all 10,000 is what makes a
+#: redraw slow, and a percentile needs far fewer.
+N_MC_EFFICIENCY = 10000
+N_BAND = 4000
+EFFICIENCY_SEED = 42
+MC_MAXFEV = 1500
+MC_TOL = 1e-5
+
+#: Fewest finite MC samples that can support a reported value. Below this a
+#: mean is an average over whichever handful happened not to diverge, which
+#: is worse than reporting nothing.
+MIN_MC_SAMPLES = 10
+
+
+def finite_mean_std(values, min_n=1):
+    """Mean and standard deviation over the finite entries, or (nan, nan)
+    when fewer than min_n of them survive."""
+    v = np.asarray(values, dtype=float)
+    v = v[np.isfinite(v)]
+    if len(v) < min_n:
+        return float("nan"), float("nan")
+    return float(np.mean(v)), float(np.std(v))
+
+
+def band_percentiles(band, lo=15.87, hi=84.13):
+    """The 1-sigma envelope of an (n_samples, n_grid) family of curves."""
+    with np.errstate(invalid="ignore"):
+        return (np.nanpercentile(band, lo, axis=0),
+                np.nanpercentile(band, hi, axis=0))
+
+
+@dataclass
+class EfficiencyMC:
+    kfr_samples: np.ndarray
+    rw_samples: np.ndarray
+    kfr_accepted: int
+    rw_accepted: int
+    rejected: int
+
+    def _band(self, grid, centre, samples, func, birge_factor):
+        """Percentile envelope, Birge-scaled about `centre`.
+
+        `centre` is normally the MC mean, because that is the curve being
+        reported. The reference centres on its best fit instead; the two
+        differ by far less than the band's own width, but centring on the
+        curve actually drawn is what keeps the band symmetric about it.
+        """
+        if samples is None or len(samples) == 0:
+            return centre, centre
+        p = samples[:N_BAND]
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            family = func(np.asarray(grid, dtype=float)[None, :],
+                          *[p[:, i:i + 1] for i in range(p.shape[1])])
+            lo, hi = band_percentiles(family)
+        return (centre - birge_factor * (centre - lo),
+                centre + birge_factor * (hi - centre))
+
+    def kfr_band(self, grid, fit, centre=None):
+        if centre is None:
+            centre = f_kfr(np.asarray(grid, dtype=float), *fit.kfr_params)
+        return self._band(grid, centre, self.kfr_samples, f_kfr, fit.kfr_birge)
+
+    def rw_band(self, grid, fit, centre=None):
+        if fit.rw_params is None:
+            nan = np.full(len(np.asarray(grid)), float("nan"))
+            return nan, nan
+        if centre is None:
+            centre = f_radware_5p(np.asarray(grid, dtype=float),
+                                  *fit.rw_params)
+        return self._band(grid, centre, self.rw_samples, f_radware_5p,
+                          fit.rw_birge)
+
+
+def run_monte_carlo(fit, N, dN, I, dI, iterations=N_MC_EFFICIENCY,
+                    seed=EFFICIENCY_SEED, progress=None):
+    """Resample N and I, refit both models, keep the parameter sets.
+
+    Speed matters here: 10,000 iterations times two models has to finish in
+    about a minute, which is why this uses LM rather than TRF, relaxes the
+    tolerances to 1e-5 (sigma-level accuracy is all a band needs) and caps
+    maxfev. All three are the reference's own choices.
+
+    `progress(done, total)` is called every 100 iterations if given, and may
+    return False to cancel.
+    """
+    _need_scipy()
+    E = fit.E
+    # The ORIGINAL deff, deliberately not recomputed from each resampled
+    # N_s/I_s. The reference passes sigma=deff unchanged inside the loop.
+    # Recomputing per sample looks like a correction and is not one: the fit
+    # weights would then vary with the noise draw, which changes what the
+    # spread of fitted parameters measures.
+    deff = fit.deff
+    rng = np.random.default_rng(seed)
+    kfr_store, rw_store, rejected = [], [], 0
+
+    for k in range(iterations):
+        if progress is not None and k % 100 == 0:
+            if progress(k, iterations) is False:
+                break
+
+        N_s = rng.normal(N, dN)
+        I_s = rng.normal(I, dI)
+        if (N_s <= 0).any() or (I_s <= 0).any():
+            rejected += 1
+            continue
+        eff_s = N_s / I_s
+        if not np.isfinite(eff_s).all() or (eff_s <= 0).any():
+            rejected += 1
+            continue
+
+        try:
+            pp, _ = curve_fit(f_kfr, E, eff_s, p0=fit.kfr_params, sigma=deff,
+                              absolute_sigma=True, maxfev=MC_MAXFEV,
+                              method="lm", ftol=MC_TOL, xtol=MC_TOL,
+                              gtol=MC_TOL)
+            if np.all(np.isfinite(pp)):
+                kfr_store.append(pp)
+        except Exception:
+            pass
+
+        if fit.rw_params is not None:
+            # A fresh parset() seed per sample, not a rolling warm start:
+            # effit.c calls parset() then fitter() for each new data set, and
+            # chaining the previous result would bias the chain.
+            try:
+                pp_r, _ = curve_fit(f_radware_5p, E, eff_s,
+                                    p0=radware_seed_5p(E, eff_s), sigma=deff,
+                                    absolute_sigma=True, maxfev=MC_MAXFEV,
+                                    method="lm", ftol=MC_TOL, xtol=MC_TOL,
+                                    gtol=MC_TOL)
+                if np.all(np.isfinite(pp_r)) and np.all(np.abs(pp_r) < 500):
+                    rw_store.append(pp_r)
+            except Exception:
+                pass
+
+    return EfficiencyMC(
+        kfr_samples=(np.asarray(kfr_store, dtype=float) if kfr_store
+                     else np.empty((0, 4))),
+        rw_samples=(np.asarray(rw_store, dtype=float) if rw_store
+                    else np.empty((0, 5))),
+        kfr_accepted=len(kfr_store), rw_accepted=len(rw_store),
+        rejected=rejected,
+    )
