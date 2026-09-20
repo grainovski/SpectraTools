@@ -228,16 +228,31 @@ where `E(i)` is the bin's energy under the **active** energy calibration and
 - **Extrapolation** — the curve is evaluated outside the fitted energy range
   without restriction (user decision, 2026-09-20, taken with the divergence
   risk stated).
-- **The one carve-out** — where the evaluated ε is `≤ 0` or non-finite, the
-  division has no meaning, so those bins pass through **uncorrected** and the
-  dialog reports how many. Everywhere ε is positive the user gets the
-  extrapolation they asked for, however extreme. *Open: see §10.*
+- **Non-positive efficiency — zero the bin** (user decision, 2026-09-20).
+  Where the evaluated ε is `≤ 0` the corrected bin is set to 0 rather than
+  divided. Everywhere ε is positive the user gets the extrapolation they
+  asked for, however extreme.
+- **Non-finite efficiency — also zero the bin.** This is an extension of the
+  rule above, not a separate instruction, and is called out because the rule
+  as stated does not cover it: under IEEE comparison `NaN ≤ 0` is **false**,
+  so a NaN efficiency would slip past a literal `eff <= 0` test and leave a
+  NaN count behind. NaN counts then propagate into plotting, autoscaling,
+  fitting and integration, where they are far more damaging than a zero.
+  `ε = ±inf` already divides to ≈0, so zeroing it changes nothing and keeps
+  the rule uniform: **a bin is corrected only where ε is finite and > 0, and
+  is zeroed otherwise.**
+- **Reported** — the dialog reports how many bins were zeroed, split by
+  reason (ε ≤ 0 versus non-finite). A silently truncated spectrum would be
+  indistinguishable from a genuinely empty region.
 - **Uncertainty** — Δε is deliberately NOT propagated (user instruction:
   "only eff is taken into account"). The spectrum's own variance, where it
   has one, is scaled by `1/ε²`, which is ordinary propagation for a per-bin
   scale factor. Leaving it alone would produce a spectrum whose stored
   variance no longer matches its counts, and would silently corrupt any later
-  fit.
+  fit. Zeroed bins get variance 0; that is safe because `peak_fit.py:882`
+  already floors the fit weight with `np.sqrt(np.maximum(variance, 1.0))`, so
+  a zero-variance bin cannot divide by zero in the weighting. Verified in the
+  source, not assumed.
 - **Result** — a new `LoadedSpectrum` added through
   `MainWindow._add_combined_spectrum`, so it picks up the next colour on the
   5.2.6 ramp, collision-safe naming and the correct auto-log path. Named
@@ -286,14 +301,21 @@ dialog, one I/O module.
 
 ---
 
-## 10. Open decision
+## 10. Decisions taken, and by whom
 
-**The §7 carve-out.** The user chose unrestricted extrapolation. This design
-nonetheless leaves bins with ε ≤ 0 or non-finite uncorrected, because
-dividing by them produces negative or infinite counts — an undefined result
-rather than merely an extreme one. If the user prefers the division to happen
-unconditionally, §7 changes to do exactly that and the reported number
-becomes a count of bins that went non-finite. **To confirm at spec review.**
+No decision in this document is still open.
+
+| decision | choice | source |
+|---|---|---|
+| Normalisation | peak of the **selected** model = 1.0 | user, 2026-09-20 |
+| Extrapolation | unrestricted, outside the fitted range | user, 2026-09-20 |
+| Files | two — per-peak and per-bin, each carrying both curves | user, 2026-09-20 |
+| Channel columns | not stored; the calibration is available | user, 2026-09-20 |
+| ε ≤ 0 when applying | zero the bin | user, 2026-09-20 |
+| ε non-finite when applying | zero the bin | §7, as the uniform form of the rule above — `NaN ≤ 0` is false, so the literal rule would not catch it |
+| Zeroed bins' variance | 0, relying on the existing fit-weight floor | §7, verified at `peak_fit.py:882` |
+
+Everything else follows the reference implementation.
 
 ---
 
@@ -329,10 +351,18 @@ Alongside it:
   rather than silently dropped; a band from too few survivors reports NaN.
 - Files — column counts and header contents; no channel column anywhere; a
   round-trip read of the numbers.
-- Apply — counts divided bin by bin; variance scaled by 1/ε²; carve-out bins
-  pass through unchanged and are counted; a new spectrum appears and the
-  original is unmodified; the action is disabled without an active
-  calibration.
+- Apply — counts divided bin by bin; variance scaled by 1/ε²; a new spectrum
+  appears and the original is unmodified; the action is disabled without an
+  active calibration.
+- Apply, the zeroing rule — a bin whose ε is negative is zeroed, and so is
+  one whose ε is `NaN`, `+inf` or `-inf`. **The NaN case gets its own test**:
+  it is the one an implementation using a literal `eff <= 0` would fail,
+  since that comparison is false for NaN, and the resulting NaN count would
+  then spread through every later operation on the spectrum. The counts of
+  zeroed bins are reported and split by reason.
+- Apply, no NaN escapes — assert the corrected counts array is entirely
+  finite for an efficiency curve deliberately built to go negative, zero and
+  NaN across the range.
 - **Controls that must fail.** Per the project's standing rule every one of
   the above gets a control: a deliberately wrong curve must fail the oracle,
   an unscaled curve must fail the normalisation test, and a correction that
