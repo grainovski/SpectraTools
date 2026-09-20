@@ -3029,9 +3029,9 @@ git commit -m "feat: apply an efficiency to a spectrum from the main window"
 def test_the_help_describes_the_efficiency_calibration():
     """Every claim in here is checked against the source, because this
     project has repeatedly found plausible help prose to be subtly wrong."""
-    from help_content import knowledge_database_html
+    from help_content import build_knowledge_database_html
 
-    html = knowledge_database_html()
+    html = build_knowledge_database_html()
     assert "efficiency" in html.lower()
     assert "KFR" in html
     assert "Radware" in html
@@ -3059,7 +3059,7 @@ Add a `## [6.0.0] - <date>` entry to `CHANGELOG.md`.
 - [ ] **Step 5: Run the whole suite**
 
 Run: `.venv/Scripts/python.exe -m pytest -q`
-Expected: every test passes, and the collected count is the previous 1591 plus the tests added here.
+Expected: every test passes, and the collected count is the 1676 collected before this task plus the tests added here.
 
 Compare the count against `--collect-only` before trusting the green: a green run that collected fewer tests than expected is this project's known invisible failure.
 
