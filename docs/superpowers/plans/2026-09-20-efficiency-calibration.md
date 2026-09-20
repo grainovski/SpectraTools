@@ -1967,6 +1967,27 @@ git commit -m "feat: write the per-peak and per-bin efficiency files"
 - Modify: `calibration_plot_dialog.py`
 - Test: `tests/test_efficiency_dialog.py`
 
+### Reuse the pairing that already exists
+
+`calibration_plot_dialog.py` already imports `build_rows` and `ExportError`
+from `caleneff_export`, and uses them for the "Finish and save for
+CalEnEff..." button. `build_rows(assignments, source_lines)` returns
+`(rows, skipped)` where each row is an `ExportRow` carrying exactly the seven
+values the efficiency fit needs:
+
+    channel  channel_err  area  area_err  energy  intensity_pct  intensity_pct_err
+
+It already matches each assignment to its source line, normalises intensity
+so the strongest line reads 100, and skips two kinds of unusable row: one
+with no matching source line, and one where the area error AND the intensity
+error are both zero, which would give an efficiency with no uncertainty at
+all.
+
+**Do not write a second pairing.** Reusing this one is not only less code --
+it is what makes the in-app fit and the exported file agree by construction,
+so a user who exports these peaks and runs CalEnEff on them gets the numbers
+this dialog just showed them.
+
 - [ ] **Step 1: Write the failing test**
 
 ```python
@@ -1980,6 +2001,8 @@ from calibration_plot_dialog import CalibrationPlotDialog
 
 
 class _Line:
+    """Enough of sou_io.SourceLine for build_rows."""
+
     def __init__(self, energy, intensity=1000.0, intensity_err=10.0):
         self.energy = energy
         self.energy_err = 0.01
@@ -1987,61 +2010,93 @@ class _Line:
         self.intensity_err = intensity_err
 
 
-def _dialog(qapp, points, lines):
+def _dialog(qapp, points, lines, excluded=()):
     return CalibrationPlotDialog(
-        None, Calibration(0.0, 0.5), points, lines, 4095, "out.txt")
+        None, Calibration("linear", 0.0, 0.5), points, lines, 4095,
+        "out.txt", excluded=excluded)
 
 
-def _good_points(n=8):
+def _points(n=8):
     """(channel, channel_err, area, area_err, energy) per point."""
     return [(100.0 * (i + 1), 0.1, 5000.0 - 300.0 * i, 70.0,
              50.0 * (i + 1)) for i in range(n)]
 
 
-def _good_lines(n=8):
+def _lines(n=8):
     return [_Line(50.0 * (i + 1)) for i in range(n)]
 
 
 def test_the_button_is_enabled_with_enough_good_points(qapp):
-    d = _dialog(qapp, _good_points(), _good_lines())
+    d = _dialog(qapp, _points(), _lines())
     assert d.efficiency_button.isEnabled()
     d.close()
 
 
 def test_too_few_points_disables_it_with_a_reason(qapp):
     """Radware has five free parameters, so ndf = n - 5 must exceed zero."""
-    d = _dialog(qapp, _good_points(4), _good_lines(4))
+    d = _dialog(qapp, _points(4), _lines(4))
     assert not d.efficiency_button.isEnabled()
     assert "6" in d.efficiency_button.toolTip()
     d.close()
 
 
-def test_a_zero_area_disables_it(qapp):
-    """eps = N/I must be positive to fit at all."""
-    points = _good_points()
-    points[2] = (300.0, 0.1, 0.0, 70.0, 150.0)
-    d = _dialog(qapp, points, _good_lines())
+def test_a_peak_with_no_matching_source_line_does_not_count(qapp):
+    """build_rows skips it, so it cannot reach the fit. If dropping it takes
+    the total below the minimum the button must go with it, rather than
+    letting the fit fail later on a count the dialog said was fine."""
+    lines = _lines(8)[:6]          # two peaks now match nothing
+    d = _dialog(qapp, _points(8), lines)
+    assert d.efficiency_button.isEnabled()      # 6 left, exactly the minimum
+
+    d2 = _dialog(qapp, _points(8), _lines(8)[:5])
+    assert not d2.efficiency_button.isEnabled()
+    d.close(); d2.close()
+
+
+def test_a_peak_with_no_usable_uncertainty_does_not_count(qapp):
+    """eps = N/I with no error on either side gives an efficiency point of
+    infinite weight. build_rows already refuses those rows; the button has
+    to agree with it or the two disagree about how many points there are."""
+    points = _points(8)
+    lines = _lines(8)
+    for i in (0, 1, 2):
+        ch, dch, area, _area_err, energy = points[i]
+        points[i] = (ch, dch, area, 0.0, energy)      # no area error
+        lines[i] = _Line(50.0 * (i + 1), intensity_err=0.0)  # nor intensity
+    d = _dialog(qapp, points, lines)
     assert not d.efficiency_button.isEnabled()
-    assert "area" in d.efficiency_button.toolTip().lower()
     d.close()
 
 
-def test_a_zero_intensity_error_disables_it(qapp):
-    """The Monte Carlo resamples I from Normal(I, dI); dI = 0 makes that
-    resampling a no-op and the band meaningless."""
-    lines = _good_lines()
-    lines[1] = _Line(100.0, intensity=1000.0, intensity_err=0.0)
-    d = _dialog(qapp, _good_points(), lines)
+def test_an_excluded_point_does_not_count(qapp):
+    """A point the user rejected from the energy calibration must not
+    silently steer the efficiency curve either."""
+    excluded = (50.0 * 7, 50.0 * 8)          # the last two energies
+    d = _dialog(qapp, _points(8), _lines(8), excluded=excluded)
+    assert d.efficiency_button.isEnabled()   # 6 left
+
+    d2 = _dialog(qapp, _points(8), _lines(8),
+                 excluded=(50.0 * 6, 50.0 * 7, 50.0 * 8))
+    assert not d2.efficiency_button.isEnabled()
+    d.close(); d2.close()
+
+
+def test_a_zero_area_disables_it(qapp):
+    """eps = N/I must be positive to fit at all, and build_rows does not
+    check the sign -- only that an uncertainty exists."""
+    points = _points(8)
+    points[2] = (300.0, 0.1, 0.0, 70.0, 150.0)
+    d = _dialog(qapp, points, _lines())
     assert not d.efficiency_button.isEnabled()
-    assert "intensit" in d.efficiency_button.toolTip().lower()
+    assert "area" in d.efficiency_button.toolTip().lower()
     d.close()
 
 
 def test_the_enable_check_can_fail(qapp):
     """Control: the good case must really be enabled, or every assertion
     above passes for the wrong reason."""
-    good = _dialog(qapp, _good_points(), _good_lines())
-    bad = _dialog(qapp, _good_points(4), _good_lines(4))
+    good = _dialog(qapp, _points(), _lines())
+    bad = _dialog(qapp, _points(4), _lines(4))
     assert good.efficiency_button.isEnabled()
     assert not bad.efficiency_button.isEnabled()
     good.close(); bad.close()
@@ -2052,22 +2107,47 @@ def test_the_enable_check_can_fail(qapp):
 Run: `.venv/Scripts/python.exe -m pytest tests/test_efficiency_dialog.py -q`
 Expected: FAIL, `AttributeError: 'CalibrationPlotDialog' object has no attribute 'efficiency_button'`
 
-- [ ] **Step 3: Add the button and its gate**
+- [ ] **Step 3: Add the button**
 
-In `calibration_plot_dialog.py`, add near the other buttons:
+The dialog has no `button_row`; it uses a `QDialogButtonBox`. Add alongside
+the existing `finish_button`, immediately after it:
 
 ```python
-        self.efficiency_button = QPushButton("Auto MC Efficiency Calibration")
+        self.efficiency_button = buttons.addButton(
+            "Auto MC Efficiency Calibration...",
+            QDialogButtonBox.ButtonRole.ActionRole,
+        )
         self.efficiency_button.clicked.connect(self._on_efficiency_clicked)
-        button_row.addWidget(self.efficiency_button)
 ```
 
-and the gate, called wherever the dialog's data is set:
+- [ ] **Step 4: Add the gate**
 
 ```python
     #: Radware has five free parameters, so ndf = n - 5 must exceed zero.
     #: Six is the smallest n leaving any redundancy at all.
     MIN_EFFICIENCY_POINTS = 6
+
+    def _efficiency_rows(self):
+        """The peaks usable for an efficiency fit, as CalEnEff's own seven
+        columns.
+
+        Built on caleneff_export.build_rows rather than pairing points to
+        source lines again here. That is what makes the in-app fit and the
+        exported file agree by construction: a user who exports these peaks
+        and runs CalEnEff on them gets the numbers this dialog showed.
+
+        Excluded points are dropped FIRST. One the user rejected from the
+        energy calibration must not silently steer the efficiency curve.
+        """
+        def is_out(energy):
+            return any(abs(energy - e) < 1e-9 for e in self._excluded)
+
+        used = [p for p in self._points if not is_out(p[4])]
+        try:
+            rows, _skipped = build_rows(used, self._source_lines)
+        except ExportError:
+            return []
+        return rows
 
     def _efficiency_blocked_reason(self):
         """Why the efficiency calibration cannot run, or None.
@@ -2075,21 +2155,23 @@ and the gate, called wherever the dialog's data is set:
         Checked here rather than left to fail inside scipy: a fitter's error
         points at the fit, not at the row of data that caused it.
         """
-        pairs = self._efficiency_pairs()
-        if len(pairs) < self.MIN_EFFICIENCY_POINTS:
-            return ("Needs at least %d matched peaks; this calibration has "
-                    "%d. The Radware model has 5 free parameters."
-                    % (self.MIN_EFFICIENCY_POINTS, len(pairs)))
-        for (_ch, _dch, area, area_err, energy), line in pairs:
-            if not (area > 0 and area_err > 0):
-                return ("Every peak needs a positive area and area error; "
-                        "the peak at %.2f keV does not." % energy)
-            if not (line.intensity > 0 and line.intensity_err > 0):
-                return ("Every source line needs a positive intensity and "
-                        "intensity error; the line at %.2f keV does not."
-                        % energy)
-            if not energy > 0:
-                return "Every energy must be above 0 keV."
+        rows = self._efficiency_rows()
+        if len(rows) < self.MIN_EFFICIENCY_POINTS:
+            return (
+                "Needs at least %d peaks matched to source lines with a "
+                "usable uncertainty; this calibration has %d. The Radware "
+                "model has 5 free parameters."
+                % (self.MIN_EFFICIENCY_POINTS, len(rows)))
+        for row in rows:
+            if not row.area > 0:
+                return ("Every peak needs a positive area; the one at "
+                        "%.2f keV does not." % row.energy)
+            if not row.energy > 0:
+                return ("Every energy must be above 0 keV; both models "
+                        "evaluate ln(E) and b/E.")
+            if not row.intensity_pct > 0:
+                return ("Every source line needs a positive intensity; the "
+                        "one at %.2f keV does not." % row.energy)
         return None
 
     def _refresh_efficiency_button(self):
@@ -2097,21 +2179,26 @@ and the gate, called wherever the dialog's data is set:
         self.efficiency_button.setEnabled(reason is None)
         self.efficiency_button.setToolTip(
             reason or "Fit a relative efficiency curve from these peaks.")
+
+    def _on_efficiency_clicked(self):
+        """Filled in by Task 10, which runs the Monte Carlo on a worker
+        thread. Task 8 only puts the button there and decides when it is
+        usable."""
 ```
 
-`_efficiency_pairs()` returns `[(point, source_line), ...]` for the points that are not excluded, matched to their source line by nearest energy — the same pairing the calibration itself already made. Call `_refresh_efficiency_button()` at the end of `set_data`.
+Call `self._refresh_efficiency_button()` at the end of `set_data`.
 
-- [ ] **Step 4: Run the tests**
+- [ ] **Step 5: Run the tests**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_efficiency_dialog.py -q`
-Expected: `5 passed`
+Expected: `7 passed`
 
-- [ ] **Step 5: Run the existing calibration tests — nothing may regress**
+- [ ] **Step 6: Run the existing calibration tests — nothing may regress**
 
-Run: `.venv/Scripts/python.exe -m pytest tests/test_calibration_plot_dialog.py tests/test_calibration.py -q`
+Run: `.venv/Scripts/python.exe -m pytest tests/test_calibration_plot_dialog.py tests/test_calibration.py tests/test_caleneff_export.py -q`
 Expected: all pass
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add calibration_plot_dialog.py tests/test_efficiency_dialog.py
@@ -2304,7 +2391,7 @@ def test_applying_adds_a_new_spectrum_and_keeps_the_original(qapp, opened):
     from spectrum import LoadedSpectrum
 
     window = MainWindow()
-    window._calibration = Calibration(0.0, 0.5)
+    window._calibration = Calibration("linear", 0.0, 0.5)
     window._calibration_active = True
     original = LoadedSpectrum("s.txt", np.full(512, 100.0), "#FF0000")
     original.active = True
@@ -2342,7 +2429,7 @@ def test_the_corrected_spectrum_is_finite_everywhere(qapp, opened):
     from spectrum import LoadedSpectrum
 
     window = MainWindow()
-    window._calibration = Calibration(0.0, 4.0)     # runs far past the fit
+    window._calibration = Calibration("linear", 0.0, 4.0)  # runs far past the fit
     window._calibration_active = True
     s = LoadedSpectrum("s.txt", np.full(2048, 100.0), "#FF0000")
     s.active = True
