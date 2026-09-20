@@ -435,6 +435,10 @@ class EfficiencyResult:
         self.calibration = calibration
         self.source = source
         self._model = None
+        #: Normalisation per model. It depends only on `fit` and `mc`,
+        #: neither of which changes after construction, so it is computed
+        #: once per model rather than on every switch.
+        self._normalisation_cache = {}
         self.model = model
 
     @property
@@ -448,7 +452,11 @@ class EfficiencyResult:
         if value == "rw" and self.fit.rw_params is None:
             raise ValueError("the Radware fit did not converge for this data")
         self._model = value
-        self.normalisation = self._compute_normalisation()
+        cached = self._normalisation_cache.get(value)
+        if cached is None:
+            cached = self._compute_normalisation(value)
+            self._normalisation_cache[value] = cached
+        self.normalisation = cached
 
     def _samples(self, model):
         if self.mc is None:
@@ -506,8 +514,13 @@ class EfficiencyResult:
                     np.nan)
         return out
 
-    def _compute_normalisation(self):
-        """1 / peak of the selected model's MC MEAN over the fitted range.
+    def _compute_normalisation(self, model=None):
+        """1 / peak of `model`'s MC MEAN over the fitted range.
+
+        Evaluating the Monte Carlo mean on a 2,000-point grid across every
+        stored sample costs about 1.2 s with a full 10,000-sample run, which
+        is why the caller caches the answer: paying it again on every toggle
+        between the two models made switching feel slow for no reason.
 
         It must be the MC mean and not the best fit, because the MC mean is
         the curve that gets applied: normalising by the other one would leave
@@ -523,13 +536,14 @@ class EfficiencyResult:
         Falls back to the best fit only when there is no Monte Carlo at all,
         which happens in tests that construct a result with mc=None.
         """
+        model = model or self._model
         lo = max(float(self.fit.E.min()) * 0.9, 1.0)
         hi = float(self.fit.E.max()) * 1.1
         grid = np.linspace(lo, hi, 2000)
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-            values = (self._mc_mean_raw(grid, self._model)
+            values = (self._mc_mean_raw(grid, model)
                       if self.mc is not None
-                      else self.best_fit_raw(grid, self._model))
+                      else self.best_fit_raw(grid, model))
         finite = values[np.isfinite(values) & (values > 0)]
         peak = float(np.max(finite)) if len(finite) else 1.0
         return 1.0 / max(peak, 1e-30)

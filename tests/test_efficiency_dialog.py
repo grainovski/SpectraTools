@@ -265,9 +265,25 @@ def test_the_worker_computes_a_usable_result(qapp):
     from calibration_plot_dialog import EfficiencyWorker
 
     worker = EfficiencyWorker(None, _rows_for(_points(), _lines()))
-    fit, mc = worker.compute(iterations=50)
-    assert fit.kfr_params is not None
-    assert mc.kfr_accepted > 0
+    result = worker.compute(iterations=50)
+    assert result.fit.kfr_params is not None
+    assert result.mc.kfr_accepted > 0
+    worker.deleteLater()
+
+
+def test_the_worker_warms_both_normalisations(qapp):
+    """Switching model recomputes the normalisation, which means evaluating
+    the Monte Carlo mean across every stored sample -- over a second with a
+    full run. Doing it on the worker puts that cost inside the progress
+    dialog the user is already watching, instead of stalling the window the
+    first time they click the other radio button."""
+    from calibration_plot_dialog import EfficiencyWorker
+
+    worker = EfficiencyWorker(None, _rows_for(_points(), _lines()))
+    result = worker.compute(iterations=50)
+    assert set(result._normalisation_cache) == {"kfr", "rw"}, (
+        "only %s was warmed" % sorted(result._normalisation_cache))
+    assert result.model == "kfr", "the worker left the wrong model selected"
     worker.deleteLater()
 
 

@@ -79,8 +79,8 @@ class EfficiencyWorker(QThread):
         thread does and the fact that it is a thread are two claims, and
         they are worth checking apart.
         """
-        from efficiency import (N_MC_EFFICIENCY, fit_efficiency,
-                                run_monte_carlo)
+        from efficiency import (N_MC_EFFICIENCY, EfficiencyResult,
+                                fit_efficiency, run_monte_carlo)
 
         rows = self._rows
         E = np.array([r.energy for r in rows], dtype=float)
@@ -93,11 +93,23 @@ class EfficiencyWorker(QThread):
             fit, N, dN, I, dI,
             iterations=N_MC_EFFICIENCY if iterations is None else iterations,
             progress=self._progress)
-        return fit, mc
+
+        result = EfficiencyResult(fit=fit, mc=mc, model="kfr")
+        # Warm the OTHER model's normalisation here, on the worker thread.
+        # It means evaluating the Monte Carlo mean on a 2,000-point grid
+        # across every stored sample -- about 1.2 s. Unnoticeable inside a
+        # Monte Carlo the user is already watching a progress bar for, and a
+        # visible stall if it happens when they click the radio button
+        # instead. Setting the model twice leaves it back on KFR with both
+        # answers cached.
+        if fit.rw_params is not None:
+            result.model = "rw"
+            result.model = "kfr"
+        return result
 
     def run(self):
         try:
-            fit, mc = self.compute()
+            result = self.compute()
         except Exception as exc:          # noqa: BLE001 - reported, not raised
             # A raise here would cross a thread boundary and vanish; in a
             # --windowed build there is no stderr to carry it either.
@@ -105,7 +117,7 @@ class EfficiencyWorker(QThread):
             return
         if self._cancelled:
             return
-        self.succeeded.emit((fit, mc))
+        self.succeeded.emit(result)
 
     def _progress(self, done, total):
         self.progressed.emit(done, total)
@@ -563,9 +575,9 @@ class CalibrationPlotDialog(QDialog):
         def on_progress(done, total):
             progress.setValue(int(100 * done / max(total, 1)))
 
-        def on_succeeded(payload):
+        def on_succeeded(result):
             progress.close()
-            self._show_efficiency(*payload)
+            self._show_efficiency(result)
 
         def on_failed(message):
             progress.close()
@@ -577,14 +589,13 @@ class CalibrationPlotDialog(QDialog):
         progress.canceled.connect(worker.cancel)
         worker.start()
 
-    def _show_efficiency(self, fit, mc):
-        from efficiency import EfficiencyResult
+    def _show_efficiency(self, result):
         from efficiency_dialog import EfficiencyDialog
 
-        result = EfficiencyResult(
-            fit=fit, mc=mc, model="kfr",
-            calibration=self._calibration,
-            source=os.path.basename(self._default_path or ""))
+        # The worker builds the result so it can warm both normalisations
+        # off the UI thread; these two are provenance and cost nothing.
+        result.calibration = self._calibration
+        result.source = os.path.basename(self._default_path or "")
         energy_errors = self._literature_errors(result.fit.E)
         previous = getattr(self, "_efficiency_dialog", None)
         if previous is not None:

@@ -189,8 +189,12 @@ class EfficiencyDialog(QDialog):
             style = "-" if key == "kfr" else "--"
             with np.errstate(over="ignore", invalid="ignore",
                              divide="ignore"):
-                curve = result.curve(grid, key)
-                lo, hi = result.band(grid, key)
+                # One MC-mean evaluation, reused as the band's centre.
+                # band() recomputes it otherwise, doubling the cost of every
+                # redraw for nothing.
+                centre = result._mc_mean_raw(grid, key)
+                curve = centre * result.normalisation
+                lo, hi = result.band(grid, key, centre=centre)
                 residual = fit.eff * scale - result.curve(E, key)
             self.axes.plot(grid, curve, style, color=colour, lw=1.8,
                            label=label)
