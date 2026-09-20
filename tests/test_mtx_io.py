@@ -266,7 +266,92 @@ def _interleaved_best_times(first, second, rows, columns, repeats=6):
     return best_first, best_second
 
 
-def test_decode_row_is_faster_than_the_pre_optimization_implementation():
+#: How many times the frozen decoder is timed against ITSELF to establish
+#: what this machine's timing can actually resolve, before either guard
+#: below is allowed to return a verdict.
+_RESOLUTION_TRIALS = 5
+#: The gap both guards rest on. A real speedup lands near 0.84 and no
+#: difference at all lands at 1.0, so the measurement has to resolve
+#: 1.0 - _MAX_DECODE_RATIO before either verdict means anything.
+_RESOLUTION_MARGIN = 1.0 - _MAX_DECODE_RATIO
+
+
+class _DecodeBenchmark:
+    """The rows to decode, plus this machine's measured noise floor."""
+
+    def __init__(self, rows, columns, ratios):
+        self.rows = rows
+        self.columns = columns
+        self.ratios = tuple(ratios)
+        #: PRECISION -- how far apart repeated same-vs-same ratios land.
+        self.spread = max(ratios) - min(ratios)
+        #: ACCURACY -- the closest any of them came to reading as a speedup.
+        self.worst = min(ratios)
+
+
+@pytest.fixture(scope="module")
+def decode_benchmark():
+    """Measure the noise floor before trusting either guard with a verdict.
+
+    Both tests below reduce to one comparison against _MAX_DECODE_RATIO,
+    and that comparison only means something on a machine whose timing
+    can tell 0.95 from 1.0. Running the frozen decoder against ITSELF
+    measures exactly that: the ratio ought to be 1.0, so however far it
+    strays is measurement noise and nothing else.
+
+    Measured once per module and shared, which also removes the duplicate
+    row load and the control's own separate timing run.
+
+    Why this exists: the 0.95 threshold was calibrated where repeated
+    same-vs-same ratios spread 0.004, leaving the ~26x headroom claimed
+    above. On a 4-core i7-1185G7 laptop the same measurement spread
+    0.2515 across 20 trials (0.8664 to 1.1179) and false-failed the
+    control 5 times in 20 on an IDLE machine -- the threshold sat inside
+    the noise, so the guard was reporting the part's turbo and thermal
+    behaviour as a fact about decode_row. Interleaving cancels sustained
+    load, as its own docstring says; it does not narrow per-pass variance
+    on a thermally limited chip."""
+    rows, columns = _compressed_rows("gg.mtx", _BENCHMARK_ROWS)
+    # Direct checks for the "silently measured nothing" failures the
+    # control was written to catch. Inferring them from a ratio never
+    # worked: an empty row list times both sides at ~0 and divides out
+    # to ~1.0, which is the control's PASSING value.
+    assert rows, "the benchmark measured nothing: no rows were loaded"
+
+    ratios = []
+    for _ in range(_RESOLUTION_TRIALS):
+        first, second = _interleaved_best_times(
+            _unoptimized_decode_row, _unoptimized_decode_row, rows, columns
+        )
+        assert first > 0.0 and second > 0.0, (
+            "the benchmark measured nothing: a decode pass took zero time"
+        )
+        ratios.append(first / second)
+
+    return _DecodeBenchmark(rows, columns, ratios)
+
+
+def _require_resolution(benchmark):
+    """Skip, rather than assert, when the machine cannot resolve the margin.
+
+    A skip says plainly that nothing was measured. A failure would instead
+    claim decode_row had regressed -- a different statement, and a false
+    one. Gating on SPREAD keeps the control's own assertion meaningful: a
+    machine that is precise but biased passes this gate and still fails
+    the control below, which is a real harness defect worth catching."""
+    if benchmark.spread > _RESOLUTION_MARGIN:
+        pytest.skip(
+            "this machine's decode timing cannot resolve the %.2f margin "
+            "these guards rest on: the frozen decoder timed against itself "
+            "%d times spread %.4f (%s). Any verdict here would be timing "
+            "noise rather than a fact about decode_row."
+            % (_RESOLUTION_MARGIN, _RESOLUTION_TRIALS, benchmark.spread,
+               ", ".join("%.4f" % r for r in benchmark.ratios))
+        )
+
+
+def test_decode_row_is_faster_than_the_pre_optimization_implementation(
+        decode_benchmark):
     """Timing regression guard for lc_codec.decode_row, expressed as a
     RATIO against a frozen copy of the pre-optimization decoder rather
     than an absolute wall-clock bound.
@@ -281,8 +366,13 @@ def test_decode_row_is_faster_than_the_pre_optimization_implementation():
 
     Timing both decoders in the same process on the same rows cancels
     machine speed out entirely: a slow machine slows both sides equally
-    and the ratio holds."""
-    rows, columns = _compressed_rows("gg.mtx", _BENCHMARK_ROWS)
+    and the ratio holds.
+
+    The ratio cancels machine SPEED, but not machine NOISE -- see
+    decode_benchmark, which measures the latter and skips this test on a
+    machine that cannot resolve the threshold."""
+    _require_resolution(decode_benchmark)
+    rows, columns = decode_benchmark.rows, decode_benchmark.columns
 
     # Same input, same output -- otherwise the two sides aren't
     # comparable and the ratio would be meaningless. This also catches
@@ -303,26 +393,39 @@ def test_decode_row_is_faster_than_the_pre_optimization_implementation():
     )
 
 
-def test_decode_speed_guard_would_catch_a_reverted_optimization():
+def test_decode_speed_guard_would_catch_a_reverted_optimization(
+        decode_benchmark):
     """Control for the test above: the harness must be able to FAIL.
 
     Runs the frozen pre-optimization decoder against itself. That is
     exactly what the measurement would see if someone reverted
     lc_codec.decode_row, so the ratio has to land near 1.0 and miss the
     threshold. Without this, a benchmark that silently measured nothing
-    (a cached result, an empty row list, both sides accidentally bound
-    to the same function) would report a passing ratio and the real
-    guard above would be worthless -- a broken check reads as a result."""
-    rows, columns = _compressed_rows("gg.mtx", _BENCHMARK_ROWS)
+    would report a passing ratio and the real guard above would be
+    worthless -- a broken check reads as a result.
 
-    first, second = _interleaved_best_times(
-        _unoptimized_decode_row, _unoptimized_decode_row, rows, columns
-    )
+    It asserts on the worst of the same-vs-same ratios decode_benchmark
+    already took, rather than drawing one more sample of its own. Those
+    ratios ARE this measurement; taking a fresh one only added a second
+    throw of the same dice after the machine had been judged steady
+    enough to ask.
 
-    assert not (first < second * _MAX_DECODE_RATIO), (
-        f"the speed guard cannot distinguish a decoder from itself "
-        f"({first:.4f}s vs {second:.4f}s, ratio {first / second:.3f}) -- "
-        f"it would not catch a reverted optimization"
+    Note what is gated and what is asserted, because they are different
+    questions. _require_resolution gates on SPREAD -- whether repeated
+    measurements agree with each other. This asserts on ACCURACY --
+    whether they land where no-difference should land. A harness that
+    was precise but systematically biased (a position effect the order
+    swap failed to cancel, say, or one side handed a warm cache) would
+    clear the gate and fail here, which is exactly the defect the
+    control exists to find."""
+    _require_resolution(decode_benchmark)
+
+    assert not (decode_benchmark.worst < _MAX_DECODE_RATIO), (
+        f"the speed guard cannot distinguish a decoder from itself: worst "
+        f"of {_RESOLUTION_TRIALS} same-vs-same ratios was "
+        f"{decode_benchmark.worst:.4f}, must be >= {_MAX_DECODE_RATIO} "
+        f"(spread {decode_benchmark.spread:.4f}, so this is bias rather "
+        f"than noise) -- it would not catch a reverted optimization"
     )
 
 
