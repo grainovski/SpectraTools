@@ -129,3 +129,161 @@ def test_efficiency_points_and_their_errors():
     assert eff[0] == pytest.approx(20.0)
     assert deff[0] == pytest.approx(
         20.0 * np.sqrt((30.0 / 1000.0) ** 2 + (2.0 / 50.0) ** 2))
+
+
+# --- normalisation -------------------------------------------------------
+
+
+def _demo_result(name="demo1.txt"):
+    from efficiency import EfficiencyResult, fit_efficiency, run_monte_carlo
+
+    N, dN, E, I, dI = _load(name)
+    fit = fit_efficiency(E, N, dN, I, dI)
+    mc = run_monte_carlo(fit, N, dN, I, dI, iterations=200)
+    return EfficiencyResult(fit=fit, mc=mc, model="kfr")
+
+
+def _norm_grid(r):
+    """The SAME grid _compute_normalisation searches for the peak.
+
+    It deliberately runs 10% past the data on each side, as the reference
+    does. Testing the peak over the narrower data range instead would be
+    wrong: for KFR the maximum falls OUTSIDE the measured points on two of
+    the three reference datasets (109.6 keV against data from 122 keV on
+    demo2; 167.6 keV against data from 186 keV on Ra-226), so such a test
+    would pass on demo1 by luck and fail on the others.
+    """
+    lo = max(float(r.fit.E.min()) * 0.9, 1.0)
+    return np.linspace(lo, float(r.fit.E.max()) * 1.1, 2000)
+
+
+def test_the_selected_curve_peaks_at_one():
+    r = _demo_result()
+    assert np.nanmax(r.curve(_norm_grid(r))) == pytest.approx(1.0, rel=1e-6)
+
+
+def test_the_peak_may_fall_outside_the_measured_points():
+    """Not a defect, and worth pinning so nobody "fixes" it. A detector's
+    efficiency crests below the lowest measured line on real data, so within
+    the data range the curve can sit just under 1 while still peaking at
+    exactly 1 on the normalisation grid."""
+    r = _demo_result("226Ra_En_Area.txt")
+    inside = np.linspace(r.fit.E.min(), r.fit.E.max(), 2000)
+    assert np.nanmax(r.curve(inside)) <= 1.0 + 1e-9
+    assert np.nanmax(r.curve(_norm_grid(r))) == pytest.approx(1.0, rel=1e-6)
+
+
+def test_switching_model_rescales_both_curves():
+    """The normalisation is the selected model's peak, so selecting the other
+    model changes the numbers written to file. That is intended and is why
+    the header records which model was active."""
+    r = _demo_result()
+    before = r.normalisation
+    r.model = "rw"
+    assert r.normalisation != pytest.approx(before)
+    assert np.nanmax(r.curve(_norm_grid(r))) == pytest.approx(1.0, rel=1e-6)
+
+
+def test_the_unselected_curve_may_exceed_one():
+    """Both curves share one scale so the plot shows their real difference.
+    Clipping the other to 1 would hide exactly the disagreement the second
+    model exists to reveal."""
+    r = _demo_result()
+    grid = np.linspace(r.fit.E.min(), r.fit.E.max(), 500)
+    other = r.curve(grid, model="rw")
+    assert np.all(np.isfinite(other))
+
+
+def test_the_normalised_curve_ignores_the_intensity_scale():
+    """Our .sou intensities are on a 0-10000 scale and the reference's are
+    percentages. Since eps = N/I is relative and is normalised again, a
+    constant factor on every intensity must leave the normalised curve
+    completely unchanged. Without this, the port would appear to work on the
+    reference's data and quietly produce a differently-scaled curve on ours."""
+    from efficiency import EfficiencyResult, fit_efficiency
+
+    N, dN, E, I, dI = _load("demo1.txt")
+    grid = np.linspace(E.min(), E.max(), 200)
+
+    a = EfficiencyResult(fit=fit_efficiency(E, N, dN, I, dI), mc=None,
+                         model="kfr")
+    b = EfficiencyResult(fit=fit_efficiency(E, N, dN, I * 137.0, dI * 137.0),
+                         mc=None, model="kfr")
+    assert a.curve(grid) == pytest.approx(b.curve(grid), rel=1e-6)
+
+
+def test_the_curve_is_the_mc_mean_not_the_best_fit():
+    """The reported efficiency is the Monte Carlo mean (user decision). The
+    best fit is a different curve and the difference is small but real, so
+    returning it here would silently change every saved number and every
+    corrected spectrum."""
+    r = _demo_result()
+    grid = np.linspace(r.fit.E.min(), r.fit.E.max(), 40)
+    expected = r._mc_mean_raw(grid, "kfr") * r.normalisation
+    assert r.curve(grid) == pytest.approx(expected, rel=1e-12, nan_ok=True)
+
+
+def test_the_best_fit_would_fail_that():
+    """Control, and the reason the test above is not vacuous: the two curves
+    really are different. If this ever passes, the MC has collapsed onto the
+    best fit and neither test is testing anything."""
+    from efficiency import f_kfr
+
+    r = _demo_result()
+    grid = np.linspace(r.fit.E.min(), r.fit.E.max(), 40)
+    best = f_kfr(grid, *r.fit.kfr_params) * r.normalisation
+    assert r.curve(grid) != pytest.approx(best, rel=1e-12)
+
+
+def test_the_applied_curve_is_the_one_that_peaks_at_one():
+    """The normalisation divides by the MC mean's peak, not the best fit's,
+    so the curve actually applied is the one bounded by 1. Checked by
+    confirming the best fit's own peak does NOT land on 1 -- if it did, the
+    two normalisations would be indistinguishable here."""
+    r = _demo_result()
+    grid = _norm_grid(r)
+    assert np.nanmax(r.curve(grid)) == pytest.approx(1.0, rel=1e-6)
+    best = r.best_fit_raw(grid, "kfr") * r.normalisation
+    assert np.nanmax(best) != pytest.approx(1.0, rel=1e-9)
+
+
+def test_predict_reports_the_mc_mean_and_the_best_fit_separately():
+    """The examine panel shows both numbers side by side, as CalEnEff does.
+    They must be two different quantities: reading the best fit from curve()
+    would report the MC mean twice, and the difference between them is the
+    whole reason both are shown."""
+    r = _demo_result()
+    energy = float(np.median(r.fit.E))
+    mean, sigma, best = r.predict(energy)
+
+    assert np.isfinite(mean) and np.isfinite(sigma) and np.isfinite(best)
+    assert mean == pytest.approx(float(r.curve([energy])[0]), rel=1e-12)
+    assert best == pytest.approx(
+        float(r.best_fit_raw([energy], "kfr")[0]) * r.normalisation, rel=1e-12)
+    assert mean != pytest.approx(best, rel=1e-12), (
+        "predict returned the same number for the MC mean and the best fit")
+    assert sigma > 0.0
+
+
+def test_predict_still_gives_the_best_fit_without_a_monte_carlo():
+    """The best fit does not depend on the MC, so mc=None must not blank it."""
+    from efficiency import EfficiencyResult, fit_efficiency
+
+    N, dN, E, I, dI = _load("demo1.txt")
+    r = EfficiencyResult(fit=fit_efficiency(E, N, dN, I, dI), mc=None,
+                         model="kfr")
+    mean, sigma, best = r.predict(float(np.median(E)))
+    assert np.isnan(mean) and np.isnan(sigma)
+    assert np.isfinite(best) and best > 0.0
+
+
+def test_an_unnormalised_curve_would_fail_that():
+    """Control: raw eps does depend on the intensity scale, by exactly the
+    factor applied."""
+    from efficiency import f_kfr, fit_efficiency
+
+    N, dN, E, I, dI = _load("demo1.txt")
+    raw_a = f_kfr(E, *fit_efficiency(E, N, dN, I, dI).kfr_params)
+    raw_b = f_kfr(E, *fit_efficiency(E, N, dN, I * 137.0,
+                                     dI * 137.0).kfr_params)
+    assert raw_a != pytest.approx(raw_b, rel=1e-6)

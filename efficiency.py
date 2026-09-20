@@ -406,3 +406,182 @@ def run_monte_carlo(fit, N, dN, I, dI, iterations=N_MC_EFFICIENCY,
         kfr_accepted=len(kfr_store), rw_accepted=len(rw_store),
         rejected=rejected,
     )
+
+
+class EfficiencyResult:
+    """A finished efficiency calibration: both curves, their bands, and
+    which one the user has selected.
+
+    The selected model sets the normalisation -- its peak becomes exactly
+    1.0 and BOTH curves are scaled by that one factor, so the other stays
+    directly comparable and may legitimately exceed 1 where it runs higher.
+    """
+
+    def __init__(self, fit, mc, model="kfr", calibration=None, source=None):
+        self.fit = fit
+        self.mc = mc
+        self.calibration = calibration
+        self.source = source
+        self._model = None
+        self.model = model
+
+    @property
+    def model(self):
+        return self._model
+
+    @model.setter
+    def model(self, value):
+        if value not in ("kfr", "rw"):
+            raise ValueError("model must be 'kfr' or 'rw', not %r" % (value,))
+        if value == "rw" and self.fit.rw_params is None:
+            raise ValueError("the Radware fit did not converge for this data")
+        self._model = value
+        self.normalisation = self._compute_normalisation()
+
+    def _samples(self, model):
+        if self.mc is None:
+            return None
+        return self.mc.kfr_samples if model == "kfr" else self.mc.rw_samples
+
+    def best_fit_raw(self, grid, model):
+        """The best-fit curve, un-normalised.
+
+        Kept because the fit-quality statistics describe it and because
+        examining an energy reports it beside the MC mean, as CalEnEff does.
+        It is NOT what gets applied or saved -- see curve().
+        """
+        grid = np.asarray(grid, dtype=float)
+        if model == "kfr":
+            return f_kfr(grid, *self.fit.kfr_params)
+        return f_radware_5p(grid, *self.fit.rw_params)
+
+    def _mc_mean_raw(self, grid, model):
+        """Mean of the Monte Carlo family at each energy, un-normalised.
+
+        This is THE efficiency: applied to a spectrum, written to both files
+        and drawn.
+
+        Evaluated in chunks over energy on purpose. A per-bin file covers
+        16,384 channels and the MC holds 10,000 parameter sets, so the whole
+        family at once is 1.6e8 doubles -- about 1.3 GB in a single
+        allocation. Chunking holds it to a few MB at a time and costs
+        nothing else.
+
+        A bin where fewer than MIN_MC_SAMPLES of the family are finite gets
+        NaN, not a mean over the survivors. Far outside the fitted range most
+        samples diverge, and averaging the few that happened not to would be
+        a number with nothing behind it. efficiency_apply then zeroes those
+        bins, which is the right outcome.
+        """
+        grid = np.atleast_1d(np.asarray(grid, dtype=float))
+        samples = self._samples(model)
+        if samples is None or len(samples) == 0:
+            return np.full(grid.shape, float("nan"))
+        func = f_kfr if model == "kfr" else f_radware_5p
+        out = np.empty(grid.shape, dtype=float)
+        step = max(1, 2000000 // max(len(samples), 1))
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            for start in range(0, len(grid), step):
+                chunk = grid[start:start + step]
+                family = func(chunk[None, :],
+                              *[samples[:, i:i + 1]
+                                for i in range(samples.shape[1])])
+                finite = np.isfinite(family)
+                n_ok = finite.sum(axis=0)
+                total = np.where(finite, family, 0.0).sum(axis=0)
+                out[start:start + step] = np.where(
+                    n_ok >= MIN_MC_SAMPLES, total / np.maximum(n_ok, 1),
+                    np.nan)
+        return out
+
+    def _compute_normalisation(self):
+        """1 / peak of the selected model's MC MEAN over the fitted range.
+
+        It must be the MC mean and not the best fit, because the MC mean is
+        the curve that gets applied: normalising by the other one would leave
+        the applied curve slightly off 1 at its peak, and "always less than
+        1" is the whole point of normalising.
+
+        The grid runs 10% past the data on each side, as the reference does.
+        The curve can crest between two measured points, or below the lowest
+        one -- for KFR the peak falls outside the measured points on two of
+        the three reference datasets -- so normalising over the data range
+        alone would leave the curve above 1 just outside it.
+
+        Falls back to the best fit only when there is no Monte Carlo at all,
+        which happens in tests that construct a result with mc=None.
+        """
+        lo = max(float(self.fit.E.min()) * 0.9, 1.0)
+        hi = float(self.fit.E.max()) * 1.1
+        grid = np.linspace(lo, hi, 2000)
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            values = (self._mc_mean_raw(grid, self._model)
+                      if self.mc is not None
+                      else self.best_fit_raw(grid, self._model))
+        finite = values[np.isfinite(values) & (values > 0)]
+        peak = float(np.max(finite)) if len(finite) else 1.0
+        return 1.0 / max(peak, 1e-30)
+
+    def curve(self, grid, model=None):
+        """The normalised efficiency at `grid` -- the **Monte Carlo mean**.
+
+        This is what is applied to a spectrum, written to both files and
+        drawn (user decision, 2026-09-20). It is deliberately NOT the
+        best-fit curve, which is what the reference plots: the two differ by
+        a small but real amount -- on the reference's Ra-226 data at 1155
+        keV, 534.762 MC mean against 534.562 best fit -- so which one is
+        returned here changes every saved number and every corrected
+        spectrum.
+
+        The best fit stays available through best_fit_raw and is reported
+        beside the MC mean when examining an energy, as CalEnEff does. The
+        fit-quality statistics (chi2, ndf, Birge, RMS) remain best-fit
+        quantities: they describe the fit, not this curve, and the CalEnEff
+        oracle in tests/test_efficiency_fit.py compares them.
+        """
+        which = model or self._model
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            if self.mc is None:
+                return self.best_fit_raw(grid, which) * self.normalisation
+            return self._mc_mean_raw(grid, which) * self.normalisation
+
+    def band(self, grid, model=None):
+        """The normalised 1-sigma band, or (nan, nan) without a Monte Carlo."""
+        which = model or self._model
+        if self.mc is None:
+            nan = np.full(len(np.asarray(grid)), float("nan"))
+            return nan, nan
+        centre = self._mc_mean_raw(grid, which)
+        lo, hi = (self.mc.kfr_band(grid, self.fit, centre) if which == "kfr"
+                  else self.mc.rw_band(grid, self.fit, centre))
+        return lo * self.normalisation, hi * self.normalisation
+
+    def predict(self, energy, model=None):
+        """(mc_mean, mc_sigma, best_fit) at one energy, all normalised.
+
+        The MC mean comes first because it is the reported efficiency; the
+        best fit is returned beside it so the examine panel can show both,
+        as CalEnEff's does.
+
+        `best_fit` must come from best_fit_raw and NOT from curve(): curve()
+        returns the MC mean now, so reading it here would report the same
+        number twice and the best fit would never be shown at all.
+
+        Fewer than MIN_MC_SAMPLES surviving finite samples gives nan for the
+        mean and sigma rather than a number computed from a handful of
+        points. The best fit is still returned in that case -- it does not
+        depend on the Monte Carlo.
+        """
+        which = model or self._model
+        grid = np.asarray([float(energy)])
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            best = float(self.best_fit_raw(grid, which)[0]) * self.normalisation
+        samples = self._samples(which)
+        if samples is None or len(samples) == 0:
+            return float("nan"), float("nan"), best
+        func = f_kfr if which == "kfr" else f_radware_5p
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            values = func(float(energy), *[samples[:, i]
+                                           for i in range(samples.shape[1])])
+        mean, std = finite_mean_std(values, min_n=MIN_MC_SAMPLES)
+        return mean * self.normalisation, std * self.normalisation, best
