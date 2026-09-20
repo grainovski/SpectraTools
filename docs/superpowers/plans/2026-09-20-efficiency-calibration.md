@@ -1079,6 +1079,36 @@ def test_the_applied_curve_is_the_one_that_peaks_at_one():
     assert np.nanmax(best) != pytest.approx(1.0, rel=1e-9)
 
 
+def test_predict_reports_the_mc_mean_and_the_best_fit_separately():
+    """The examine panel shows both numbers side by side, as CalEnEff does.
+    They must be two different quantities: reading the best fit from curve()
+    would report the MC mean twice, and the difference between them is the
+    whole reason both are shown."""
+    r = _demo_result()
+    energy = float(np.median(r.fit.E))
+    mean, sigma, best = r.predict(energy)
+
+    assert np.isfinite(mean) and np.isfinite(sigma) and np.isfinite(best)
+    assert mean == pytest.approx(float(r.curve([energy])[0]), rel=1e-12)
+    assert best == pytest.approx(
+        float(r.best_fit_raw([energy], "kfr")[0]) * r.normalisation, rel=1e-12)
+    assert mean != pytest.approx(best, rel=1e-12), (
+        "predict returned the same number for the MC mean and the best fit")
+    assert sigma > 0.0
+
+
+def test_predict_still_gives_the_best_fit_without_a_monte_carlo():
+    """The best fit does not depend on the MC, so mc=None must not blank it."""
+    from efficiency import EfficiencyResult, fit_efficiency
+
+    N, dN, E, I, dI = _load("demo1.txt")
+    r = EfficiencyResult(fit=fit_efficiency(E, N, dN, I, dI), mc=None,
+                         model="kfr")
+    mean, sigma, best = r.predict(float(np.median(E)))
+    assert np.isnan(mean) and np.isnan(sigma)
+    assert np.isfinite(best) and best > 0.0
+
+
 def test_an_unnormalised_curve_would_fail_that():
     """Control: raw eps does depend on the intensity scale, by exactly the
     factor applied."""
@@ -1250,34 +1280,38 @@ class EfficiencyResult:
     def predict(self, energy, model=None):
         """(mc_mean, mc_sigma, best_fit) at one energy, all normalised.
 
-        The MC mean comes first because it is the reported efficiency.
-        The best fit is shown next to it, which is what CalEnEff's own
-        examine panel does.
+        The MC mean comes first because it is the reported efficiency; the
+        best fit is returned beside it so the examine panel can show both,
+        as CalEnEff's does.
 
-        Fewer than 10 surviving finite samples gives nan for the mean and
-        sigma rather than a number computed from a handful of points.
+        `best_fit` must come from best_fit_raw and NOT from curve(): curve()
+        returns the MC mean now, so reading it here would report the same
+        number twice and the best fit would never be shown at all.
+
+        Fewer than MIN_MC_SAMPLES surviving finite samples gives nan for the
+        mean and sigma rather than a number computed from a handful of
+        points. The best fit is still returned in that case -- it does not
+        depend on the Monte Carlo.
         """
         which = model or self._model
         grid = np.asarray([float(energy)])
-        best = float(self.curve(grid, which)[0])
-        if self.mc is None:
-            return best, float("nan"), float("nan")
-        samples = (self.mc.kfr_samples if which == "kfr"
-                   else self.mc.rw_samples)
-        if len(samples) == 0:
-            return best, float("nan"), float("nan")
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            best = float(self.best_fit_raw(grid, which)[0]) * self.normalisation
+        samples = self._samples(which)
+        if samples is None or len(samples) == 0:
+            return float("nan"), float("nan"), best
         func = f_kfr if which == "kfr" else f_radware_5p
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
             values = func(float(energy), *[samples[:, i]
                                            for i in range(samples.shape[1])])
-        mean, std = finite_mean_std(values, min_n=10)
-        return best, mean * self.normalisation, std * self.normalisation
+        mean, std = finite_mean_std(values, min_n=MIN_MC_SAMPLES)
+        return mean * self.normalisation, std * self.normalisation, best
 ```
 
 - [ ] **Step 4: Run the tests**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_efficiency_fit.py tests/test_efficiency_mc.py -q`
-Expected: `22 passed`  (15 in the fit file, 7 in the MC file)
+Expected: `24 passed`  (17 in the fit file, 7 in the MC file)
 
 Note: `tests/test_efficiency_mc.py` has 11 tests, not 7 -- two were added
 after this plan was written. Run it too and expect 26 in total across the
