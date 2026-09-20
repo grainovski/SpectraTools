@@ -10,6 +10,8 @@ application's startup path and tests/test_startup_imports.py enforces it; a
 module-level scipy import here would put it straight back.
 """
 
+from dataclasses import dataclass
+
 import numpy as np
 
 #: Radford's own defaults in effit.c (freepars[2] = 0, freepars[6] = 0),
@@ -137,3 +139,123 @@ def multistart(func, E, eff, deff, seeds, bounds=None, method="trf",
         except Exception:
             pass
     return best_p
+
+
+@dataclass
+class EfficiencyFit:
+    """The deterministic part of an efficiency calibration: the two best-fit
+    curves and how well each describes the data. The Monte Carlo (Task 4)
+    adds the uncertainty bands on top of this."""
+    E: np.ndarray
+    eff: np.ndarray
+    deff: np.ndarray
+    kfr_params: tuple
+    kfr_chi2: float
+    kfr_ndf: int
+    kfr_rms: float
+    kfr_birge: float
+    rw_params: tuple = None
+    rw_chi2: float = float("nan")
+    rw_ndf: int = 0
+    rw_rms: float = float("nan")
+    rw_birge: float = 1.0
+
+
+def efficiency_points(N, dN, I, dI):
+    """eps = N/I and its 1-sigma error.
+
+    The absolute scale of I does not matter and must not be "converted":
+    eps is relative and is normalised again later, so a factor common to
+    every line of one source divides straight back out. Our .sou intensities
+    are on sou_io's 0-10000 scale, the reference's are percentages, and both
+    give the same normalised curve.
+    """
+    N = np.asarray(N, dtype=float)
+    dN = np.asarray(dN, dtype=float)
+    I = np.asarray(I, dtype=float)
+    dI = np.asarray(dI, dtype=float)
+    eff = N / I
+    deff = eff * np.sqrt((dN / N) ** 2 + (dI / I) ** 2)
+    return eff, deff
+
+
+def birge(chi2, ndf):
+    """Birge ratio sqrt(chi2/ndf), or 1.0 when ndf <= 0.
+
+    An exactly-determined fit carries no scatter information, so the stated
+    sigma are used unscaled instead of dividing by zero.
+    """
+    return float(np.sqrt(chi2 / ndf)) if ndf > 0 else 1.0
+
+
+#: KFR bounds from the reference: a, b >= 0 and c <= 0 keep the curve
+#: physical; d is free.
+KFR_BOUNDS = ([0.0, 0.0, -np.inf, -np.inf], [np.inf, np.inf, 0.0, np.inf])
+
+
+def _kfr_seeds(E, eff):
+    """The reference's five starting points: the data-driven seed, three
+    perturbations of it, and the original fixed fallback."""
+    s = kfr_seed(E, eff)
+    return [
+        s,
+        [s[0] * 2.0, s[1] * 2.0, -1e-4, 1.0],
+        [s[0] * 0.5, s[1] * 0.5, -5e-4, 0.5],
+        [s[0], s[1], -1e-3, 2.0],
+        [1.0, 1e3, -1e-3, 0.0],
+    ]
+
+
+def fit_efficiency(E, N, dN, I, dI):
+    """Best-fit KFR and Radware curves for one set of peaks.
+
+    Raises RuntimeError only if KFR fails from every starting point. A
+    Radware failure is recorded as rw_params=None and reported to the user
+    rather than raised: KFR alone is still a usable calibration.
+    """
+    _need_scipy()
+    E = np.asarray(E, dtype=float)
+    eff, deff = efficiency_points(N, dN, I, dI)
+
+    kfr = multistart(f_kfr, E, eff, deff, _kfr_seeds(E, eff),
+                     bounds=KFR_BOUNDS, method="trf")
+    if kfr is None:
+        raise RuntimeError(
+            "The KFR efficiency fit did not converge from any starting "
+            "point. Check that every peak has a positive area and every "
+            "source line a positive intensity.")
+    res_k = eff - f_kfr(E, *kfr)
+    kfr_chi2 = float(np.sum((res_k / deff) ** 2))
+    kfr_ndf = len(E) - 4
+
+    # Radware: LM without bounds, parset seed first then the polyfit one.
+    # Parameters beyond +-500 mean the polynomials have run away rather than
+    # converged, which the reference also rejects.
+    rw = None
+    best = np.inf
+    for seed in (radware_seed_5p(E, eff), radware_seed_polyfit_5p(E, eff)):
+        try:
+            pp, _ = curve_fit(f_radware_5p, E, eff, p0=seed, sigma=deff,
+                              absolute_sigma=True, method="lm", maxfev=20000)
+            if not (np.all(np.isfinite(pp)) and np.all(np.abs(pp) < 500)):
+                continue
+            chi2 = float(np.sum(((eff - f_radware_5p(E, *pp)) / deff) ** 2))
+            if chi2 < best:
+                best, rw = chi2, pp
+        except Exception:
+            pass
+
+    out = EfficiencyFit(
+        E=E, eff=eff, deff=deff,
+        kfr_params=tuple(kfr), kfr_chi2=kfr_chi2, kfr_ndf=kfr_ndf,
+        kfr_rms=float(np.sqrt(np.mean(res_k ** 2))),
+        kfr_birge=birge(kfr_chi2, kfr_ndf),
+    )
+    if rw is not None:
+        res_r = eff - f_radware_5p(E, *rw)
+        out.rw_params = tuple(rw)
+        out.rw_chi2 = float(np.sum((res_r / deff) ** 2))
+        out.rw_ndf = len(E) - 5
+        out.rw_rms = float(np.sqrt(np.mean(res_r ** 2)))
+        out.rw_birge = birge(out.rw_chi2, out.rw_ndf)
+    return out
