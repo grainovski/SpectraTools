@@ -12,8 +12,39 @@ What is compared, and why in this order:
                 carry different parameters; the curve they describe is what
                 the spectrum correction divides by.
   chi-squared   The quantity being minimised, robust to that degeneracy.
-  parameters    Loosest of the three, and informational -- it catches gross
-                divergence without failing on a harmless reparameterisation.
+  equivalence   Whether the reference's parameters and ours describe the
+                same fit, measured as the chi-squared one set scores on the
+                other's data. Replaces a direct parameter comparison, which
+                asked a question this data cannot answer -- see below.
+
+WHY PARAMETERS ARE NOT COMPARED DIRECTLY
+
+This check used to assert the parameters themselves matched to rel=1e-4,
+and demo2's Radware a1/a2 failed it by 61% and 15% while the curve and
+the chi-squared agreed to 1e-7. The parameters were not wrong; the
+assertion was.
+
+On demo2 the low-energy branch f1 = a1 + a2*x never activates: f1 > f2
+at all 19 points, and with the blend exponent g = 15 it reaches the curve
+only where the branches come closest, at the single lowest line. Two
+parameters, one constraint. Measured: corr(a1, a2) = +1.000000000, the
+Hessian's softest eigenvalue -1.5e-11 against a largest of 2.2e+05, and
+the flat direction (+0.1934, -0.9811, 0, 0, 0) -- exactly the line
+a1 + a2*ln(E_min/100) = const, on which the two solutions agree to
+5.7e-6. An optimizer stops wherever rounding leaves it along a direction
+that flat, so rel=1e-4 was recording one machine's floating-point noise.
+
+WHAT THIS LEAVES UNTESTED, DELIBERATELY
+
+The two solutions are NOT identical everywhere. Between the two lowest
+demo2 lines the curves differ by up to 1.29e-2 (worst at 124.19 keV,
+between lines at 121.78 and 244.69 keV) -- around one error bar of the
+data there, and 4.2% of the measured range exceeds 1e-3. That is a real
+ambiguity in the calibration, not a defect in either implementation: the
+data pin f1 at the lowest line but not its slope, so the efficiency just
+above that line is genuinely under-determined. Do not "fix" this by
+tightening a dense-grid tolerance -- any threshold that passes today
+encodes where this machine's optimizer happened to stop.
 """
 
 import os
@@ -63,6 +94,24 @@ def _load(name):
     return data[:, 2], data[:, 3], data[:, 4], data[:, 5], data[:, 6]
 
 
+#: How far apart two parameter sets may score on the same data and still
+#: count as the same fit. The natural unit is the one-sigma contour, where
+#: chi-squared rises by 1.0, so this is 10,000x tighter than "within the
+#: fit's own uncertainty". Measured across all three files and both models
+#: on 2026-09-21: worst 1.118e-07 (demo2 Radware, the case that used to
+#: fail), everything else below 2e-11. That leaves ~900x headroom, while a
+#: genuinely different fit misses by of order 1 or more.
+_EQUIVALENT_CHI2 = 1e-4
+
+
+def _chi2(model, got, params):
+    """What `params` scores on the data `got` was fitted to.
+
+    Evaluated through our own pipeline for both sides, so the comparison
+    is of the parameters alone and not of two chi-squared conventions."""
+    return float(np.sum(((got.eff - model(got.E, *params)) / got.deff) ** 2))
+
+
 @pytest.mark.parametrize("name", sorted(GOLDEN))
 def test_our_fit_reproduces_caleneff(name):
     from efficiency import f_kfr, f_radware_5p
@@ -88,11 +137,20 @@ def test_our_fit_reproduces_caleneff(name):
     assert got.kfr_ndf == want["kfr_ndf"]
     assert got.rw_ndf == want["rw_ndf"]
 
-    # 3. Parameters, loosely -- degeneracy makes this the weakest check.
-    assert np.asarray(got.kfr_params) == pytest.approx(
-        np.asarray(want["kfr"]), rel=1e-4)
-    assert np.asarray(got.rw_params) == pytest.approx(
-        np.asarray(want["rw"]), rel=1e-4)
+    # 3. The two parameter sets are the same fit. Scoring each on the same
+    #    data answers that directly, and is blind to a direction the data
+    #    leave free exactly where such a direction costs no chi-squared --
+    #    which is what "the data cannot tell these apart" means. See this
+    #    module's docstring for the degeneracy that forced this rewrite.
+    for f, key in ((f_kfr, "kfr"), (f_radware_5p, "rw")):
+        ours = _chi2(f, got, getattr(got, key + "_params"))
+        theirs = _chi2(f, got, want[key])
+        assert abs(ours - theirs) < _EQUIVALENT_CHI2, (
+            "%s: our %s parameters and CalEnEff's are not the same fit -- "
+            "they score %.9f and %.9f on the same data, a gap of %.3e "
+            "against a one-sigma contour of 1.0"
+            % (name, key, ours, theirs, abs(ours - theirs))
+        )
 
 
 def test_the_oracle_can_fail():
@@ -106,6 +164,51 @@ def test_the_oracle_can_fail():
     wrong = list(want["kfr"])
     wrong[0] *= 1.10                      # a 10% error in one parameter
     assert f_kfr(E, *wrong) != pytest.approx(f_kfr(E, *want["kfr"]), rel=1e-6)
+
+
+def test_the_equivalence_check_is_blind_only_to_the_free_direction():
+    """Control for check 3: it must ignore the degeneracy and nothing else.
+
+    A check blind to everything would pass this file however wrong the fit
+    was -- the mirror image of the old parameter comparison, which failed
+    on a difference that was not there. So move demo2's Radware parameters
+    ALONG the direction its data leave free, and ACROSS it, and require
+    opposite verdicts.
+
+    Magnitudes measured 2026-09-21. Along the free direction the cost
+    saturates at 1.4e-7: shifting a2 by 100, about 2.5x its own value, is
+    still free, which is what an exactly flat direction means. Across it a
+    relative 1e-5 in a4 already costs 6.6e-4. So this check is STRICTER
+    than the rel=1e-4 comparison it replaced on the parameters the data
+    actually determine, and blind only where they determine nothing."""
+    from efficiency import f_radware_5p
+
+    N, dN, E, I, dI = _load("demo2.txt")
+    got = fit_efficiency(E, N, dN, I, dI)
+    base = np.asarray(GOLDEN["demo2.txt"]["rw"])
+    reference = _chi2(f_radware_5p, got, base)
+
+    # Along: a1 + a2*ln(E_min/100) held constant while a2 moves by 100.
+    x0 = float(np.log(E.min() * 0.01))
+    free = base.copy()
+    free[0] -= x0 * 100.0
+    free[1] += 100.0
+    assert abs(_chi2(f_radware_5p, got, free) - reference) < _EQUIVALENT_CHI2, (
+        "check 3 is not blind to the direction demo2's data leave free -- "
+        "it would fail on a harmless reparameterisation again"
+    )
+
+    # Across: the same parameter moved OFF that line, and the determined
+    # branch nudged. Both must cost far more than the tolerance allows.
+    for index, factor, label in ((1, 1.001, "a2"), (2, 1.0001, "a4")):
+        broken = base.copy()
+        broken[index] *= factor
+        cost = abs(_chi2(f_radware_5p, got, broken) - reference)
+        assert cost > _EQUIVALENT_CHI2, (
+            "check 3 cannot see a relative %.0e error in %s: it costs only "
+            "%.3e, so a genuinely different fit would pass"
+            % (factor - 1.0, label, cost)
+        )
 
 
 def test_birge_is_one_when_there_is_no_redundancy():
