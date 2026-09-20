@@ -4283,3 +4283,72 @@ def test_reopening_a_stepped_fit_puts_the_checkbox_back(qapp):
     item = main_window.fit_controller.results_table.item(0, 0)
     main_window.fit_controller._on_result_double_clicked(item)
     assert main_window.step_action.isChecked() is True
+
+
+def test_clear_hides_fits_on_every_spectrum_not_only_the_active_one(qapp):
+    """Reported from real use in 6.0.0: fit curves that cannot be cleared.
+
+    main_window._plot_data draws committed fits for EVERY visible spectrum,
+    so hiding them on the active one alone leaves the others on screen with
+    no control able to remove them. Clear then looks broken -- it is working
+    perfectly, on a spectrum that has no fits.
+
+    It happens whenever an operation adds a NEW active spectrum while the
+    original keeps its fits: applying an efficiency correction, Add/Subtract
+    Spectra, Activate Cut. Nothing about it is specific to efficiency; that
+    is merely where it was noticed.
+    """
+    import numpy as np
+
+    from main_window import MainWindow
+    from spectrum import LoadedSpectrum
+
+    window = MainWindow()
+    fitted = _make_active_spectrum(window)
+    _held_key_click(window, "b", 70)
+    _held_key_click(window, "b", 85)
+    _held_key_click(window, "b", 115)
+    _held_key_click(window, "b", 130)
+    _held_key_click(window, "r", 85)
+    _held_key_click(window, "r", 115)
+    _held_key_click(window, "p", 100)
+    window.fit_controller.run_fit()
+    assert fitted.fits, "the marking flow did not produce a committed fit"
+    assert all(f.visible for f in fitted.fits)
+
+    # A second spectrum takes over as active, as any of those operations
+    # would leave things.
+    newer = LoadedSpectrum("derived.txt", np.full(len(fitted.data), 10.0),
+                           "#0000FF")
+    fitted.active = False
+    newer.active = True
+    window.spectra.append(newer)
+    assert not newer.fits
+
+    window.fit_controller.clear()
+
+    assert not any(f.visible for f in fitted.fits), (
+        "fits on the no-longer-active spectrum stayed visible, and no "
+        "control can reach them")
+    window.close()
+
+
+def test_clear_still_hides_the_active_spectrum_s_own_fits(qapp):
+    """Control for the test above: widening Clear to every spectrum must not
+    have cost it the case it already handled."""
+    window = MainWindow()
+    fitted = _make_active_spectrum(window)
+    _held_key_click(window, "b", 70)
+    _held_key_click(window, "b", 85)
+    _held_key_click(window, "b", 115)
+    _held_key_click(window, "b", 130)
+    _held_key_click(window, "r", 85)
+    _held_key_click(window, "r", 115)
+    _held_key_click(window, "p", 100)
+    window.fit_controller.run_fit()
+    assert all(f.visible for f in fitted.fits)
+
+    window.fit_controller.clear()
+
+    assert not any(f.visible for f in fitted.fits)
+    window.close()

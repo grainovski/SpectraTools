@@ -572,9 +572,19 @@ class FitModeController(QObject):
 
     def clear(self):
         self.reset_marks()
-        active = active_spectrum(self.main_window.spectra)
-        if active is not None:
-            for result in active.fits:
+        # EVERY spectrum, not just the active one. main_window._plot_data
+        # draws committed fits for every visible spectrum, so hiding them on
+        # the active one alone leaves the others' overlays on screen with no
+        # control that can remove them.
+        #
+        # That is not a corner case: it happens the moment any operation
+        # adds a NEW active spectrum while the original keeps its fits --
+        # applying an efficiency correction, Add/Subtract Spectra, Activate
+        # Cut. The user is then looking at fit curves belonging to a
+        # spectrum that is no longer selected, and Clear appears to do
+        # nothing because the spectrum it clears has no fits.
+        for spectrum in self.main_window.spectra:
+            for result in getattr(spectrum, "fits", ()):
                 result.visible = False
         # Go To's mark is a mark on the plot, so the one control that clears
         # marks clears it too. redraw=False: the replot below covers it.
