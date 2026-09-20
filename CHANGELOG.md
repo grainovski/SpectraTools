@@ -4,6 +4,64 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [6.0.0] - 2026-09-20
+
+### Added
+
+- **Automatic Monte Carlo efficiency calibration.** After an automatic
+  energy calibration, **Auto MC Efficiency Calibration...** on the Energy
+  Calibration window fits the detector's relative efficiency from the peaks
+  that calibration already matched to source lines. It is a port of
+  CalEnEff's engine, and it is checked against it: the test suite runs both
+  on CalEnEff's own three datasets and requires the fitted curves to agree
+  to one part in a million.
+
+  Two independent models are fitted at once -- **KFR** (4 parameters) and
+  **Radware** (5 free, following Radford's EFFIT with C and G fixed) -- so
+  where they agree the curve is well determined and where they separate it
+  is not. Uncertainty comes from a 10,000-iteration Monte Carlo that
+  resamples every peak area and every line intensity, refits both models,
+  and reports how many samples survived; a band built on two hundred
+  survivors means something different from one built on nine thousand, and
+  the counts are on screen and in every file header.
+
+  The reported efficiency is the **Monte Carlo mean**, not the best-fit
+  curve. The best fit is shown beside it when examining an energy, because
+  the two differ and the size of the difference is worth seeing. This is a
+  deliberate departure from CalEnEff, which reports its best fit.
+
+  The window runs the fit on a worker thread with a cancellable progress
+  dialog -- a minute of frozen window is indistinguishable from a crash.
+
+- **Saving an efficiency** writes two files, one row per calibration peak
+  and one per channel, each carrying both curves so the file records the
+  whole calibration rather than one choice within it. Neither stores a
+  channel column: the energy calibration is available wherever the file is
+  read, so a channel column would duplicate a derived value where it can go
+  stale.
+
+- **Applying an efficiency to a spectrum** divides it bin by bin and adds
+  the result as a new spectrum beside the original, which is left
+  untouched. The curve is extrapolated outside its fitted range without
+  restriction; a bin is corrected only where the efficiency is finite and
+  greater than zero, and is zeroed otherwise, with the count reported. That
+  rule is written that way rather than as "at or below zero" because the
+  two models fail differently outside their range -- KFR goes negative
+  while Radware returns NaN -- and a NaN left in a spectrum spreads into
+  everything that touches it afterwards.
+
+### Notes
+
+- The efficiency is **relative**. Only the shape is measured; the scale is
+  fixed by normalising the applied curve to peak at 1. A corrected spectrum
+  can be compared line against line, but its absolute scale is arbitrary
+  and this is not an activity calibration.
+
+- The efficiency's own uncertainty is deliberately not propagated into a
+  corrected spectrum. The spectrum's variance is divided by the efficiency
+  squared so it still matches the counts, but only the efficiency value
+  itself is applied.
+
 ## [5.2.6] - 2026-09-19
 
 ### Changed

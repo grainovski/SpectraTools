@@ -1275,3 +1275,85 @@ def test_help_says_the_residual_strip_draws_error_bars():
     that makes the strip readable at a glance."""
     kb = build_knowledge_database_html()
     assert "draws this same quantity as an error bar" in kb
+
+
+def _flat(html):
+    """HTML with its line wrapping removed.
+
+    Assertions on phrases must not depend on where the source happened to
+    wrap a line -- "Monte Carlo mean" is one string to a reader and two to
+    a substring search if a newline falls between the words.
+    """
+    import re
+
+    return re.sub(r"\s+", " ", html)
+
+
+# --- the efficiency calibration (6.0.0) ---------------------------------
+#
+# These assert on content that can ONLY come from the new sections. The
+# obvious versions -- "efficiency" appears, "KFR" appears, "relative"
+# appears -- all passed BEFORE a word was written, because the CalEnEff
+# export documentation already used those words. A help test that passes
+# against the help you have not written yet is worse than no test.
+
+
+def test_the_knowledge_database_explains_the_efficiency_calibration():
+    """Every claim in the help is verified against the source, because this
+    project has repeatedly found plausible help prose to be subtly wrong."""
+    from help_content import build_knowledge_database_html
+
+    html = build_knowledge_database_html()
+    lowered = _flat(html).lower()
+
+    assert "Radware" in _flat(html), "the second model is not described"
+    assert "monte carlo mean" in lowered, (
+        "the help must say the reported value is the MC mean, not the best "
+        "fit -- that is the difference between this and CalEnEff")
+    assert "10,000" in _flat(html) or "10000" in _flat(html), "the iteration count"
+    assert "zero" in lowered and "finite" in lowered, (
+        "the rule for bins the curve cannot be evaluated at")
+
+
+def test_the_knowledge_database_says_the_efficiency_is_not_absolute():
+    """The one thing a reader can act wrongly on. Stating it is the point of
+    the section, so it gets an assertion of its own rather than riding along
+    inside a broader one."""
+    from help_content import build_knowledge_database_html
+
+    lowered = _flat(build_knowledge_database_html()).lower()
+    assert "not an activity calibration" in lowered or (
+        "absolute scale" in lowered and "arbitrary" in lowered), (
+        "the help does not warn that the corrected spectrum's absolute "
+        "scale is arbitrary")
+
+
+def test_the_howto_covers_the_efficiency_workflow():
+    """Asserts on the button's exact label, which nothing else in the help
+    contains. Merely checking for the word "efficiency" passed before this
+    feature existed."""
+    from help_content import build_howto_html
+
+    html = build_howto_html()
+    assert "Auto MC Efficiency Calibration" in _flat(html), (
+        "the HowTo does not name the button that starts the calibration")
+    assert "Apply to active spectrum" in _flat(html), (
+        "the HowTo does not describe applying the result")
+
+
+def test_these_checks_would_have_failed_before_the_feature():
+    """Control. The prose already in the help for the CalEnEff export uses
+    the words "efficiency", "KFR" and "relative", so assertions built on
+    those alone cannot distinguish the new sections from the old ones. This
+    pins that the markers above are genuinely new.
+    """
+    from help_content import build_howto_html, build_knowledge_database_html
+
+    # Present before 6.0.0 -- useless as evidence.
+    assert "efficiency" in _flat(build_knowledge_database_html()).lower()
+    assert "efficiency" in _flat(build_howto_html()).lower()
+
+    # Introduced by 6.0.0 -- the markers the tests above actually use.
+    for marker in ("Radware", "Monte Carlo mean"):
+        assert marker.lower() in _flat(build_knowledge_database_html()).lower()
+    assert "Auto MC Efficiency Calibration" in _flat(build_howto_html())

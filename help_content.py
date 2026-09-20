@@ -634,6 +634,38 @@ in-progress cut/background marks, and discards any in-progress or
 committed fit marks for the projection you're leaving -- it's
 different underlying data, so nothing carries over, even switching
 back to an axis you'd already marked or fit before.</p>
+
+<h3>16. Efficiency calibration</h3>
+<p>After an automatic calibration has matched peaks to a source's lines,
+<b>Auto MC Efficiency Calibration...</b> on the Energy Calibration window
+fits the detector's <i>relative</i> efficiency from those same peaks. It
+needs at least six of them matched to lines with a usable uncertainty; when
+it does not have that, the button is disabled and its tooltip says which
+condition failed.</p>
+<p>The fit runs as a Monte Carlo and takes about a minute, on a worker
+thread with a progress dialog you can cancel. It fits two independent
+models at once -- <b>KFR</b> and <b>Radware</b> -- and the window that
+opens shows both, each with its 1-sigma band, over the measured points,
+with a residual strip underneath.</p>
+<p>Type an energy and press <b>Examine</b> to read both models at that
+energy. Each reports the Monte Carlo mean, its uncertainty, and the
+best-fit value beside it; the two differ slightly, and seeing by how much
+is the reason both are shown.</p>
+<p>The <b>Apply:</b> radio buttons choose which curve is used. That choice
+also sets the scale: the selected model's curve is normalised to peak at
+exactly 1, so switching models changes every number, including the ones
+written to file. The other curve is drawn on the same scale and may run
+above 1 where it sits higher -- that is the disagreement between the
+models, not an error.</p>
+<p><b>Save efficiency...</b> writes two files, one row per calibration peak
+and one row per channel. Both carry both curves.</p>
+<p><b>Apply to active spectrum</b> divides the active spectrum bin by bin
+by the selected curve and adds the result as a <i>new</i> spectrum beside
+the original, which is left untouched. It needs an active energy
+calibration, since that is what gives each bin an energy. If the active
+calibration is not the one the efficiency was fitted under, you are asked
+first -- the same curve applied through a different channel-to-energy map
+is a different correction.</p>
 """
     return _page("SpectraTools -- HowTo", body)
 
@@ -1323,6 +1355,96 @@ than one and the parenthesised digits are the whole of it.</p>
 <p>Neither the fit region nor a row number is a column. The region
 has moved into the tooltip, along with the gross and net areas, and
 hovering anywhere on a row shows it.</p>
+
+<h2>Relative efficiency</h2>
+<p>A detector does not record every gamma ray that reaches it, and how
+often it does depends on energy. Dividing a peak's net area <b>N</b> by
+its line's emission intensity <b>I</b> gives a number proportional to
+that probability: <b>&epsilon; = N / I</b>. Collect one per matched peak
+and a curve through them is the detector's efficiency against energy.</p>
+<p><b>This is a relative efficiency, not an absolute one.</b> Only the
+shape is measured; the overall scale is arbitrary, and is fixed here by
+normalising the curve to peak at 1. A spectrum corrected with it can be
+compared line against line, but the corrected counts are not activities
+and this is <b>not an activity calibration</b>. The absolute scale of a
+corrected spectrum is arbitrary.</p>
+
+<h3>Two models</h3>
+<p>Both are fitted, always, and you choose which to apply.</p>
+<p><b>KFR</b>, four parameters:
+<i>&epsilon;(E) = (aE + b/E) &middot; exp(cE + d/E)</i>.</p>
+<p><b>Radware</b>, five free parameters, following Radford's EFFIT (v4.0,
+<i>effit.c</i>): a pair of quadratics in ln(E/100) and ln(E/1000) joined
+smoothly, with Radford's own defaults C = 0 and G = 15 held fixed.
+Fixing those two is what makes the fit stable on ordinary detector
+data.</p>
+<p>Fitting two models that were derived independently is a check you
+cannot get from one. Where they agree, the curve is well determined by
+the data; where they separate, it is not, and the gap between them says
+how much.</p>
+
+<h3>The Monte Carlo, and what number is reported</h3>
+<p>The uncertainty comes from resampling rather than from a formula.
+Each of <b>10,000</b> iterations draws every peak area and every
+intensity from a Gaussian of its own uncertainty, refits both models,
+and keeps the parameters. Draws that come out non-physical -- a
+non-positive area or intensity -- are rejected and counted, and the
+accepted and rejected counts are shown in the window and written into
+the file headers. A band built on two hundred surviving samples means
+something different from one built on nine thousand, and nothing else
+would tell you which you are looking at.</p>
+<p><b>The efficiency reported, applied and saved is the Monte Carlo
+mean</b> at each energy -- the average of those ten thousand curves --
+not the single best-fit curve. The best fit is still shown beside it
+when you examine an energy, because the two differ and the size of the
+difference is worth seeing. The band is the 15.87 / 84.13 percentiles
+of the same family, Birge-scaled.</p>
+<p>The fit-quality numbers in the summary -- chi-squared, ndf, Birge,
+RMS -- describe the <i>best fit</i>, since that is what they are
+statistics of.</p>
+
+<h3>The two files</h3>
+<p>Saving writes two, and both carry both curves so the file is a
+complete record of the calibration rather than of one choice within
+it:</p>
+<p>Per peak, one row per calibration peak:
+<b>E &nbsp; dE &nbsp; eff_kfr &nbsp; deff_kfr &nbsp; eff_rw &nbsp;
+deff_rw</b></p>
+<p>Per bin, one row per channel:
+<b>E &nbsp; eff_kfr &nbsp; deff_kfr &nbsp; eff_rw &nbsp; deff_rw</b></p>
+<p>Neither stores a channel column. The energy calibration is available
+wherever these files are read, so a channel column would be a copy of
+something already derivable -- and one that goes stale the moment the
+calibration changes. The per-bin file has no <b>dE</b> either: a point
+sampled off a curve has no energy uncertainty, and a column of zeros
+would be a meaningless number written to disk.</p>
+<p>Above 2,048 rows the per-bin curves are interpolated from that many
+knots rather than evaluated at every channel. The header records when
+this happened. The error it introduces is about 2 parts in a million,
+some three thousand times smaller than the Monte Carlo uncertainty
+already in the <b>deff</b> columns; evaluating every channel exactly
+would spend a minute and a half of your time buying precision the
+numbers do not have.</p>
+
+<h3>Applying it to a spectrum</h3>
+<p>Each bin's counts are divided by the efficiency at that bin's energy,
+producing a new spectrum shown beside the original. The original is
+never modified.</p>
+<p>The curve is extrapolated outside the range it was fitted over,
+without restriction. Both models can run away out there, so there is a
+rule for what cannot be used: <b>a bin is corrected only where the
+efficiency is finite and greater than zero</b>, and is set to zero
+otherwise. The count of zeroed bins is reported. Writing the rule that
+way rather than as "efficiency at or below zero" matters, because the
+two models fail differently at, say, a negative energy from a
+calibration offset -- KFR stays finite and goes negative, Radware
+returns a NaN -- and a NaN left in a spectrum spreads into everything
+that touches it afterwards.</p>
+<p>The spectrum's own variance is divided by the efficiency squared, so
+that stored uncertainties still match the corrected counts. The
+efficiency's <i>own</i> uncertainty -- the <b>deff</b> columns -- is
+deliberately not propagated into the correction; only the efficiency
+value is used.</p>
 
 <h2>Saving and reloading your work</h2>
 <p><b>File &rarr; Save Fits...</b> writes every fit on the active
