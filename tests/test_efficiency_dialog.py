@@ -104,3 +104,95 @@ def test_the_enable_check_can_fail(qapp):
     assert good.efficiency_button.isEnabled()
     assert not bad.efficiency_button.isEnabled()
     good.close(); bad.close()
+
+
+# --- the results window --------------------------------------------------
+
+
+@pytest.fixture
+def opened(qapp):
+    """A real window over the reference's Ba-133 data, with a short MC."""
+    import os
+
+    from efficiency import EfficiencyResult, fit_efficiency, run_monte_carlo
+    from efficiency_dialog import EfficiencyDialog
+
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "caleneff",
+                        "demo1.txt")
+    data = np.loadtxt(path, ndmin=2)
+    N, dN, E, I, dI = (data[:, 2], data[:, 3], data[:, 4],
+                       data[:, 5], data[:, 6])
+    fit = fit_efficiency(E, N, dN, I, dI)
+    result = EfficiencyResult(
+        fit=fit, mc=run_monte_carlo(fit, N, dN, I, dI, iterations=200),
+        model="kfr")
+    dialog = EfficiencyDialog(None, result, np.full(len(E), 0.01))
+    yield dialog
+    dialog.close()
+
+
+def test_it_draws_both_curves_and_the_points(opened):
+    assert len(opened.axes.lines) >= 2
+    assert len(opened.axes.collections) >= 1, "no error bars drawn"
+
+
+def test_it_draws_a_residual_for_each_model(opened):
+    assert len(opened.residual_axes.lines) >= 1
+
+
+def test_examine_reports_both_models_at_an_energy(opened):
+    text = opened.examine(250.0)
+    assert "KFR" in text and "Radware" in text
+    assert "250" in text
+
+
+def test_examine_shows_the_mc_mean_and_the_best_fit_as_two_numbers(opened):
+    """They are different quantities and CalEnEff shows both. If the window
+    ever printed one of them twice, the disagreement the second exists to
+    expose would be invisible."""
+    mean, sigma, best = opened.result.predict(250.0, "kfr")
+    text = opened.examine(250.0)
+    assert "%.6g" % mean in text
+    assert "%.6g" % best in text
+    assert mean != pytest.approx(best, rel=1e-12)
+
+
+def test_selecting_the_other_model_redraws_and_rescales(opened):
+    before = opened.result.normalisation
+    opened.select_model("rw")
+    assert opened.result.model == "rw"
+    assert opened.result.normalisation != pytest.approx(before)
+
+
+def test_the_summary_reports_the_mc_counts(opened):
+    """A band from few survivors means something different from one built on
+    thousands, so the number is on screen rather than implied."""
+    text = opened.summary_text()
+    assert "accepted" in text.lower()
+    assert str(opened.result.mc.kfr_accepted) in text
+
+
+def test_it_survives_radware_not_converging(qapp):
+    """rw_params is None whenever the Radware fit fails. The window must
+    still open on the KFR curve rather than raising -- a failed second model
+    is a normal outcome, not a broken calibration."""
+    import os
+
+    from efficiency import EfficiencyResult, fit_efficiency, run_monte_carlo
+    from efficiency_dialog import EfficiencyDialog
+
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "caleneff",
+                        "demo1.txt")
+    data = np.loadtxt(path, ndmin=2)
+    N, dN, E, I, dI = (data[:, 2], data[:, 3], data[:, 4],
+                       data[:, 5], data[:, 6])
+    fit = fit_efficiency(E, N, dN, I, dI)
+    fit.rw_params = None                      # as a failed Radware fit leaves it
+    result = EfficiencyResult(
+        fit=fit, mc=run_monte_carlo(fit, N, dN, I, dI, iterations=100),
+        model="kfr")
+
+    dialog = EfficiencyDialog(None, result, np.full(len(E), 0.01))
+    assert "did not converge" in dialog.summary_text().lower()
+    assert "did not converge" in dialog.examine(250.0).lower()
+    dialog.close()
