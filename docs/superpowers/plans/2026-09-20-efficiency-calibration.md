@@ -964,19 +964,43 @@ Append to `tests/test_efficiency_fit.py`:
 # --- normalisation -------------------------------------------------------
 
 
-def _demo_result():
+def _demo_result(name="demo1.txt"):
     from efficiency import EfficiencyResult, fit_efficiency, run_monte_carlo
 
-    N, dN, E, I, dI = _load("demo1.txt")
+    N, dN, E, I, dI = _load(name)
     fit = fit_efficiency(E, N, dN, I, dI)
     mc = run_monte_carlo(fit, N, dN, I, dI, iterations=200)
     return EfficiencyResult(fit=fit, mc=mc, model="kfr")
 
 
+def _norm_grid(r):
+    """The SAME grid _compute_normalisation searches for the peak.
+
+    It deliberately runs 10% past the data on each side, as the reference
+    does. Testing the peak over the narrower data range instead would be
+    wrong: for KFR the maximum falls OUTSIDE the measured points on two of
+    the three reference datasets (109.6 keV against data from 122 keV on
+    demo2; 167.6 keV against data from 186 keV on Ra-226), so such a test
+    would pass on demo1 by luck and fail on the others.
+    """
+    lo = max(float(r.fit.E.min()) * 0.9, 1.0)
+    return np.linspace(lo, float(r.fit.E.max()) * 1.1, 2000)
+
+
 def test_the_selected_curve_peaks_at_one():
     r = _demo_result()
-    grid = np.linspace(r.fit.E.min(), r.fit.E.max(), 2000)
-    assert np.max(r.curve(grid)) == pytest.approx(1.0, rel=1e-6)
+    assert np.nanmax(r.curve(_norm_grid(r))) == pytest.approx(1.0, rel=1e-6)
+
+
+def test_the_peak_may_fall_outside_the_measured_points():
+    """Not a defect, and worth pinning so nobody "fixes" it. A detector's
+    efficiency crests below the lowest measured line on real data, so within
+    the data range the curve can sit just under 1 while still peaking at
+    exactly 1 on the normalisation grid."""
+    r = _demo_result("226Ra_En_Area.txt")
+    inside = np.linspace(r.fit.E.min(), r.fit.E.max(), 2000)
+    assert np.nanmax(r.curve(inside)) <= 1.0 + 1e-9
+    assert np.nanmax(r.curve(_norm_grid(r))) == pytest.approx(1.0, rel=1e-6)
 
 
 def test_switching_model_rescales_both_curves():
@@ -989,8 +1013,7 @@ def test_switching_model_rescales_both_curves():
     before = r.normalisation
     r.model = "rw"
     assert r.normalisation != pytest.approx(before)
-    grid = np.linspace(r.fit.E.min(), r.fit.E.max(), 2000)
-    assert np.max(r.curve(grid)) == pytest.approx(1.0, rel=1e-6)
+    assert np.nanmax(r.curve(_norm_grid(r))) == pytest.approx(1.0, rel=1e-6)
 
 
 def test_the_unselected_curve_may_exceed_one():
@@ -1046,10 +1069,14 @@ def test_the_best_fit_would_fail_that():
 
 def test_the_applied_curve_is_the_one_that_peaks_at_one():
     """The normalisation divides by the MC mean's peak, not the best fit's,
-    so that the curve actually applied is the one bounded by 1."""
+    so the curve actually applied is the one bounded by 1. Checked by
+    confirming the best fit's own peak does NOT land on 1 -- if it did, the
+    two normalisations would be indistinguishable here."""
     r = _demo_result()
-    grid = np.linspace(r.fit.E.min(), r.fit.E.max(), 2000)
+    grid = _norm_grid(r)
     assert np.nanmax(r.curve(grid)) == pytest.approx(1.0, rel=1e-6)
+    best = r.best_fit_raw(grid, "kfr") * r.normalisation
+    assert np.nanmax(best) != pytest.approx(1.0, rel=1e-9)
 
 
 def test_an_unnormalised_curve_would_fail_that():
@@ -1250,7 +1277,11 @@ class EfficiencyResult:
 - [ ] **Step 4: Run the tests**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_efficiency_fit.py tests/test_efficiency_mc.py -q`
-Expected: `21 passed`  (14 in the fit file, 7 in the MC file)
+Expected: `22 passed`  (15 in the fit file, 7 in the MC file)
+
+Note: `tests/test_efficiency_mc.py` has 11 tests, not 7 -- two were added
+after this plan was written. Run it too and expect 26 in total across the
+two files.
 
 - [ ] **Step 5: Commit**
 
