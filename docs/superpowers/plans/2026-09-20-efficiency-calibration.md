@@ -2280,17 +2280,281 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'efficiency_dialog'`
 
 - [ ] **Step 3: Write `efficiency_dialog.py`**
 
-Build a `QDialog` following `calibration_plot_dialog.py`'s structure exactly — same `Figure` / `FigureCanvasQTAgg` / `subplots(2, 1, sharex=True, gridspec_kw={"height_ratios": [3, 1]})` layout, same `style_axes(self.axes, theme)` calls so both themes work.
+Two colour choices worth stating rather than leaving to taste. The curves
+must read on **both** a white and a `#1e1e1e` ground, since this app has a
+dark theme, and they must not be confused with the spectrum traces, which
+since 5.2.6 run along a red-to-blue ramp. Teal and amber satisfy both: they
+are mid-tone enough for either background and sit well away from the ramp's
+hues.
 
-It must expose, because the tests above drive them:
+```python
+"""The efficiency calibration results window.
 
-- `self.axes`, `self.residual_axes`
-- `self.result` — the `EfficiencyResult`
-- `select_model(name)` — set `result.model`, recompute, redraw
-- `examine(energy)` — return the report string for both models
-- `summary_text()` — chi2/ndf, Birge, RMS per model plus MC accepted/rejected
+Shows what CalEnEff shows -- both curves with their Monte Carlo bands, the
+residuals, and a readout for any energy -- in this application's own themes
+rather than CalEnEff's palette.
 
-Drawing: error bars at the data points; KFR solid with `fill_between` for its band; Radware dashed with its band; the residual strip carries both models' residuals with their RMS lines. Colours come from `theme.py`, not from CalEnEff.
+The curve drawn is the Monte Carlo MEAN, which is what gets applied and
+saved. The best fit is reported beside it when examining a single energy,
+because the two differ and the difference is the point of showing both.
+"""
+
+import os
+
+import numpy as np
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.figure import Figure
+from PySide6.QtWidgets import (
+    QButtonGroup, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel,
+    QLineEdit, QMessageBox, QPushButton, QRadioButton, QVBoxLayout,
+)
+
+from efficiency_io import write_per_bin, write_per_peak
+from theme import style_axes
+
+#: Mid-tone on white and on #1e1e1e alike, and clear of the red-to-blue
+#: spectrum ramp so a curve is never mistaken for a trace.
+KFR_COLOR = "#2AA198"      # teal
+RADWARE_COLOR = "#D9822B"  # amber
+
+MODEL_LABELS = (("kfr", "KFR"), ("rw", "Radware"))
+
+
+class EfficiencyDialog(QDialog):
+    """A finished efficiency calibration, drawn and queryable.
+
+    Takes an EfficiencyResult that has already been fitted; it runs no
+    Monte Carlo of its own.
+    """
+
+    def __init__(self, parent, result, energy_errors, theme="light",
+                 default_path=None):
+        super().__init__(parent)
+        self.setWindowTitle("Relative Efficiency")
+        self.result = result
+        self._energy_errors = np.asarray(energy_errors, dtype=float)
+        self._theme = theme
+        self._default_path = default_path or "efficiency.txt"
+
+        layout = QVBoxLayout(self)
+
+        self._figure = Figure(figsize=(6.5, 5.0))
+        self.canvas = FigureCanvasQTAgg(self._figure)
+        # Same split as the energy-calibration window: residuals share the
+        # x axis and take a third of the height, because they are read
+        # against the curve above rather than on their own.
+        self.axes, self.residual_axes = self._figure.subplots(
+            2, 1, sharex=True, gridspec_kw={"height_ratios": [3, 1]}
+        )
+        layout.addWidget(self.canvas)
+
+        # --- model selector ------------------------------------------
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Apply:"))
+        self._model_buttons = QButtonGroup(self)
+        for key, label in MODEL_LABELS:
+            button = QRadioButton(label)
+            button.setChecked(key == result.model)
+            # Radware may simply not have converged for this data.
+            button.setEnabled(key == "kfr" or result.fit.rw_params is not None)
+            button.toggled.connect(
+                lambda checked, k=key: checked and self.select_model(k))
+            self._model_buttons.addButton(button)
+            row.addWidget(button)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+        # --- examine --------------------------------------------------
+        examine_row = QHBoxLayout()
+        examine_row.addWidget(QLabel("Efficiency at (keV):"))
+        self.energy_edit = QLineEdit()
+        self.energy_edit.setMaximumWidth(120)
+        self.energy_edit.returnPressed.connect(self._on_examine)
+        examine_row.addWidget(self.energy_edit)
+        examine_button = QPushButton("Examine")
+        examine_button.clicked.connect(self._on_examine)
+        examine_row.addWidget(examine_button)
+        examine_row.addStretch(1)
+        layout.addLayout(examine_row)
+
+        self.examine_label = QLabel()
+        self.examine_label.setWordWrap(True)
+        layout.addWidget(self.examine_label)
+
+        self.summary_label = QLabel()
+        self.summary_label.setWordWrap(True)
+        layout.addWidget(self.summary_label)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        self.save_button = buttons.addButton(
+            "Save efficiency...", QDialogButtonBox.ButtonRole.ActionRole)
+        self.save_button.clicked.connect(self._on_save)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._draw()
+
+    # --- the three things the tests drive ----------------------------
+
+    def select_model(self, name):
+        """Choose which curve is applied and saved.
+
+        Changing it changes the normalisation too, because that is the
+        selected curve's own peak -- so every number on screen moves.
+        """
+        if name == self.result.model:
+            return
+        self.result.model = name
+        self._draw()
+
+    def examine(self, energy):
+        """The readout for one energy, both models, as displayed.
+
+        Reports the Monte Carlo mean and the best fit side by side. They are
+        different quantities and CalEnEff shows both; collapsing them would
+        hide the disagreement the second number exists to expose.
+        """
+        lines = ["At %.2f keV" % float(energy)]
+        for key, label in MODEL_LABELS:
+            if key == "rw" and self.result.fit.rw_params is None:
+                lines.append("  %-8s did not converge" % label)
+                continue
+            mean, sigma, best = self.result.predict(energy, key)
+            lines.append(
+                "  %-8s %s +- %s   (best fit %s)"
+                % (label, _fmt(mean), _fmt(sigma), _fmt(best)))
+        return "\n".join(lines)
+
+    def summary_text(self):
+        """Fit quality per model, plus how much Monte Carlo survived.
+
+        The accepted counts are on screen rather than implied: a band built
+        on 200 surviving samples means something different from one built on
+        9,900, and nothing else would reveal which this is.
+        """
+        fit = self.result.fit
+        out = ["KFR      chi2/ndf %.2f/%d   Birge %.3f   RMS %.4g"
+               % (fit.kfr_chi2, fit.kfr_ndf, fit.kfr_birge, fit.kfr_rms)]
+        if fit.rw_params is None:
+            out.append("Radware  did not converge")
+        else:
+            out.append("Radware  chi2/ndf %.2f/%d   Birge %.3f   RMS %.4g"
+                       % (fit.rw_chi2, fit.rw_ndf, fit.rw_birge, fit.rw_rms))
+        mc = self.result.mc
+        if mc is not None:
+            out.append(
+                "Monte Carlo: KFR %d accepted, Radware %d accepted, "
+                "%d rejected" % (mc.kfr_accepted, mc.rw_accepted, mc.rejected))
+        out.append("Fitted range %.2f - %.2f keV   applied: %s"
+                   % (fit.E.min(), fit.E.max(),
+                      dict(MODEL_LABELS)[self.result.model]))
+        return "\n".join(out)
+
+    # --- drawing ------------------------------------------------------
+
+    def _draw(self):
+        result = self.result
+        fit = result.fit
+        E = fit.E
+        grid = np.linspace(float(E.min()) * 0.98, float(E.max()) * 1.02, 400)
+
+        self.axes.clear()
+        self.residual_axes.clear()
+        style_axes(self.axes, self._theme)
+        style_axes(self.residual_axes, self._theme)
+
+        # Data points, on the same normalised scale as the curves.
+        scale = result.normalisation
+        self.axes.errorbar(E, fit.eff * scale, yerr=fit.deff * scale,
+                           fmt="o", ms=4, capsize=3, elinewidth=1,
+                           color=_fg(self._theme), ecolor=_fg(self._theme),
+                           label="data", zorder=5)
+
+        for key, label in MODEL_LABELS:
+            if key == "rw" and fit.rw_params is None:
+                continue
+            colour = KFR_COLOR if key == "kfr" else RADWARE_COLOR
+            style = "-" if key == "kfr" else "--"
+            with np.errstate(over="ignore", invalid="ignore",
+                             divide="ignore"):
+                curve = result.curve(grid, key)
+                lo, hi = result.band(grid, key)
+                residual = (fit.eff - result.curve(E, key) / scale) * scale
+            self.axes.plot(grid, curve, style, color=colour, lw=1.8,
+                           label=label)
+            good = np.isfinite(lo) & np.isfinite(hi)
+            if good.any():
+                self.axes.fill_between(grid[good], lo[good], hi[good],
+                                       color=colour, alpha=0.18, lw=0)
+            self.residual_axes.errorbar(
+                E, residual, yerr=fit.deff * scale, fmt="o", ms=3,
+                capsize=2, elinewidth=0.8, color=colour, ecolor=colour,
+                label=label)
+
+        self.axes.set_ylabel("relative efficiency")
+        self.axes.legend(fontsize=8)
+        self.residual_axes.axhline(0.0, lw=0.8, color=_fg(self._theme))
+        self.residual_axes.set_ylabel("residual")
+        self.residual_axes.set_xlabel("Energy (keV)")
+
+        self.summary_label.setText(self.summary_text())
+        self._figure.tight_layout()
+        self.canvas.draw()
+
+    # --- handlers -----------------------------------------------------
+
+    def _on_examine(self):
+        text = self.energy_edit.text().strip()
+        try:
+            energy = float(text)
+        except ValueError:
+            self.examine_label.setText("Enter an energy in keV.")
+            return
+        self.examine_label.setText(self.examine(energy))
+
+    def _on_save(self):
+        """Writes BOTH files from one dialog, since they are two views of
+        one calibration and saving only half of it is never what is
+        wanted."""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save efficiency", self._default_path,
+            "Text files (*.txt);;All files (*)")
+        if not path:
+            return
+        stem, ext = os.path.splitext(path)
+        ext = ext or ".txt"
+        try:
+            write_per_peak(stem + "_peaks" + ext, self.result,
+                           self._energy_errors)
+            if self.result.calibration is not None:
+                write_per_bin(stem + "_bins" + ext, self.result,
+                              self.result.calibration,
+                              self._bin_count())
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Could not save", str(exc))
+            return
+        QMessageBox.information(
+            self, "Efficiency saved",
+            "Wrote %s_peaks%s%s" % (os.path.basename(stem), ext,
+                                    "" if self.result.calibration is None
+                                    else " and _bins" + ext))
+
+    def _bin_count(self):
+        return int(getattr(self, "_channels", 0) or 4096)
+
+
+def _fg(theme):
+    return "#e0e0e0" if theme == "dark" else "black"
+
+
+def _fmt(value):
+    """Six significant figures, or a plain marker when there is no number.
+
+    nan reaches here whenever fewer than MIN_MC_SAMPLES of the Monte Carlo
+    family survived at that energy, which is a real answer and not a bug.
+    """
+    return "n/a" if value is None or not np.isfinite(value) else "%.6g" % value
+```
 
 - [ ] **Step 4: Run the tests**
 
