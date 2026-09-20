@@ -2576,59 +2576,265 @@ git commit -m "feat: the efficiency results window"
 - Modify: `calibration_plot_dialog.py`
 - Test: `tests/test_efficiency_dialog.py` (append)
 
+This is the task that finally connects the button to the calibration. After
+it the feature is reachable end to end from the interface.
+
+**`QThread` already has a `finished` signal.** Naming a custom one `finished`
+shadows it and the connection silently goes to the wrong place, so the
+signals below are `progressed`, `succeeded` and `failed`.
+
 - [ ] **Step 1: Write the failing test**
 
+Append to `tests/test_efficiency_dialog.py`. Note the helpers are `_points`
+and `_lines` -- an earlier draft of this plan called them `_good_points` and
+`_good_lines`, which no longer exist.
+
 ```python
+# --- running it off the UI thread ---------------------------------------
+
+
 def test_the_mc_runs_off_the_ui_thread(qapp, monkeypatch):
-    """10,000 iterations twice over is about a minute. Running it inline
-    would freeze the window for that whole time, with no way to cancel."""
+    """10,000 iterations across two models is about a minute. Running it in
+    the handler would freeze the window for that whole time, and a frozen
+    window is indistinguishable from a crashed one."""
     import calibration_plot_dialog as mod
 
     seen = {}
-
-    def _fake_start(self, *args, **kwargs):
-        seen["started"] = True
-
-    monkeypatch.setattr(mod.EfficiencyWorker, "start", _fake_start,
+    monkeypatch.setattr(mod.EfficiencyWorker, "start",
+                        lambda self, *a, **k: seen.setdefault("started", True),
                         raising=False)
-    d = _dialog(qapp, _good_points(), _good_lines())
+    d = _dialog(qapp, _points(), _lines())
     d._on_efficiency_clicked()
-    assert seen.get("started"), "the MC was not handed to a worker"
+    assert seen.get("started"), "the Monte Carlo was not handed to a worker"
     d.close()
 
 
-def test_cancelling_stops_the_run(qapp):
-    """progress() returning False must end the loop, or Cancel does nothing
-    until the full minute is up."""
-    import os
+def test_the_worker_really_is_a_thread(qapp):
+    """Control for the test above. A plain object with a start() method
+    would satisfy it while still running everything on the UI thread."""
+    from PySide6.QtCore import QThread
 
-    from efficiency import fit_efficiency, run_monte_carlo
+    from calibration_plot_dialog import EfficiencyWorker
 
-    path = os.path.join(os.path.dirname(__file__), "fixtures", "caleneff",
-                        "demo1.txt")
-    data = np.loadtxt(path, ndmin=2)
-    N, dN, E, I, dI = (data[:, 2], data[:, 3], data[:, 4],
-                       data[:, 5], data[:, 6])
-    fit = fit_efficiency(E, N, dN, I, dI)
-    out = run_monte_carlo(fit, N, dN, I, dI, iterations=5000,
-                          progress=lambda done, total: done < 100)
-    assert out.kfr_accepted < 500, "cancel was ignored"
+    assert issubclass(EfficiencyWorker, QThread)
+
+
+def test_cancelling_tells_the_worker_to_stop(qapp):
+    """The progress dialog's Cancel has to reach the loop. run_monte_carlo
+    stops when its progress callback returns False, so the worker's callback
+    must start returning False once cancelled."""
+    from calibration_plot_dialog import EfficiencyWorker
+
+    worker = EfficiencyWorker(None, _rows_for(_points(), _lines()))
+    assert worker._progress(0, 100) is True
+    worker.cancel()
+    assert worker._progress(1, 100) is False
+    worker.deleteLater()
+
+
+def test_a_blocked_calibration_never_starts_a_worker(qapp, monkeypatch):
+    """The button is disabled in that case, but the handler is still
+    reachable by keyboard and by code. It must refuse rather than run a fit
+    the dialog already said was impossible."""
+    import calibration_plot_dialog as mod
+
+    seen = {}
+    monkeypatch.setattr(mod.EfficiencyWorker, "start",
+                        lambda self, *a, **k: seen.setdefault("started", True),
+                        raising=False)
+    monkeypatch.setattr(mod.QMessageBox, "warning",
+                        staticmethod(lambda *a, **k: None))
+    d = _dialog(qapp, _points(4), _lines(4))       # too few points
+    d._on_efficiency_clicked()
+    assert not seen.get("started")
+    d.close()
+
+
+def test_the_worker_computes_a_usable_result(qapp):
+    """Run the worker's own computation synchronously, on the same rows the
+    dialog would hand it. Threading is tested above; this checks the thing
+    the thread exists to do actually works."""
+    from calibration_plot_dialog import EfficiencyWorker
+
+    worker = EfficiencyWorker(None, _rows_for(_points(), _lines()))
+    fit, mc = worker.compute(iterations=50)
+    assert fit.kfr_params is not None
+    assert mc.kfr_accepted > 0
+    worker.deleteLater()
+
+
+def _rows_for(points, lines):
+    """The same rows _efficiency_rows would produce for these inputs."""
+    from caleneff_export import build_rows
+
+    rows, _skipped = build_rows(points, lines)
+    return rows
 ```
 
 - [ ] **Step 2: Run it and watch it fail**
 
+Run: `.venv/Scripts/python.exe -m pytest tests/test_efficiency_dialog.py -q`
 Expected: FAIL, `AttributeError: module 'calibration_plot_dialog' has no attribute 'EfficiencyWorker'`
 
-- [ ] **Step 3: Implement the worker**
+- [ ] **Step 3: Add the worker**
 
-A `QThread` subclass carrying the arrays, emitting `progress(int, int)` and `finished(object)`, driven from `_on_efficiency_clicked` behind a `QProgressDialog` whose Cancel sets a flag the `progress` callback returns False on. On completion, construct the `EfficiencyResult` and open `EfficiencyDialog`.
+Add to the imports in `calibration_plot_dialog.py`: `QThread` from
+`PySide6.QtCore`, and `QMessageBox` plus `QProgressDialog` from
+`PySide6.QtWidgets` if not already there.
 
-- [ ] **Step 4: Run the tests**
+```python
+class EfficiencyWorker(QThread):
+    """Runs the efficiency Monte Carlo off the UI thread.
+
+    Ten thousand iterations across two models takes about a minute. Doing
+    that in the click handler would freeze the window for the whole of it,
+    with no way to stop, and a frozen window is indistinguishable from a
+    crashed one.
+
+    The signals are `progressed`, `succeeded` and `failed` rather than the
+    obvious `finished`, because QThread already defines `finished` and
+    shadowing it sends the connection somewhere else with no error.
+    """
+
+    progressed = Signal(int, int)
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, parent, rows):
+        super().__init__(parent)
+        self._rows = rows
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def compute(self, iterations=None):
+        """The fit and the Monte Carlo, synchronously.
+
+        Separate from run() so it can be tested without a thread: what the
+        thread does and the fact that it is a thread are two claims, and
+        they are worth checking apart.
+        """
+        from efficiency import (N_MC_EFFICIENCY, fit_efficiency,
+                                run_monte_carlo)
+
+        rows = self._rows
+        E = np.array([r.energy for r in rows], dtype=float)
+        N = np.array([r.area for r in rows], dtype=float)
+        dN = np.array([r.area_err for r in rows], dtype=float)
+        I = np.array([r.intensity_pct for r in rows], dtype=float)
+        dI = np.array([r.intensity_pct_err for r in rows], dtype=float)
+        fit = fit_efficiency(E, N, dN, I, dI)
+        mc = run_monte_carlo(
+            fit, N, dN, I, dI,
+            iterations=N_MC_EFFICIENCY if iterations is None else iterations,
+            progress=self._progress)
+        return fit, mc
+
+    def run(self):
+        try:
+            fit, mc = self.compute()
+        except Exception as exc:          # noqa: BLE001 - reported, not raised
+            # A raise here would cross a thread boundary and vanish; in a
+            # --windowed build there is no stderr to carry it either.
+            self.failed.emit(str(exc))
+            return
+        if self._cancelled:
+            return
+        self.succeeded.emit((fit, mc))
+
+    def _progress(self, done, total):
+        self.progressed.emit(done, total)
+        return not self._cancelled
+```
+
+- [ ] **Step 4: Drive it from the button**
+
+Replace the `_on_efficiency_clicked` stub:
+
+```python
+    def _on_efficiency_clicked(self):
+        """Fit the efficiency curves, then show them.
+
+        Re-checks the gate rather than trusting the button: the handler is
+        reachable by keyboard and by code even when the button is disabled,
+        and refusing here is cheaper than a fitter error later.
+        """
+        reason = self._efficiency_blocked_reason()
+        if reason is not None:
+            QMessageBox.warning(self, "Cannot fit an efficiency", reason)
+            return
+
+        rows = self._efficiency_rows()
+        progress = QProgressDialog(
+            "Fitting efficiency curves (Monte Carlo)...", "Cancel",
+            0, 100, self)
+        progress.setWindowTitle("Efficiency calibration")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        worker = EfficiencyWorker(self, rows)
+        # Held on self: a QThread that goes out of scope while running is
+        # destroyed mid-run, which Qt reports as a crash rather than an
+        # error.
+        self._efficiency_worker = worker
+
+        def on_progress(done, total):
+            progress.setValue(int(100 * done / max(total, 1)))
+
+        def on_succeeded(payload):
+            progress.close()
+            self._show_efficiency(*payload)
+
+        def on_failed(message):
+            progress.close()
+            QMessageBox.warning(self, "Efficiency fit failed", message)
+
+        worker.progressed.connect(on_progress)
+        worker.succeeded.connect(on_succeeded)
+        worker.failed.connect(on_failed)
+        progress.canceled.connect(worker.cancel)
+        worker.start()
+
+    def _show_efficiency(self, fit, mc):
+        from efficiency import EfficiencyResult
+        from efficiency_dialog import EfficiencyDialog
+
+        result = EfficiencyResult(
+            fit=fit, mc=mc, model="kfr",
+            calibration=self._calibration,
+            source=os.path.basename(self._default_path or ""))
+        energy_errors = self._literature_errors(result.fit.E)
+        previous = getattr(self, "_efficiency_dialog", None)
+        if previous is not None:
+            previous.close()
+            previous.deleteLater()
+        self._efficiency_dialog = EfficiencyDialog(
+            self, result, energy_errors,
+            theme=getattr(self.parent(), "_theme", "light"),
+            default_path=self._default_path,
+            channels=(self._max_channel or 4095) + 1)
+        self._efficiency_dialog.setAttribute(
+            Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._efficiency_dialog.show()
+```
+
+`_literature_errors` already exists in this file and returns the per-energy
+literature uncertainty, which is exactly the `dE` column the per-peak file
+wants.
+
+- [ ] **Step 5: Run the tests**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_efficiency_dialog.py -q`
-Expected: `12 passed`
+Expected: `19 passed` (14 from Tasks 8 and 9, 5 new)
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Nothing may regress**
+
+Run: `.venv/Scripts/python.exe -m pytest tests/test_calibration_plot.py tests/test_calibration_workflow.py tests/test_efficiency_dialog.py -q`
+Expected: all pass. Report the count.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add calibration_plot_dialog.py tests/test_efficiency_dialog.py
