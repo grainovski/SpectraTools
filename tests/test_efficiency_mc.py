@@ -156,3 +156,37 @@ def test_recomputed_weights_really_would_differ():
     _eff_s, deff_s = efficiency_points(rng.normal(N, dN), dN,
                                        rng.normal(I, dI), dI)
     assert deff_s != pytest.approx(deff)
+
+
+def test_an_all_nan_energy_is_quiet_but_still_nan():
+    """Channel 0 maps to zero or negative energy under most calibrations, so
+    every Monte Carlo sample diverges there and nanpercentile warns. That is
+    ordinary, not exceptional -- it is precisely what efficiency_apply's
+    zeroing rule handles -- so the warning is suppressed while the NaN it
+    describes is still returned and still propagates.
+
+    Pinned because silencing a warning is easy to overdo. Note what each
+    assertion actually guards, since they are not equally strong: removing
+    the suppression fails the first one, while the NaN in the second is
+    guaranteed by the band's CENTRE being NaN at that energy, not by the
+    percentile call. So this pins the behaviour a user sees -- quiet, and
+    still NaN -- rather than the internals of band_percentiles.
+    """
+    import warnings
+
+    from efficiency import EfficiencyResult
+
+    N, dN, E, I, dI = _load("demo1.txt")
+    fit = fit_efficiency(E, N, dN, I, dI)
+    r = EfficiencyResult(fit=fit,
+                         mc=run_monte_carlo(fit, N, dN, I, dI, iterations=100),
+                         model="kfr")
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        lo, hi = r.band(np.array([0.0, 100.0, 200.0]))
+
+    assert not [w for w in caught if issubclass(w.category, RuntimeWarning)], \
+        [str(w.message) for w in caught]
+    assert np.isnan(lo[0]) and np.isnan(hi[0]), "the bad energy stopped being NaN"
+    assert np.isfinite(lo[1]) and np.isfinite(hi[1]), "a good energy was lost"

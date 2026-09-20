@@ -12,6 +12,8 @@ module-level scipy import here would put it straight back.
 
 from dataclasses import dataclass
 
+import warnings
+
 import numpy as np
 
 #: Radford's own defaults in effit.c (freepars[2] = 0, freepars[6] = 0),
@@ -287,8 +289,18 @@ def finite_mean_std(values, min_n=1):
 
 
 def band_percentiles(band, lo=15.87, hi=84.13):
-    """The 1-sigma envelope of an (n_samples, n_grid) family of curves."""
-    with np.errstate(invalid="ignore"):
+    """The 1-sigma envelope of an (n_samples, n_grid) family of curves.
+
+    An energy where every sample diverged leaves an all-NaN column, and
+    np.nanpercentile emits a RuntimeWarning rather than raising on those.
+    That case is ordinary rather than exceptional -- channel 0 maps to zero
+    or negative energy under most calibrations, which is exactly what the
+    zeroing rule in efficiency_apply exists to handle -- so the warning is
+    suppressed here rather than printed on every save. The NaN itself is
+    still returned and still propagates.
+    """
+    with np.errstate(invalid="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
         return (np.nanpercentile(band, lo, axis=0),
                 np.nanpercentile(band, hi, axis=0))
 
