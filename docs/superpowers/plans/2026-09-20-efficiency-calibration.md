@@ -1748,9 +1748,19 @@ def test_a_big_per_bin_file_is_written_in_seconds_not_minutes(tmp_path, result):
         def apply(self, channel):
             return 50.0 + np.asarray(channel, dtype=float) * 0.25
 
+    # The shared fixture holds 200 samples, which is fast whatever the
+    # implementation does. Tile it to a realistic 10,000 so the expensive
+    # path is actually exercised -- without paying for 10,000 real fits,
+    # since the cost depends only on the array shapes.
+    from efficiency import EfficiencyResult
+
+    big = EfficiencyResult(fit=result.fit, mc=result.mc, model="kfr")
+    big.mc.kfr_samples = np.tile(result.mc.kfr_samples, (50, 1))[:10000]
+    big.mc.rw_samples = np.tile(result.mc.rw_samples, (50, 1))[:10000]
+
     path = str(tmp_path / "big.txt")
     start = time.perf_counter()
-    write_per_bin(path, result, _Cal(), channels=16384)
+    write_per_bin(path, big, _Cal(), channels=16384)
     assert time.perf_counter() - start < 60.0
     assert len(_rows(path)) == 16384
 
