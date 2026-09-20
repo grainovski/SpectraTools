@@ -60,3 +60,80 @@ def f_radware(E, a1, a2, a3, a4, a5, a6, g):
 def f_radware_5p(E, a1, a2, a4, a5, a6):
     """The 7-parameter model with Radford's C and G defaults held fixed."""
     return f_radware(E, a1, a2, RADWARE_C, a4, a5, a6, RADWARE_G)
+
+
+curve_fit = None
+
+
+def _need_scipy():
+    """Bind scipy on first use. See this module's docstring for why it is
+    not imported at the top."""
+    global curve_fit
+    if curve_fit is None:
+        from scipy.optimize import curve_fit as _cf
+        curve_fit = _cf
+
+
+def kfr_seed(E, eff):
+    """Data-driven KFR start: a and b from the geometric means of E and eps
+    so the model reproduces the right scale, c and d small so the
+    exponential starts near 1."""
+    E = np.asarray(E, dtype=float)
+    eff = np.asarray(eff, dtype=float)
+    Eg = float(np.exp(np.mean(np.log(np.maximum(E, 1e-30)))))
+    eg = float(np.exp(np.mean(np.log(np.maximum(eff, 1e-30)))))
+    return [eg / (2.0 * Eg), eg * Eg / 2.0, -1e-4, 1.0]
+
+
+def radware_seed_5p(E, eff):
+    """Radford's parset() seed, with the two fixed entries stripped.
+
+    Anchors the low-energy polynomial at 100 keV and the high-energy one at
+    1000 keV using whichever data points sit nearest those references.
+    """
+    E = np.asarray(E, dtype=float)
+    eff = np.asarray(eff, dtype=float)
+    ix1 = int(np.argmin(np.abs(E - 100.0)))
+    ix2 = int(np.argmin(np.abs(E - 1000.0)))
+    a2, a5 = 1.5, -0.9
+    a1 = float(np.log(max(eff[ix1], 1e-30)) + a2 * (np.log(100.0) - np.log(E[ix1])))
+    a4 = float(np.log(max(eff[ix2], 1e-30)) + a5 * (np.log(1000.0) - np.log(E[ix2])))
+    return [a1, a2, a4, a5, 0.0]
+
+
+def radware_seed_polyfit_5p(E, eff):
+    """Secondary seed: independent quadratic polyfits of ln eps against
+    ln(E/100) and ln(E/1000). Less reliable than parset() but useful when
+    eps is far from a clean power law."""
+    E = np.asarray(E, dtype=float)
+    lne = np.log(np.maximum(np.asarray(eff, dtype=float), 1e-30))
+    cx = np.polyfit(np.log(E / 100.0), lne, 2)
+    cy = np.polyfit(np.log(E / 1000.0), lne, 2)
+    return [float(cx[2]), float(cx[1]), float(cy[2]), float(cy[1]), float(cy[0])]
+
+
+def multistart(func, E, eff, deff, seeds, bounds=None, method="trf",
+               maxfev=20000):
+    """Fit from several starting points; keep the lowest weighted chi-squared.
+
+    Multi-start, not tighter tolerances, is what reduces divergence between
+    the two models. Candidates that fail to converge are skipped; None comes
+    back only when every one of them failed.
+    """
+    _need_scipy()
+    best_p, best_chi2 = None, np.inf
+    for p0 in seeds:
+        try:
+            kwargs = dict(p0=p0, sigma=deff, absolute_sigma=True,
+                          maxfev=maxfev, method=method)
+            if bounds is not None:
+                kwargs["bounds"] = bounds
+            p, _ = curve_fit(func, E, eff, **kwargs)
+            if not np.all(np.isfinite(p)):
+                continue
+            chi2 = float(np.sum(((eff - func(E, *p)) / deff) ** 2))
+            if chi2 < best_chi2:
+                best_chi2, best_p = chi2, p
+        except Exception:
+            pass
+    return best_p
