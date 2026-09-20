@@ -2195,7 +2195,7 @@ Expected: `7 passed`
 
 - [ ] **Step 6: Run the existing calibration tests — nothing may regress**
 
-Run: `.venv/Scripts/python.exe -m pytest tests/test_calibration_plot_dialog.py tests/test_calibration.py tests/test_caleneff_export.py -q`
+Run: `.venv/Scripts/python.exe -m pytest tests/test_calibration_plot.py tests/test_calibration.py tests/test_caleneff_export.py -q`
 Expected: all pass
 
 - [ ] **Step 7: Commit**
