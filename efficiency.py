@@ -545,13 +545,20 @@ class EfficiencyResult:
                 return self.best_fit_raw(grid, which) * self.normalisation
             return self._mc_mean_raw(grid, which) * self.normalisation
 
-    def band(self, grid, model=None):
-        """The normalised 1-sigma band, or (nan, nan) without a Monte Carlo."""
+    def band(self, grid, model=None, centre=None):
+        """The normalised 1-sigma band, or (nan, nan) without a Monte Carlo.
+
+        `centre` is the raw (un-normalised) MC mean when the caller has
+        already computed it. Recomputing it here doubles the cost of writing
+        a per-bin file, which is 16,384 evaluations over 10,000 parameter
+        sets.
+        """
         which = model or self._model
         if self.mc is None:
             nan = np.full(len(np.asarray(grid)), float("nan"))
             return nan, nan
-        centre = self._mc_mean_raw(grid, which)
+        if centre is None:
+            centre = self._mc_mean_raw(grid, which)
         lo, hi = (self.mc.kfr_band(grid, self.fit, centre) if which == "kfr"
                   else self.mc.rw_band(grid, self.fit, centre))
         return lo * self.normalisation, hi * self.normalisation
