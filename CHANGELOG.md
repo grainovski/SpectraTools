@@ -4,6 +4,28 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [6.0.4] - 2026-09-21
+
+### Changed
+
+- **Applying an efficiency now zeroes every bin below 50 keV.** The
+  correction divides counts by the efficiency, and below the energies the
+  curve was fitted over that efficiency falls away towards zero, so the
+  division explodes: on a 0.5 keV/channel calibration against a curve
+  fitted from 121.8 keV, a flat 1000 counts became 5.7e+96 at the second
+  channel. A single such bin sets the plot's vertical scale and hides the
+  spectrum completely.
+
+  The threshold is in keV rather than a number of channels because how far
+  the blow-up reaches depends on the energies the curve is asked about, not
+  on channel numbers: the same 50 keV covers 25 channels at 2 keV/channel,
+  10 at 5, and 5 at 10. It also costs nothing where it is not needed --
+  a spectrum whose first channel already lies above 50 keV keeps every bin.
+
+  The message reporting zeroed bins now appears only when bins were dropped
+  for an unexpected reason, since the low-energy band is dropped on every
+  correction by design.
+
 ## [6.0.3] - 2026-09-21
 
 ### Fixed
