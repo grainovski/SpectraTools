@@ -4,7 +4,7 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
-## [6.0.9] - 2026-09-21
+## [6.0.10] - 2026-09-21
 
 ### Fixed
 
@@ -31,7 +31,15 @@ when individual pieces of work happened.
   it, so the main window had to stay usable for it to come forward at all.
   OK and Cancel behave exactly as before.
 
-  6.0.5 through 6.0.8 each carried an attempt at this; none was published.
+### Changed
+
+- **The first Automatic Calibration no longer pauses before its dialog
+  appears.** Opening it the first time took about a second, spent loading
+  the numerical library the fitting needs; every later open was instant.
+  That loading now happens quietly in the background once the main window
+  is up, so the first calibration is as quick as the rest — about a
+  fiftieth of the previous wait. Starting the application is unaffected.
+  The first peak fit benefits too, for the same reason.
 
 ## [6.0.5] - 2026-09-21
 
