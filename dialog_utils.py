@@ -32,11 +32,17 @@ from PySide6.QtWidgets import QApplication, QWidget
 class RaiseOnClickFilter(QObject):
     """Bring a window to the front when it is clicked anywhere.
 
-    Every window this app opens is parented to another one, so the window
-    manager treats them all as transient for the same top-level and does
-    not reorder them among themselves when one is clicked. Nothing in the
-    app asked it to either, so a half-covered calibration plot stayed
-    half-covered however often you clicked it.
+    Nothing in this app used to ask the window manager to reorder its
+    windows, so a half-covered plot stayed half-covered however often it
+    was clicked.
+
+    This filter is necessary but not sufficient, and the difference cost
+    two releases. Asking is only heeded for windows the window manager is
+    free to move: a widget parent makes a window Win32-OWNED by its
+    parent, and Windows keeps an owned window above its owner whatever it
+    is asked -- measured, including with the Qt window type changed, which
+    does not affect ownership. Windows that have to stack freely must not
+    be parented to each other; see energy_assign_dialog.
 
     Installed on the QApplication rather than overridden per window,
     because a click almost never reaches the window itself: a matplotlib
@@ -71,19 +77,21 @@ def window_to_raise(widget, popup=None):
 
     * there is no widget, or it has no window (events do reach objects
       that are not widgets at all);
-    * the window is already active -- raising it again is a no-op that
-      still costs a round trip to the window manager on every single
-      click;
     * a popup is open. A menu, a combo box drop-down and a completer are
       all separate windows, and raising the window underneath one closes
       it. `popup` is QApplication.activePopupWidget(), passed in rather
       than read here so a test can set it.
+
+    It deliberately does NOT skip a window that is already active. That
+    looks like a free optimisation and is the opposite: the reported bug
+    had the dialog ACTIVE and still underneath, so "active" does not imply
+    "on top", and skipping active windows would decline to raise exactly
+    the window the user clicked to bring forward. The cost is one
+    window-manager call per click, at human speed.
     """
     if widget is None or popup is not None:
         return None
     window = widget.window()
-    if window is None or window.isActiveWindow():
-        return None
     return window
 
 

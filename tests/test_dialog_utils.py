@@ -124,11 +124,19 @@ def test_clicking_a_child_widget_raises_its_window(qapp):
     dialog.close()
 
 
-def test_an_already_active_window_is_not_raised_again(qapp):
-    """Raising is a round trip to the window manager on every click."""
+def test_an_already_active_window_is_still_raised(qapp):
+    """The tempting optimisation, and why it is wrong.
+
+    Skipping windows that are already active looks free. It is the
+    opposite: the reported bug had "Calibrate from Fitted Peaks" ACTIVE
+    and still underneath the plot, so active does not imply on top, and
+    skipping active windows declines to raise precisely the window the
+    user clicked to bring forward.
+    """
     dialog = _Watched(active=True)
     RaiseOnClickFilter(qapp).eventFilter(dialog, _press(dialog))
-    assert dialog.calls == []
+    assert dialog.calls == ["raise_", "activate"], (
+        "an active-but-buried window was skipped")
     dialog.close()
 
 
@@ -177,6 +185,28 @@ class _Line:
         self.energy_err = 0.01
         self.intensity = 1000.0
         self.intensity_err = 10.0
+
+
+def _choices(n=6):
+    """(channel, area, area_err, channel_err) per fitted peak."""
+    return [(100.0 * (i + 1), 5000.0 - 300.0 * i, 70.0, 0.1) for i in range(n)]
+
+
+def _energy_dialog():
+    """A Calibrate-from-Fitted-Peaks dialog with its live plot open.
+
+    The preview opens on the first assigned energy, not before, so the
+    energies have to go in for there to be anything to test.
+    """
+    from energy_assign_dialog import EnergyAssignDialog
+
+    dialog = EnergyAssignDialog(None, _choices(), max_channel=4095,
+                                export_default_path="out.txt")
+    for row in range(3):
+        dialog.table.item(row, EnergyAssignDialog.ENERGY_COLUMN).setText(
+            "%.1f" % (50.0 * (row + 1)))
+    dialog._refresh_live_plot()
+    return dialog
 
 
 def test_the_efficiency_window_reopens_after_a_fit(qapp, result):
@@ -281,51 +311,86 @@ def test_qt_dialog_already_contains_the_window_bit(qapp):
     parent.close()
 
 
-def test_the_live_plot_stacks_free_of_the_dialog_that_owns_it(qapp):
-    """A window manager pins a transient window above the one it belongs
-    to, so the calibration preview sat on top of "Calibrate from Fitted
-    Peaks" and clicking the dialog activated it without ever raising it.
+def test_the_live_plot_has_no_parent_so_it_can_be_stacked(qapp):
+    """The reported bug, and the only thing that actually fixes it.
 
-    The QObject parent must survive the change: that dialog is run with
-    exec(), and an application-modal dialog blocks every window except its
-    own descendants -- reparenting the plot to the main window would freeze
-    the clicking that pointPicked exists for.
+    A widget parent makes the child window Win32-OWNED by the parent, and
+    Windows keeps an owned window above its owner unconditionally.
+    Measured on real windows: with the plot parented, raise_() on the
+    dialog and lower() on the plot BOTH leave the plot on top, and
+    changing the Qt window type does not help because ownership follows
+    the widget parent rather than the type. Two shipped attempts failed
+    on exactly that. Dropping the parent is what frees them.
     """
-    from energy_assign_dialog import EnergyAssignDialog
-
-    choices = [(100.0 * (i + 1), 5000.0 - 300.0 * i, 70.0, 0.1)
-               for i in range(6)]
-    dialog = EnergyAssignDialog(None, choices, max_channel=4095,
-                                export_default_path="out.txt")
-    # The preview opens on the first assigned energy, not before.
-    for row in range(3):
-        dialog.table.item(row, EnergyAssignDialog.ENERGY_COLUMN).setText(
-            "%.1f" % (50.0 * (row + 1)))
-    dialog._refresh_live_plot()
+    dialog = _energy_dialog()
     plot = dialog._live_plot
     assert plot is not None, "no live plot -- the fixture stopped triggering it"
 
-    assert _window_type(plot) == Qt.WindowType.Window, (
-        "the preview is transient again and will pin itself above the dialog")
-    assert plot.parent() is dialog, (
-        "reparented -- modality would block it and lifetime would leak")
-
+    assert plot.parent() is None, (
+        "the plot is parented again and will be pinned above the dialog")
+    assert plot.windowTitle() == "Energy Calibration"
     dialog._close_live_plot()
     dialog.close()
 
 
+def test_the_dialog_is_window_modal_so_the_parentless_plot_stays_live(qapp):
+    """The other half, and it is load-bearing.
+
+    exec() makes a dialog APPLICATION-modal, which blocks every window in
+    the app that is not one of its descendants -- and the plot is
+    deliberately no longer a descendant. Measured: under ApplicationModal
+    a parentless window is disabled outright, so clicking a point on the
+    plot would do nothing and pointPicked would be dead. WindowModal still
+    blocks the main window and leaves the plot alive.
+    """
+    from energy_assign_dialog import EnergyAssignDialog
+
+    dialog = EnergyAssignDialog(None, _choices(), max_channel=4095,
+                                export_default_path="out.txt")
+    assert dialog.windowModality() == Qt.WindowModality.WindowModal, (
+        "application-modal again -- the parentless plot would be dead")
+    dialog.close()
+
+
+def test_closing_the_dialog_closes_the_plot_it_opened(qapp):
+    """The plot has no parent now, so Qt no longer destroys it with the
+    dialog. done() has to, or a preview outlives what it belongs to."""
+    dialog = _energy_dialog()
+    assert dialog._live_plot is not None
+    dialog.done(0)                       # Cancel, Escape and the X all land here
+    assert dialog._live_plot is None, "the preview was left behind"
+
+
 def test_the_efficiency_window_stacks_free_of_the_plot_that_owns_it(qapp, result):
-    """The same defect, one level further in: the efficiency window is
-    opened by the calibration plot and was pinned above it."""
+    """The same defect one level further in. The efficiency window is
+    opened by the calibration plot; owned by it, Windows pinned it above
+    the plot for good. Parenting it to the MAIN window instead leaves the
+    two free to stack in either order, and it still dies with the app."""
+    main = _window()
+    plot = CalibrationPlotDialog(
+        None, Calibration("linear", 0.0, 0.5), _points(),
+        [_Line(50.0 * (i + 1)) for i in range(8)], 4095, "out.txt",
+        main_window=main)
+    plot._show_efficiency(result)
+    window = plot._efficiency_dialog
+
+    assert window.parent() is main, (
+        "owned by the plot again, so Windows will pin it above the plot")
+
+    window.close()
+    plot.close()
+    main.close()
+
+
+def test_the_efficiency_window_falls_back_to_the_plot_with_no_main_window(
+        qapp, result):
+    """A parentless window nothing owns would simply leak, so with no main
+    window to be found the plot is still the better parent of the two."""
     plot = CalibrationPlotDialog(
         None, Calibration("linear", 0.0, 0.5), _points(),
         [_Line(50.0 * (i + 1)) for i in range(8)], 4095, "out.txt")
     plot._show_efficiency(result)
-    window = plot._efficiency_dialog
+    assert plot._efficiency_dialog.parent() is plot
 
-    assert _window_type(window) == Qt.WindowType.Window, (
-        "the efficiency window is transient again")
-    assert window.parent() is plot, "reparented -- it would outlive the plot"
-
-    window.close()
+    plot._efficiency_dialog.close()
     plot.close()

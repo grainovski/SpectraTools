@@ -142,8 +142,15 @@ class CalibrationPlotDialog(QDialog):
     MIN_EFFICIENCY_POINTS = 6
 
     def __init__(self, parent, calibration, points, source_lines,
-                 max_channel, default_path, excluded=(), reason=None):
+                 max_channel, default_path, excluded=(), reason=None,
+                 main_window=None):
         super().__init__(parent)
+        #: Where to report a fitted efficiency, and where to read the theme.
+        #: Normally found by walking up from `parent`; passed explicitly when
+        #: this plot is deliberately parentless, which is how it escapes
+        #: being pinned above the dialog that opened it -- see
+        #: energy_assign_dialog.
+        self._main_window = main_window
         self.setWindowTitle("Energy Calibration")
         self._default_path = default_path
         self._max_channel = max_channel
@@ -599,9 +606,11 @@ class CalibrationPlotDialog(QDialog):
         result.source = os.path.basename(self._default_path or "")
         # Hand it to the main window so it outlives this dialog and can be
         # reopened from the menu later.
-        window = self.parent()
-        while window is not None and not hasattr(window, "set_efficiency"):
-            window = window.parent()
+        window = self._main_window
+        if window is None:
+            window = self.parent()
+            while window is not None and not hasattr(window, "set_efficiency"):
+                window = window.parent()
         if window is not None:
             window.set_efficiency(result)
         energy_errors = self._literature_errors(result.fit.E)
@@ -609,21 +618,17 @@ class CalibrationPlotDialog(QDialog):
         # the C++ object while this attribute keeps the wrapper. See
         # dialog_utils for why that silently swallowed the second open.
         close_previous(getattr(self, "_efficiency_dialog", None))
+        # Parented to the MAIN window, not to this plot. A widget parent
+        # makes the child Win32-owned, and Windows keeps an owned window
+        # above its owner unconditionally -- so hanging it off this plot
+        # would pin it on top of the plot for good. Owned by the main
+        # window instead, the two are free to stack in either order, and
+        # the window still dies with the application rather than leaking.
         self._efficiency_dialog = EfficiencyDialog(
-            self, result, energy_errors,
-            theme=getattr(self.parent(), "_theme", "light"),
+            window if window is not None else self, result, energy_errors,
+            theme=getattr(window, "_theme", "light"),
             default_path=self._default_path,
             channels=(self._max_channel or 4095) + 1)
         self._efficiency_dialog.setAttribute(
             Qt.WidgetAttribute.WA_DeleteOnClose)
-        # Same trap as the live plot in energy_assign_dialog: a parented
-        # QDialog is transient for its parent, so this window sat pinned
-        # above the calibration plot that opened it and clicking the plot
-        # could activate it but never raise it. The type bits are masked
-        # and replaced because Qt::Dialog already contains Qt::Window --
-        # setting that bit changes nothing. The QObject parent stays, so
-        # the window still dies with the plot.
-        self._efficiency_dialog.setWindowFlags(
-            (self._efficiency_dialog.windowFlags()
-             & ~Qt.WindowType.WindowType_Mask) | Qt.WindowType.Window)
         self._efficiency_dialog.show()

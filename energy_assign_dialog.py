@@ -124,6 +124,15 @@ class EnergyAssignDialog(QDialog):
                  assignments=None, max_channel=None, export_default_path=None):
         super().__init__(parent)
         self.setWindowTitle("Calibrate from Fitted Peaks")
+        # WINDOW-modal, not application-modal. exec() would otherwise make
+        # this application-modal, which blocks every window in the app that
+        # is not a descendant of this one -- and the live plot is no longer
+        # a descendant, because being one is what pinned it on top. Measured:
+        # under ApplicationModal a parentless window is disabled outright, so
+        # clicking a point on the plot would do nothing. WindowModal still
+        # blocks the main window, which is the point of being modal at all,
+        # and leaves the plot live. exec() preserves this setting.
+        self.setWindowModality(Qt.WindowModality.WindowModal)
         self.result_calibration = None
         #: The live plot needs the channel range to draw the curve over
         #: and a filename to offer its export under. Both are properties
@@ -665,6 +674,17 @@ class EnergyAssignDialog(QDialog):
         except RuntimeError:
             pass  # Qt destroyed it already; nothing left to close
 
+    def done(self, result):
+        """Every way out of this dialog goes through here -- OK, Cancel,
+        Escape and the title-bar close all land in QDialog.done().
+
+        The plot has no parent any more, so Qt will not destroy it along
+        with this dialog the way it used to. Closing it here is what stops
+        a preview outliving the dialog it belongs to.
+        """
+        self._close_live_plot()
+        super().done(result)
+
     def _refresh_live_plot(self):
         """Show the calibration as it currently stands.
 
@@ -696,37 +716,22 @@ class EnergyAssignDialog(QDialog):
             except RuntimeError:
                 # Closed by the user; fall through and build a new one.
                 self._live_plot = None
+        # PARENTLESS on purpose. A widget parent makes the child window
+        # Win32-OWNED by the parent, and Windows keeps an owned window above
+        # its owner unconditionally -- measured: raise_() on the parent and
+        # lower() on the child both leave the child on top, and changing the
+        # Qt window type does not help because ownership follows the widget
+        # parent, not the type. So while this plot was a child of the dialog
+        # it could never be got out of the way, which is exactly what was
+        # reported. Only dropping the parent frees the two to stack.
+        #
+        # `main_window` replaces what the parent chain used to provide: where
+        # to report a fitted efficiency and where to read the theme.
         self._live_plot = CalibrationPlotDialog(
-            self, calibration, points, self.source_lines,
+            None, calibration, points, self.source_lines,
             self._max_channel, self._export_default_path, excluded=excluded,
-            reason=reason,
+            reason=reason, main_window=self.parent(),
         )
-        # A parented QDialog is transient for its parent, and a window
-        # manager keeps a transient window above the one it belongs to --
-        # permanently. So this preview sat on top of "Calibrate from Fitted
-        # Peaks" and no amount of clicking the dialog could lift it: the
-        # click activated the dialog, which is why it looked focused, but
-        # the stacking is the window manager's to decide and it had already
-        # decided.
-        #
-        # Qt::Window makes it an ordinary top-level that stacks freely. The
-        # QObject parent is deliberately left alone, and that is the whole
-        # trick: parenting and window type are separate. The parent is what
-        # keeps this plot usable while the dialog is application-modal --
-        # a modal blocks every window except its own descendants, so
-        # reparenting to the main window would freeze the very clicking
-        # that pointPicked exists for -- and it is also what destroys the
-        # plot with the dialog.
-        #
-        # The type bits have to be masked off and replaced. Qt::Dialog is
-        # Qt::Window plus one more bit, so setWindowFlag(Window, True) is a
-        # no-op on a dialog -- it already has that bit -- and
-        # setWindowFlag(Dialog, False) is worse, leaving type Widget, which
-        # embeds the plot inside the dialog instead of floating it. Both
-        # were measured before this line was written.
-        self._live_plot.setWindowFlags(
-            (self._live_plot.windowFlags() & ~Qt.WindowType.WindowType_Mask)
-            | Qt.WindowType.Window)
         self._live_plot.pointPicked.connect(self._on_point_picked)
         self._live_plot.show()
 
