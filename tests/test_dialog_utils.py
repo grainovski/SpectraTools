@@ -252,3 +252,80 @@ def test_the_calibration_plot_reopens_after_being_closed(qapp):
 
     window._calibration_plot.close()
     window.close()
+
+
+def _window_type(widget):
+    return widget.windowFlags() & Qt.WindowType.WindowType_Mask
+
+
+def test_qt_dialog_already_contains_the_window_bit(qapp):
+    """CONTROL, and the reason the two tests below assert what they do.
+
+    Qt::Dialog is Qt::Window plus one more bit, so the obvious
+    setWindowFlag(Window, True) is a no-op on a dialog and would have
+    shipped as a fix that changed nothing -- it did, until this was
+    measured. setWindowFlag(Dialog, False) is worse: it leaves type Widget,
+    which embeds the window inside its parent instead of floating it. Only
+    masking the type bits off and replacing them works.
+    """
+    assert int(Qt.WindowType.Dialog) & int(Qt.WindowType.Window)
+
+    parent = QDialog()
+    naive = QDialog(parent)
+    naive.setWindowFlag(Qt.WindowType.Window, True)
+    assert _window_type(naive) == Qt.WindowType.Dialog, "no longer a no-op"
+
+    worse = QDialog(parent)
+    worse.setWindowFlag(Qt.WindowType.Dialog, False)
+    assert _window_type(worse) == Qt.WindowType.Widget, "no longer embeds"
+    parent.close()
+
+
+def test_the_live_plot_stacks_free_of_the_dialog_that_owns_it(qapp):
+    """A window manager pins a transient window above the one it belongs
+    to, so the calibration preview sat on top of "Calibrate from Fitted
+    Peaks" and clicking the dialog activated it without ever raising it.
+
+    The QObject parent must survive the change: that dialog is run with
+    exec(), and an application-modal dialog blocks every window except its
+    own descendants -- reparenting the plot to the main window would freeze
+    the clicking that pointPicked exists for.
+    """
+    from energy_assign_dialog import EnergyAssignDialog
+
+    choices = [(100.0 * (i + 1), 5000.0 - 300.0 * i, 70.0, 0.1)
+               for i in range(6)]
+    dialog = EnergyAssignDialog(None, choices, max_channel=4095,
+                                export_default_path="out.txt")
+    # The preview opens on the first assigned energy, not before.
+    for row in range(3):
+        dialog.table.item(row, EnergyAssignDialog.ENERGY_COLUMN).setText(
+            "%.1f" % (50.0 * (row + 1)))
+    dialog._refresh_live_plot()
+    plot = dialog._live_plot
+    assert plot is not None, "no live plot -- the fixture stopped triggering it"
+
+    assert _window_type(plot) == Qt.WindowType.Window, (
+        "the preview is transient again and will pin itself above the dialog")
+    assert plot.parent() is dialog, (
+        "reparented -- modality would block it and lifetime would leak")
+
+    dialog._close_live_plot()
+    dialog.close()
+
+
+def test_the_efficiency_window_stacks_free_of_the_plot_that_owns_it(qapp, result):
+    """The same defect, one level further in: the efficiency window is
+    opened by the calibration plot and was pinned above it."""
+    plot = CalibrationPlotDialog(
+        None, Calibration("linear", 0.0, 0.5), _points(),
+        [_Line(50.0 * (i + 1)) for i in range(8)], 4095, "out.txt")
+    plot._show_efficiency(result)
+    window = plot._efficiency_dialog
+
+    assert _window_type(window) == Qt.WindowType.Window, (
+        "the efficiency window is transient again")
+    assert window.parent() is plot, "reparented -- it would outlive the plot"
+
+    window.close()
+    plot.close()

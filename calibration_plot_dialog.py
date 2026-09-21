@@ -616,4 +616,14 @@ class CalibrationPlotDialog(QDialog):
             channels=(self._max_channel or 4095) + 1)
         self._efficiency_dialog.setAttribute(
             Qt.WidgetAttribute.WA_DeleteOnClose)
+        # Same trap as the live plot in energy_assign_dialog: a parented
+        # QDialog is transient for its parent, so this window sat pinned
+        # above the calibration plot that opened it and clicking the plot
+        # could activate it but never raise it. The type bits are masked
+        # and replaced because Qt::Dialog already contains Qt::Window --
+        # setting that bit changes nothing. The QObject parent stays, so
+        # the window still dies with the plot.
+        self._efficiency_dialog.setWindowFlags(
+            (self._efficiency_dialog.windowFlags()
+             & ~Qt.WindowType.WindowType_Mask) | Qt.WindowType.Window)
         self._efficiency_dialog.show()

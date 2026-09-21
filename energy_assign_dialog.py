@@ -701,6 +701,32 @@ class EnergyAssignDialog(QDialog):
             self._max_channel, self._export_default_path, excluded=excluded,
             reason=reason,
         )
+        # A parented QDialog is transient for its parent, and a window
+        # manager keeps a transient window above the one it belongs to --
+        # permanently. So this preview sat on top of "Calibrate from Fitted
+        # Peaks" and no amount of clicking the dialog could lift it: the
+        # click activated the dialog, which is why it looked focused, but
+        # the stacking is the window manager's to decide and it had already
+        # decided.
+        #
+        # Qt::Window makes it an ordinary top-level that stacks freely. The
+        # QObject parent is deliberately left alone, and that is the whole
+        # trick: parenting and window type are separate. The parent is what
+        # keeps this plot usable while the dialog is application-modal --
+        # a modal blocks every window except its own descendants, so
+        # reparenting to the main window would freeze the very clicking
+        # that pointPicked exists for -- and it is also what destroys the
+        # plot with the dialog.
+        #
+        # The type bits have to be masked off and replaced. Qt::Dialog is
+        # Qt::Window plus one more bit, so setWindowFlag(Window, True) is a
+        # no-op on a dialog -- it already has that bit -- and
+        # setWindowFlag(Dialog, False) is worse, leaving type Widget, which
+        # embeds the plot inside the dialog instead of floating it. Both
+        # were measured before this line was written.
+        self._live_plot.setWindowFlags(
+            (self._live_plot.windowFlags() & ~Qt.WindowType.WindowType_Mask)
+            | Qt.WindowType.Window)
         self._live_plot.pointPicked.connect(self._on_point_picked)
         self._live_plot.show()
 
