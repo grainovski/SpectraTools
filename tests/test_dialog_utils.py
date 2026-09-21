@@ -394,3 +394,64 @@ def test_the_efficiency_window_falls_back_to_the_plot_with_no_main_window(
 
     plot._efficiency_dialog.close()
     plot.close()
+
+
+def test_nothing_in_the_calibrate_trio_is_owned_by_anything(qapp):
+    """All three windows must be free of each other.
+
+    A widget parent makes a window Win32-owned, and an owned window drags
+    its owner up the Z order when activated. Measured: with the dialog
+    owned by the main window, clicking the dialog gave
+    DIALOG > MAIN > PLOT -- the calibration plot dropped behind the main
+    window. Unowned it gives DIALOG > PLOT > MAIN, and the main window can
+    be raised by clicking it, neither of which was possible before.
+    """
+    from energy_assign_dialog import EnergyAssignDialog
+
+    main = _window()
+    dialog = EnergyAssignDialog(None, _choices(), max_channel=4095,
+                                export_default_path="out.txt",
+                                main_window=main)
+    assert dialog.parent() is None, (
+        "owned by the main window again -- activating it would drag the "
+        "main window above the plot")
+
+    for row in range(3):
+        dialog.table.item(row, EnergyAssignDialog.ENERGY_COLUMN).setText(
+            "%.1f" % (50.0 * (row + 1)))
+    dialog._refresh_live_plot()
+    plot = dialog._live_plot
+    assert plot is not None
+    assert plot.parent() is None, "the plot is owned again"
+
+    dialog._close_live_plot()
+    dialog.close()
+    main.close()
+
+
+def test_the_main_window_still_reaches_the_plot_without_a_parent_chain(qapp):
+    """What the parent used to carry, now passed by hand.
+
+    The plot reports a fitted efficiency to the main window and reads the
+    theme from it, and used to find it by walking up parents. With nothing
+    parented that walk finds nothing, so a missing hand-off would not
+    raise -- the efficiency would simply never be remembered.
+    """
+    from energy_assign_dialog import EnergyAssignDialog
+
+    main = _window()
+    dialog = EnergyAssignDialog(None, _choices(), max_channel=4095,
+                                export_default_path="out.txt",
+                                main_window=main)
+    for row in range(3):
+        dialog.table.item(row, EnergyAssignDialog.ENERGY_COLUMN).setText(
+            "%.1f" % (50.0 * (row + 1)))
+    dialog._refresh_live_plot()
+
+    assert dialog._live_plot._main_window is main, (
+        "the plot cannot reach the main window, so a fitted efficiency "
+        "would be silently dropped")
+
+    dialog._close_live_plot()
+    dialog.close()
+    main.close()

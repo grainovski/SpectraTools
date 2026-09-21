@@ -1266,8 +1266,12 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         """
         from energy_assign_dialog import EnergyAssignDialog
 
+        # Parentless, with the main window passed explicitly instead: a
+        # widget parent would make this dialog Win32-owned by the main
+        # window, and activating an owned window drags its owner up the Z
+        # order, dropping the calibration plot behind the main window.
         dialog = EnergyAssignDialog(
-            self, choices,
+            None, choices, main_window=self,
             quadratic=(self._calibration is not None
                        and self._calibration.kind == "quadratic"),
             settings=self.settings,

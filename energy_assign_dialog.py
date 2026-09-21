@@ -121,17 +121,35 @@ class EnergyAssignDialog(QDialog):
     INCLUDE_COLUMN = 0
 
     def __init__(self, parent, peaks, quadratic=False, settings=None,
-                 assignments=None, max_channel=None, export_default_path=None):
+                 assignments=None, max_channel=None, export_default_path=None,
+                 main_window=None):
         super().__init__(parent)
+        #: The main window, when this dialog is deliberately parentless.
+        #: Passed on to the live plot, which needs somewhere to report a
+        #: fitted efficiency and somewhere to read the theme.
+        self._main_window = main_window if main_window is not None else parent
         self.setWindowTitle("Calibrate from Fitted Peaks")
-        # WINDOW-modal, not application-modal. exec() would otherwise make
-        # this application-modal, which blocks every window in the app that
-        # is not a descendant of this one -- and the live plot is no longer
-        # a descendant, because being one is what pinned it on top. Measured:
-        # under ApplicationModal a parentless window is disabled outright, so
-        # clicking a point on the plot would do nothing. WindowModal still
-        # blocks the main window, which is the point of being modal at all,
-        # and leaves the plot live. exec() preserves this setting.
+        # WINDOW-modal, and this dialog is created PARENTLESS, so in
+        # practice it blocks nothing. Both halves are deliberate and both
+        # were measured.
+        #
+        # Parentless because a widget parent makes a window Win32-owned by
+        # the parent, and an owned window drags its owner up the Z order
+        # with it when activated: with this dialog owned by the main
+        # window, clicking it produced DIALOG > MAIN > PLOT, dropping the
+        # calibration plot behind the main window. Unowned it gives
+        # DIALOG > PLOT > MAIN, which is what the user asked for.
+        #
+        # Not blocking the main window follows from the same request. A
+        # window blocked by a modal dialog cannot be raised by clicking it
+        # -- Windows flashes the dialog instead -- so "click SpectraTools
+        # and it comes to the top" is only possible while the main window
+        # stays enabled. ApplicationModal is not an option either: it
+        # disables the parentless plot outright, killing the click-a-point
+        # -to-select-a-row the plot exists for.
+        #
+        # exec() still runs its own event loop and still returns
+        # Accepted/Rejected, so the OK/Cancel flow is unchanged.
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.result_calibration = None
         #: The live plot needs the channel range to draw the curve over
@@ -730,7 +748,7 @@ class EnergyAssignDialog(QDialog):
         self._live_plot = CalibrationPlotDialog(
             None, calibration, points, self.source_lines,
             self._max_channel, self._export_default_path, excluded=excluded,
-            reason=reason, main_window=self.parent(),
+            reason=reason, main_window=self._main_window,
         )
         self._live_plot.pointPicked.connect(self._on_point_picked)
         self._live_plot.show()
