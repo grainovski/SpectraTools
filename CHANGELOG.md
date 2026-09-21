@@ -4,6 +4,28 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [6.0.5] - 2026-09-21
+
+### Fixed
+
+- **Clicking a window now brings it to the front.** With several windows
+  open and overlapping — the calibration plot, the energy assignment
+  dialog, the efficiency window, a matrix panel and its heatmap can all be
+  up at once — clicking a half-covered one left it half-covered. A click
+  anywhere on a window now raises and activates it, including clicks that
+  land on a plot, a button, a table row or a text field rather than on bare
+  background. Menus and drop-down lists are unaffected.
+
+- **The efficiency uncertainty band is no longer drawn where there is too
+  little behind it.** The band is built from ten thousand fits to resampled
+  data, and at energies far outside the fitted range almost all of those
+  fits diverge. The band was being drawn from however few remained, so a
+  handful of surviving fits produced an envelope that looked no different
+  from a well-determined one. It is now left blank there, matching what the
+  efficiency curve itself and the examine panel have always done. No data
+  in ordinary use reaches this: on the reference datasets every sample
+  survives across the whole range.
+
 ## [6.0.4] - 2026-09-21
 
 ### Changed
