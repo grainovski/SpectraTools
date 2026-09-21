@@ -4,23 +4,27 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
-## [6.0.6] - 2026-09-21
+## [6.0.7] - 2026-09-21
 
 ### Fixed
 
 - **A window opened by another window is no longer stuck on top of it.**
   In the automatic calibration, the **Calibrate from Fitted Peaks** dialog
-  stayed underneath the fit graph however often it was clicked — it would
-  become active, but never come forward. The graph is opened by that dialog
-  and so belonged to it, and a window manager keeps a window that belongs
-  to another one permanently above it. The two now stack freely, in
-  whatever order you last clicked them.
+  stayed underneath the **Energy Calibration** graph however often it was
+  clicked — it would become active, but never come forward.
 
-  The click-to-front behaviour added in 6.0.5 only ever governed windows
-  that are siblings of one another, which is why it did not help here.
+  The graph belonged to that dialog, and Windows keeps a window that
+  belongs to another one above it no matter what the application asks. The
+  graph is now independent of the dialog, so the two stack in whatever
+  order you last clicked them. The same arrangement applied to the
+  efficiency window opened from the calibration plot, and is fixed with it.
 
-  The same arrangement applied to the efficiency window opened from the
-  calibration plot, and is fixed with it.
+  While the dialog is open, other windows in the application now stay
+  usable rather than being blocked. The dialog still blocks the main
+  window, which is the point of it being modal.
+
+  6.0.5 and 6.0.6 each carried an attempt at this that could not have
+  worked; neither was published.
 
 ## [6.0.5] - 2026-09-21
 
