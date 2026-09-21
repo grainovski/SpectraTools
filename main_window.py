@@ -398,17 +398,27 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             self._on_activated()
 
     def closeEvent(self, event):
-        # MatrixPanel windows are parentless top-level windows (deliberately,
-        # so they behave independently rather than as Qt-modal children --
-        # see matrix_panel.py). That means Qt's quitOnLastWindowClosed
-        # doesn't quit the app just because MainWindow closes: any matrix
-        # panel left open keeps counting as a visible top-level window, so
-        # app.exec() would never return and the process would linger with
-        # no visible explanation. list(...) copies before iterating because
-        # each panel.close() synchronously mutates self._matrix_panels via
-        # its own closeEvent (MatrixPanel.closeEvent removes itself).
-        for panel in list(self._matrix_panels):
-            panel.close()
+        # Every window this app keeps open alongside the main one is a
+        # PARENTLESS top-level: matrix panels and their heatmaps have
+        # always been (see matrix_panel.py), and the calibration plot and
+        # efficiency window joined them so that clicking the main window
+        # can bring it to the front -- Windows keeps a window that is owned
+        # by another permanently above it, so an owned window can never be
+        # got out of the way.
+        #
+        # The cost of being parentless is that Qt does not destroy them
+        # with this window, and quitOnLastWindowClosed does not fire while
+        # any of them is still visible: app.exec() would never return and
+        # the process would linger with nothing on screen to explain it.
+        #
+        # Closing every other top-level rather than a list of the ones we
+        # happen to remember: a window added later would otherwise
+        # reintroduce exactly that hang, silently. list(...) copies first
+        # because closing a window mutates the collections behind it --
+        # MatrixPanel.closeEvent removes itself from _matrix_panels.
+        for widget in list(QApplication.topLevelWidgets()):
+            if widget is not self and widget.isWindow() and widget.isVisible():
+                widget.close()
         super().closeEvent(event)
 
     def _build_menu(self):
@@ -1010,8 +1020,13 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
 
         close_previous(getattr(self, "_efficiency_dialog", None))
         errors = [0.0] * len(self._efficiency.fit.E)
+        # Parentless, like the matrix panels: a widget parent makes a
+        # window Win32-owned, and Windows keeps an owned window above its
+        # owner -- so this would pin itself above the main window and stop
+        # the main window ever being clicked to the front.
         self._efficiency_dialog = EfficiencyDialog(
-            self, self._efficiency, errors, theme=self._theme,
+            None, self._efficiency, errors, theme=self._theme,
+            main_window=self,
             channels=(len(active_spectrum(self.spectra).data)
                       if active_spectrum(self.spectra) is not None else 4096),
         )
@@ -1452,9 +1467,11 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # ...and the user may have closed it already, which destroys the
         # C++ object out from under the attribute. See dialog_utils.
         close_previous(getattr(self, "_calibration_plot", None))
+        # Parentless for the same reason as the efficiency window above.
         self._calibration_plot = CalibrationPlotDialog(
-            self, calibration, points, source_lines,
+            None, calibration, points, source_lines,
             len(spectrum.data) - 1, default_path, excluded=excluded,
+            main_window=self,
         )
         self._calibration_plot.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self._calibration_plot.show()

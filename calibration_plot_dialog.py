@@ -625,7 +625,7 @@ class CalibrationPlotDialog(QDialog):
         # window instead, the two are free to stack in either order, and
         # the window still dies with the application rather than leaking.
         self._efficiency_dialog = EfficiencyDialog(
-            window if window is not None else self, result, energy_errors,
+            None, result, energy_errors, main_window=window,
             theme=getattr(window, "_theme", "light"),
             default_path=self._default_path,
             channels=(self._max_channel or 4095) + 1)

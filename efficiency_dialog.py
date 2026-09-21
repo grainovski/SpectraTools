@@ -39,8 +39,13 @@ class EfficiencyDialog(QDialog):
     """
 
     def __init__(self, parent, result, energy_errors, theme="light",
-                 default_path=None, channels=4096):
+                 default_path=None, channels=4096, main_window=None):
         super().__init__(parent)
+        #: Where Apply sends its corrected spectrum. Named apart from the
+        #: _main_window() method below, which it feeds: an attribute of the
+        #: same name silently shadows the method and every call site turns
+        #: into "object is not callable".
+        self._owner_window = main_window
         self.setWindowTitle("Relative Efficiency")
         self.result = result
         self._energy_errors = np.asarray(energy_errors, dtype=float)
@@ -334,11 +339,14 @@ class EfficiencyDialog(QDialog):
     def _main_window(self):
         """Walk up to whatever can apply an efficiency.
 
-        This window is opened by the calibration dialog, which is itself
-        parented to the main window, so the target is two levels up -- but
-        walking by capability rather than by counting parents survives
-        anyone re-parenting either dialog later.
+        Given explicitly when this window is parentless, which it now is:
+        a widget parent would make it Win32-owned and pin it above the
+        window that opened it. The walk is kept for callers that still
+        pass a parent -- it finds the target by capability rather than by
+        counting levels, so it survives re-parenting either way.
         """
+        if self._owner_window is not None:
+            return self._owner_window
         widget = self.parent()
         while widget is not None and not hasattr(widget, "apply_efficiency"):
             widget = widget.parent()

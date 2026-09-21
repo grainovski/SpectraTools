@@ -361,11 +361,11 @@ def test_closing_the_dialog_closes_the_plot_it_opened(qapp):
     assert dialog._live_plot is None, "the preview was left behind"
 
 
-def test_the_efficiency_window_stacks_free_of_the_plot_that_owns_it(qapp, result):
+def test_the_efficiency_window_opened_from_the_plot_is_unowned(qapp, result):
     """The same defect one level further in. The efficiency window is
     opened by the calibration plot; owned by it, Windows pinned it above
-    the plot for good. Parenting it to the MAIN window instead leaves the
-    two free to stack in either order, and it still dies with the app."""
+    the plot for good. It is parentless now, and reaches the main window
+    through an explicit reference instead of the parent chain."""
     main = _window()
     plot = CalibrationPlotDialog(
         None, Calibration("linear", 0.0, 0.5), _points(),
@@ -374,26 +374,13 @@ def test_the_efficiency_window_stacks_free_of_the_plot_that_owns_it(qapp, result
     plot._show_efficiency(result)
     window = plot._efficiency_dialog
 
-    assert window.parent() is main, (
-        "owned by the plot again, so Windows will pin it above the plot")
+    assert window.parent() is None, "owned again, so it would pin itself"
+    assert window._main_window() is main, (
+        "Apply cannot reach the main window and would silently do nothing")
 
     window.close()
     plot.close()
     main.close()
-
-
-def test_the_efficiency_window_falls_back_to_the_plot_with_no_main_window(
-        qapp, result):
-    """A parentless window nothing owns would simply leak, so with no main
-    window to be found the plot is still the better parent of the two."""
-    plot = CalibrationPlotDialog(
-        None, Calibration("linear", 0.0, 0.5), _points(),
-        [_Line(50.0 * (i + 1)) for i in range(8)], 4095, "out.txt")
-    plot._show_efficiency(result)
-    assert plot._efficiency_dialog.parent() is plot
-
-    plot._efficiency_dialog.close()
-    plot.close()
 
 
 def test_nothing_in_the_calibrate_trio_is_owned_by_anything(qapp):
@@ -455,3 +442,68 @@ def test_the_main_window_still_reaches_the_plot_without_a_parent_chain(qapp):
     dialog._close_live_plot()
     dialog.close()
     main.close()
+
+
+def test_the_windows_opened_from_the_main_window_are_unowned(qapp, result):
+    """The same rule, applied to every window that outlives its opener.
+
+    Matrix panels and their heatmaps have always been parentless; the
+    calibration plot and the efficiency window were not, which pinned them
+    above the main window and made the main window impossible to click to
+    the front. Modal dialogs are deliberately left alone: a modal belongs
+    above the window it blocks, and it does not outlive the operation.
+    """
+    main = _window()
+
+    main.set_efficiency(result)
+    main.show_efficiency()
+    assert main._efficiency_dialog.parent() is None, (
+        "the efficiency window is owned again and will pin itself above "
+        "the main window")
+
+    main._show_calibration_plot(
+        main.spectra[0], Calibration("linear", 0.0, 0.5), _points(), [], ())
+    assert main._calibration_plot.parent() is None, (
+        "the calibration plot is owned again")
+
+    main.close()
+
+
+def test_apply_still_finds_the_main_window_with_no_parent_chain(qapp, result):
+    """The silent failure this would otherwise cause.
+
+    EfficiencyDialog.Apply walks up to whatever can apply an efficiency and
+    returns quietly when it finds nothing -- so a missing hand-off does not
+    raise, it just makes the button do nothing.
+    """
+    main = _window()
+    main.set_efficiency(result)
+    main.show_efficiency()
+
+    assert main._efficiency_dialog._main_window() is main, (
+        "Apply cannot reach the main window, so it would silently do nothing")
+
+    main.close()
+
+
+def test_closing_the_main_window_leaves_nothing_behind(qapp, result):
+    """Parentless windows are not destroyed with the main window, and Qt
+    will not quit while any visible top-level remains -- app.exec() would
+    never return and the process would linger with nothing on screen."""
+    from PySide6.QtWidgets import QApplication
+
+    main = _window()
+    main.show()
+    main.set_efficiency(result)
+    main.show_efficiency()
+    main._show_calibration_plot(
+        main.spectra[0], Calibration("linear", 0.0, 0.5), _points(), [], ())
+    qapp.processEvents()
+
+    main.close()
+    qapp.processEvents()
+
+    left = [w for w in QApplication.topLevelWidgets()
+            if w.isWindow() and w.isVisible()]
+    assert left == [], "these would keep the application running: %s" % (
+        [w.windowTitle() for w in left],)
