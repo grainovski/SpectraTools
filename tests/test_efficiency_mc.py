@@ -139,9 +139,26 @@ def test_the_mc_weights_never_change_between_samples():
         efficiency.curve_fit = real
 
     assert len(seen) > 25, "expected roughly two refits per iteration"
+
+    # Two weight vectors are legitimate, and both are FIXED for the whole
+    # run: deff for the KFR arm, and deff*rw_scale for the Radware arm,
+    # which fits a scaled copy of eps (see efficiency.RW_SCALE_TARGETS).
+    # Scaling data and sigma by the same constant leaves chi-squared
+    # unchanged, so that arm weights the points identically.
+    #
+    # The invariant is unchanged and so is this test's grip on it: weights
+    # recomputed from the resampled N and I would move with the draw, and
+    # so would NOT be a constant multiple of the original deff.
+    deff = np.asarray(fit.deff, dtype=float)
+    allowed = (1.0, float(fit.rw_scale))
     for sigma in seen:
-        assert sigma == pytest.approx(fit.deff), (
-            "a refit used weights other than the original deff")
+        ratio = np.asarray(sigma, dtype=float) / deff
+        assert ratio == pytest.approx(ratio[0]), (
+            "a refit's weights are not a constant multiple of the original "
+            "deff -- they were recomputed from the resampled data")
+        assert min(abs(ratio[0] / a - 1.0) for a in allowed) < 1e-9, (
+            "a refit used weights scaled by %.6g, which is neither 1 nor "
+            "rw_scale (%.6g)" % (ratio[0], fit.rw_scale))
 
 
 def test_recomputed_weights_really_would_differ():

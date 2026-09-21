@@ -33,8 +33,13 @@ def _header_lines(result, extra=()):
         lines.append("Radware            : did not converge")
     else:
         lines += [
+            # The divisor is part of the answer: the parameters describe
+            # eff*rw_scale, so the curve is f_radware_5p(E, *params) over
+            # it. Writing the parameters without it would be writing a
+            # curve a reader cannot reconstruct.
             "Radware params     : %s" % ", ".join("%.12g" % v
                                                   for v in fit.rw_params),
+            "Radware scale      : %.12g" % fit.rw_scale,
             "Radware chi2/ndf   : %.6f / %d   Birge %.4f   RMS %.6g" %
             (fit.rw_chi2, fit.rw_ndf, fit.rw_birge, fit.rw_rms),
         ]

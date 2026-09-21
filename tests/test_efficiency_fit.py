@@ -17,6 +17,28 @@ What is compared, and why in this order:
                 other's data. Replaces a direct parameter comparison, which
                 asked a question this data cannot answer -- see below.
 
+WHERE WE DELIBERATELY NO LONGER MATCH THE REFERENCE
+
+KFR still has to reproduce CalEnEff outright, and does. Radware is held to
+"never worse", because efficiency.RW_SCALE_TARGETS searches curves the
+reference cannot reach.
+
+The reason is that the Radware family is NOT closed under a constant factor
+on eps, so the fitted curve depended on the arbitrary normalisation of the
+intensity column -- a constant our own .sou files do not agree on (most peak
+at 10000, co56.sou at 100000, na24.sou at 1000). Measured before the fix, a
+100x change in it moved the reported curve by up to 12% at the bottom of the
+range while leaving KFR identical to 2e-8. The reference has the same
+property and does nothing about it, so removing it necessarily means parting
+company with the reference on any file whose scale differs from the one it
+happened to be handed.
+
+On 226Ra and demo2 the ladder lands on the reference's own answer and the
+full strict comparison still applies. On demo1 it finds a genuinely better
+fit -- chi-squared 1.6373 against the reference's 2.9282 -- which is listed
+in RW_BEATS_REFERENCE and pinned as a floor, so a ladder that stopped
+working would fail rather than quietly revert.
+
 WHY PARAMETERS ARE NOT COMPARED DIRECTLY
 
 This check used to assert the parameters themselves matched to rel=1e-4,
@@ -104,12 +126,34 @@ def _load(name):
 _EQUIVALENT_CHI2 = 1e-4
 
 
-def _chi2(model, got, params):
+#: Fixtures where our Radware fit is expected to BEAT the reference's, and
+#: by how much at least. See the module docstring: the scale ladder searches
+#: a family the reference does not, so on demo1 it reaches a fit the
+#: reference never sees. Pinned as a floor rather than a value so the ladder
+#: staying switched on is what the test checks -- losing it drops demo1 back
+#: to the reference's 2.9282 and fails here.
+RW_BEATS_REFERENCE = {"demo1.txt": 0.30}
+
+
+def _rw_curve(got, E, params=None):
+    """The Radware curve on the DATA's scale.
+
+    `rw_params` describe eff*rw_scale, so the divisor is part of reading
+    them -- see efficiency.RW_SCALE_TARGETS. `params` overrides which
+    parameter set is evaluated, for scoring the reference's against ours.
+    """
+    from efficiency import f_radware_5p
+    return f_radware_5p(E, *(got.rw_params if params is None
+                             else params)) / got.rw_scale
+
+
+def _chi2(model, got, params, scale=1.0):
     """What `params` scores on the data `got` was fitted to.
 
     Evaluated through our own pipeline for both sides, so the comparison
     is of the parameters alone and not of two chi-squared conventions."""
-    return float(np.sum(((got.eff - model(got.E, *params)) / got.deff) ** 2))
+    return float(np.sum(((got.eff - model(got.E, *params) / scale)
+                         / got.deff) ** 2))
 
 
 @pytest.mark.parametrize("name", sorted(GOLDEN))
@@ -122,35 +166,54 @@ def test_our_fit_reproduces_caleneff(name):
 
     got = fit_efficiency(E, N, dN, I, dI)
 
-    # 1. The curves agree where it matters.
-    for f, key in ((f_kfr, "kfr"), (f_radware_5p, "rw")):
-        ours = f(E, *getattr(got, key + "_params"))
-        theirs = f(E, *want[key])
-        assert ours == pytest.approx(theirs, rel=1e-6), (
-            "%s: our %s curve differs from CalEnEff's at the data energies"
-            % (name, key)
-        )
-
-    # 2. The minimised quantity agrees.
+    # KFR is untouched by the scale ladder -- it is exactly scale-invariant,
+    # so it still has to reproduce the reference outright.
+    assert f_kfr(E, *got.kfr_params) == pytest.approx(
+        f_kfr(E, *want["kfr"]), rel=1e-6), (
+        "%s: our KFR curve differs from CalEnEff's at the data energies"
+        % name)
     assert got.kfr_chi2 == pytest.approx(want["kfr_chi2"], rel=1e-6)
-    assert got.rw_chi2 == pytest.approx(want["rw_chi2"], rel=1e-6)
     assert got.kfr_ndf == want["kfr_ndf"]
     assert got.rw_ndf == want["rw_ndf"]
+    ours_kfr = _chi2(f_kfr, got, got.kfr_params)
+    theirs_kfr = _chi2(f_kfr, got, want["kfr"])
+    assert abs(ours_kfr - theirs_kfr) < _EQUIVALENT_CHI2, (
+        "%s: our KFR parameters and CalEnEff's are not the same fit -- "
+        "they score %.9f and %.9f on the same data, a gap of %.3e against "
+        "a one-sigma contour of 1.0"
+        % (name, ours_kfr, theirs_kfr, abs(ours_kfr - theirs_kfr)))
 
-    # 3. The two parameter sets are the same fit. Scoring each on the same
-    #    data answers that directly, and is blind to a direction the data
-    #    leave free exactly where such a direction costs no chi-squared --
-    #    which is what "the data cannot tell these apart" means. See this
-    #    module's docstring for the degeneracy that forced this rewrite.
-    for f, key in ((f_kfr, "kfr"), (f_radware_5p, "rw")):
-        ours = _chi2(f, got, getattr(got, key + "_params"))
-        theirs = _chi2(f, got, want[key])
+    # Radware: never worse than the reference. It is allowed to be BETTER,
+    # because the scale ladder searches curves the reference cannot reach,
+    # and on demo1 it finds one. Anywhere it merely ties, the old strict
+    # comparison still applies in full.
+    floor = RW_BEATS_REFERENCE.get(name)
+    assert got.rw_chi2 <= want["rw_chi2"] * (1.0 + 1e-6), (
+        "%s: our Radware fit is WORSE than CalEnEff's -- %.9f against "
+        "%.9f. The scale ladder may only ever improve on the reference."
+        % (name, got.rw_chi2, want["rw_chi2"]))
+
+    if floor is None:
+        assert got.rw_chi2 == pytest.approx(want["rw_chi2"], rel=1e-6), (
+            "%s: our Radware chi-squared moved away from CalEnEff's without "
+            "being listed in RW_BEATS_REFERENCE" % name)
+        assert _rw_curve(got, E) == pytest.approx(
+            f_radware_5p(E, *want["rw"]), rel=1e-6), (
+            "%s: our Radware curve differs from CalEnEff's at the data "
+            "energies" % name)
+        ours = _chi2(f_radware_5p, got, got.rw_params, got.rw_scale)
+        theirs = _chi2(f_radware_5p, got, want["rw"])
         assert abs(ours - theirs) < _EQUIVALENT_CHI2, (
-            "%s: our %s parameters and CalEnEff's are not the same fit -- "
-            "they score %.9f and %.9f on the same data, a gap of %.3e "
-            "against a one-sigma contour of 1.0"
-            % (name, key, ours, theirs, abs(ours - theirs))
-        )
+            "%s: our Radware parameters and CalEnEff's are not the same "
+            "fit -- they score %.9f and %.9f on the same data, a gap of "
+            "%.3e against a one-sigma contour of 1.0"
+            % (name, ours, theirs, abs(ours - theirs)))
+    else:
+        assert got.rw_chi2 <= want["rw_chi2"] - floor, (
+            "%s: the scale ladder is expected to beat CalEnEff here by at "
+            "least %.2f in chi-squared, but scored %.9f against %.9f. A "
+            "ladder that stopped working would land back on the reference's "
+            "value." % (name, floor, got.rw_chi2, want["rw_chi2"]))
 
 
 def test_the_oracle_can_fail():
@@ -302,7 +365,18 @@ def test_the_normalised_curve_ignores_the_intensity_scale():
     percentages. Since eps = N/I is relative and is normalised again, a
     constant factor on every intensity must leave the normalised curve
     completely unchanged. Without this, the port would appear to work on the
-    reference's data and quietly produce a differently-scaled curve on ours."""
+    reference's data and quietly produce a differently-scaled curve on ours.
+
+    KFR ONLY, and that is the gap this test used to have. The invariant
+    above is the right one, but it was only ever exercised against the model
+    that satisfies it by construction, so Radware breaking it went unnoticed
+    until the 2026-09-21 audit -- by up to 12% of the reported curve. Radware
+    is covered by
+    test_the_radware_fit_does_not_depend_on_the_intensity_scale, which
+    compares chi-squared rather than the curve: the best-fit curve still
+    wanders along the flat direction described in this module's docstring,
+    so a rel=1e-6 curve comparison would be pinning that wander and not this
+    invariant. Do not "extend" this test to rw expecting it to pass."""
     from efficiency import EfficiencyResult, fit_efficiency
 
     N, dN, E, I, dI = _load("demo1.txt")
@@ -390,3 +464,66 @@ def test_an_unnormalised_curve_would_fail_that():
     raw_b = f_kfr(E, *fit_efficiency(E, N, dN, I * 137.0,
                                      dI * 137.0).kfr_params)
     assert raw_a != pytest.approx(raw_b, rel=1e-6)
+
+
+#: Largest relative spread in rw_chi2 across the intensity scales below that
+#: still counts as scale-free. Measured 2026-09-21 over eight scales spanning
+#: 1e-3 to 1e6: worst 5.2e-09 (226Ra), demo1 4.0e-12, demo2 4.8e-10. Before
+#: the scale ladder the same sweep spread 2.1e-02, 2.4e-02 and 5.7e-02, so
+#: this sits ~200x above the noise and four orders below the defect.
+_SCALE_FREE = 1e-6
+
+#: Spans the full range our own .sou files disagree over -- sou_io records
+#: most peaking at 10000, co56.sou at 100000 and na24.sou at 1000 -- with
+#: room either side.
+_INTENSITY_SCALES = (1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0, 1e4, 1e6)
+
+
+def _chi2_spread(name, targets=None):
+    """Relative spread of the Radware chi-squared over _INTENSITY_SCALES.
+
+    The intensity column is a RELATIVE scale, so multiplying every line of
+    one source by a constant describes the same physics and must give the
+    same fit. `targets` overrides efficiency.RW_SCALE_TARGETS, which is how
+    the control below reproduces the old behaviour.
+    """
+    import efficiency
+
+    N, dN, E, I, dI = _load(name)
+    saved = efficiency.RW_SCALE_TARGETS
+    got = []
+    try:
+        for s in _INTENSITY_SCALES:
+            if targets == "own":
+                eff, _ = efficiency.efficiency_points(N, dN, I / s, dI / s)
+                efficiency.RW_SCALE_TARGETS = (
+                    float(np.exp(np.mean(np.log(np.maximum(eff, 1e-300))))),)
+            got.append(fit_efficiency(E, N, dN, I / s, dI / s).rw_chi2)
+    finally:
+        efficiency.RW_SCALE_TARGETS = saved
+    return (max(got) - min(got)) / float(np.mean(got))
+
+
+@pytest.mark.parametrize("name", sorted(GOLDEN))
+def test_the_radware_fit_does_not_depend_on_the_intensity_scale(name):
+    """The bug this guards: the Radware family is not closed under a
+    constant factor on eps, so fitting the intensities as given made the
+    answer depend on an arbitrary constant in the source file -- one our own
+    files do not even agree on. Measured at up to 12% of the reported curve.
+    """
+    spread = _chi2_spread(name)
+    assert spread < _SCALE_FREE, (
+        "%s: the Radware fit still depends on the intensity scale -- chi2 "
+        "spreads by %.3e across factors of %g to %g, against a limit of %.0e"
+        % (name, spread, min(_INTENSITY_SCALES), max(_INTENSITY_SCALES),
+           _SCALE_FREE))
+
+
+def test_that_scale_check_can_fail():
+    """Control. Without the ladder the fit is done at whatever scale the
+    caller's intensities happen to be on, which is exactly the defect. If
+    this ever passes, the check above is measuring nothing."""
+    spread = _chi2_spread("demo2.txt", targets="own")
+    assert spread > 1e-3, (
+        "the scale-free check cannot detect the bug it guards: fitting at "
+        "the data's own scale spread chi2 by only %.3e" % spread)

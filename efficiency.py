@@ -22,6 +22,76 @@ import numpy as np
 RADWARE_C = 0.0
 RADWARE_G = 15.0
 
+#: Geometric-mean targets the Radware fit is tried at, plus the data's own
+#: scale. The best-scoring one wins.
+#:
+#: The Radware family is NOT closed under a constant factor on eps. Scaling
+#: eps shifts ln eps by a constant, and while a1 and a4 can absorb that
+#: shift, doing so changes r = f/F and therefore the blend
+#: (1 + r**g)**(-1/g) -- so eps*k is described by a genuinely different set
+#: of curve shapes. KFR has no such problem: it is linear in a and b, so a
+#: factor passes straight through.
+#:
+#: That made the fitted curve depend on the arbitrary normalisation of the
+#: intensity column, which sou_io records is not even consistent between
+#: our own files -- most peak at 10000, co56.sou at 100000, na24.sou at
+#: 1000. Measured on the reference data, a 100x change in that constant
+#: moved the reported Radware curve by up to 12% at the bottom of the
+#: range, while leaving KFR identical to 2e-8.
+#:
+#: The fix uses the identity that fitting eps*k and reporting f/k is
+#: exactly fitting the curve f/k to the original data:
+#:
+#:     chi2(k) = sum(((eps*k - f)/(deps*k))**2) = sum(((eps - f/k)/deps)**2)
+#:
+#: so chi-squared is directly comparable across k, and searching over k
+#: fits a strictly larger family that IS scale-closed. Scaling the input by
+#: c then hits the same targets at k/c and reports the same shape, which is
+#: what removes the dependence rather than hiding it.
+#:
+#: Every entry is a target for the geometric mean, never a multiplier of
+#: the data as given. That is what makes the ladder scale-equivariant:
+#: scaling the input scales the geometric mean with it, so eff*k comes out
+#: identical and the same rung wins. An "and also try the data's own scale"
+#: rung would undo exactly that -- it was measured reintroducing the full
+#: 12% drift on demo2 -- so there is deliberately no such entry.
+#:
+#: The ladder is wide and fine because the landscape is not smooth in k: a
+#: target of 0.1 scores chi-squared 553 on demo1 where 1.0 scores 1.64.
+#: Breadth is what replaces the missing own-scale rung, and a bad target
+#: simply loses, so it costs only fit time -- about 30 short
+#: Levenberg-Marquardt runs on a fit that happens once.
+#:
+#: The half-decade rungs earn nothing on the three reference files: dropping
+#: to decades alone gives identical chi-squared on all three and the same
+#: scale-independence, for 0.41 s a fit instead of 0.64 s. They are kept
+#: anyway, as insurance on data we have not seen -- the 553-against-1.64
+#: step above is what a coarser ladder risks straddling, and 0.23 s sits
+#: against the ~33 s the Monte Carlo spends on the same calibration. Trim
+#: to decades if that ever stops being true; the measurement is the reason,
+#: not the fear.
+RW_SCALE_TARGETS = (1e-2, 3e-2, 1e-1, 3e-1, 1.0, 3.0, 1e1, 3e1, 1e2, 3e2,
+                    1e3, 3e3, 1e4, 3e4, 1e5)
+
+#: How much better a rung must score to displace the one already chosen.
+#:
+#: Without this the ladder does not actually settle anything. On demo2 nine
+#: rungs tie at chi-squared 42.185873246 within 1.5e-13 of each other, and
+#: which one comes out lowest is decided by floating-point noise in the
+#: geometric mean -- noise that moves when the caller's intensities are on a
+#: different scale. Those tied fits are not the same curve: they agree
+#: where the data constrain them and differ by about 8% at the bottom of the
+#: range, which is the known Radware flat direction, so letting noise pick
+#: between them put that 8% straight back into the answer.
+#:
+#: Requiring a real margin makes the FIRST rung to reach the best score keep
+#: it, and RW_SCALE_TARGETS is a fixed ascending tuple, so the choice is
+#: reproducible. Measured headroom: rung-to-rung noise across input scales
+#: stays under 1e-8 relative, while a genuinely better rung wins by 0.3 or
+#: more (demo1 improves by 44%), so 1e-6 sits about 100x above the noise and
+#: 5 orders below any real difference.
+RW_SCALE_TIE = 1e-6
+
 
 def f_kfr(E, a, b, c, d):
     """KFR 4-parameter efficiency: eps(E) = (aE + b/E) * exp(cE + d/E)."""
@@ -161,6 +231,11 @@ class EfficiencyFit:
     rw_ndf: int = 0
     rw_rms: float = float("nan")
     rw_birge: float = 1.0
+    #: The scale `rw_params` were fitted at: they describe `eff * rw_scale`,
+    #: so the Radware curve on the data's own scale is
+    #: `f_radware_5p(E, *rw_params) / rw_scale`. Always 1.0 for KFR, which
+    #: needs no such factor -- see RW_SCALE_TARGETS for why Radware does.
+    rw_scale: float = 1.0
 
 
 def efficiency_points(N, dN, I, dI):
@@ -171,6 +246,13 @@ def efficiency_points(N, dN, I, dI):
     every line of one source divides straight back out. Our .sou intensities
     are on sou_io's 0-10000 scale, the reference's are percentages, and both
     give the same normalised curve.
+
+    That holds for KFR by construction -- it is linear in a and b, so a
+    common factor passes straight through. It does NOT hold for Radware by
+    construction, and until 2026-09-21 this docstring was simply wrong about
+    it: the fitted curve moved by up to 12% when the intensity column was
+    rescaled. It holds now only because fit_efficiency searches over the
+    scale as well; see RW_SCALE_TARGETS.
     """
     N = np.asarray(N, dtype=float)
     dN = np.asarray(dN, dtype=float)
@@ -233,19 +315,57 @@ def fit_efficiency(E, N, dN, I, dI):
     # Radware: LM without bounds, parset seed first then the polyfit one.
     # Parameters beyond +-500 mean the polynomials have run away rather than
     # converged, which the reference also rejects.
+    # Tried at each scale in RW_SCALE_TARGETS, and at NO other -- every rung
+    # is a target for the geometric mean, so the set is the same whatever
+    # scale the caller's intensities happen to be on. Falling back to the
+    # data's own scale when the geometric mean is unusable keeps a
+    # degenerate input (all-zero, non-finite) fitting as it used to.
     rw = None
+    rw_scale = 1.0
     best = np.inf
-    for seed in (radware_seed_5p(E, eff), radware_seed_polyfit_5p(E, eff)):
-        try:
-            pp, _ = curve_fit(f_radware_5p, E, eff, p0=seed, sigma=deff,
-                              absolute_sigma=True, method="lm", maxfev=20000)
-            if not (np.all(np.isfinite(pp)) and np.all(np.abs(pp) < 500)):
-                continue
-            chi2 = float(np.sum(((eff - f_radware_5p(E, *pp)) / deff) ** 2))
-            if chi2 < best:
-                best, rw = chi2, pp
-        except Exception:
-            pass
+    best_norm = np.inf
+    geo = float(np.exp(np.mean(np.log(np.maximum(eff, 1e-300)))))
+    if np.isfinite(geo) and geo > 0.0:
+        scales = [t / geo for t in RW_SCALE_TARGETS]
+    else:
+        scales = [1.0]
+    for k in scales:
+        if not np.isfinite(k) or k <= 0.0:
+            continue
+        effk, deffk = eff * k, deff * k
+        for seed in (radware_seed_5p(E, effk),
+                     radware_seed_polyfit_5p(E, effk)):
+            try:
+                # The covariance is discarded, so scipy warning that it
+                # could not be estimated says nothing about the parameters
+                # we keep. Left unsuppressed it printed to stderr once per
+                # rung, which the ladder made routine rather than rare.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    pp, _ = curve_fit(f_radware_5p, E, effk, p0=seed,
+                                      sigma=deffk, absolute_sigma=True,
+                                      method="lm", maxfev=20000)
+                if not (np.all(np.isfinite(pp))
+                        and np.all(np.abs(pp) < 500)):
+                    continue
+                chi2 = float(np.sum(
+                    ((effk - f_radware_5p(E, *pp)) / deffk) ** 2))
+                # Clearly better on chi-squared wins. Among fits the data
+                # cannot tell apart, the one with the smallest parameters
+                # wins instead: on demo2 a dozen of them tie to 1e-13 while
+                # their curves differ by 8% below the lowest point, so
+                # something has to choose, and left to chi-squared alone the
+                # choice falls to floating-point noise. The tamest
+                # polynomials are the least extrapolated guess and, unlike
+                # the noise, are the same answer every run.
+                norm = float(np.max(np.abs(pp)))
+                if chi2 < best * (1.0 - RW_SCALE_TIE):
+                    best, best_norm, rw, rw_scale = chi2, norm, pp, k
+                elif (chi2 < best * (1.0 + RW_SCALE_TIE)
+                      and norm < best_norm):
+                    best, best_norm, rw, rw_scale = min(chi2, best), norm, pp, k
+            except Exception:
+                pass
 
     out = EfficiencyFit(
         E=E, eff=eff, deff=deff,
@@ -254,8 +374,11 @@ def fit_efficiency(E, N, dN, I, dI):
         kfr_birge=birge(kfr_chi2, kfr_ndf),
     )
     if rw is not None:
-        res_r = eff - f_radware_5p(E, *rw)
+        # On the data's own scale, so chi2, RMS and the residuals plotted
+        # under the curve all stay in the units the caller passed in.
+        res_r = eff - f_radware_5p(E, *rw) / rw_scale
         out.rw_params = tuple(rw)
+        out.rw_scale = rw_scale
         out.rw_chi2 = float(np.sum((res_r / deff) ** 2))
         out.rw_ndf = len(E) - 5
         out.rw_rms = float(np.sqrt(np.mean(res_r ** 2)))
@@ -313,7 +436,7 @@ class EfficiencyMC:
     rw_accepted: int
     rejected: int
 
-    def _band(self, grid, centre, samples, func, birge_factor):
+    def _band(self, grid, centre, samples, func, birge_factor, scale=1.0):
         """Percentile envelope, Birge-scaled about `centre`.
 
         `centre` is normally the MC mean, because that is the curve being
@@ -334,7 +457,7 @@ class EfficiencyMC:
         p = samples[:N_BAND]
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
             family = func(np.asarray(grid, dtype=float)[None, :],
-                          *[p[:, i:i + 1] for i in range(p.shape[1])])
+                          *[p[:, i:i + 1] for i in range(p.shape[1])]) / scale
             lo, hi = band_percentiles(family)
             enough = np.isfinite(family).sum(axis=0) >= MIN_MC_SAMPLES
         lo = np.where(enough, lo, np.nan)
@@ -353,9 +476,9 @@ class EfficiencyMC:
             return nan, nan
         if centre is None:
             centre = f_radware_5p(np.asarray(grid, dtype=float),
-                                  *fit.rw_params)
+                                  *fit.rw_params) / fit.rw_scale
         return self._band(grid, centre, self.rw_samples, f_radware_5p,
-                          fit.rw_birge)
+                          fit.rw_birge, scale=fit.rw_scale)
 
 
 def run_monte_carlo(fit, N, dN, I, dI, iterations=N_MC_EFFICIENCY,
@@ -410,12 +533,21 @@ def run_monte_carlo(fit, N, dN, I, dI, iterations=N_MC_EFFICIENCY,
             # A fresh parset() seed per sample, not a rolling warm start:
             # effit.c calls parset() then fitter() for each new data set, and
             # chaining the previous result would bias the chain.
+            # At the scale the deterministic fit settled on, so every stored
+            # sample describes eff*rw_scale like fit.rw_params does and the
+            # band can be evaluated with the one divisor.
+            eff_k, deff_k = eff_s * fit.rw_scale, deff * fit.rw_scale
             try:
-                pp_r, _ = curve_fit(f_radware_5p, E, eff_s,
-                                    p0=radware_seed_5p(E, eff_s), sigma=deff,
-                                    absolute_sigma=True, maxfev=MC_MAXFEV,
-                                    method="lm", ftol=MC_TOL, xtol=MC_TOL,
-                                    gtol=MC_TOL)
+                # Covariance discarded here too, and at 10,000 draws an
+                # un-suppressed warning is 10,000 lines of stderr.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    pp_r, _ = curve_fit(f_radware_5p, E, eff_k,
+                                        p0=radware_seed_5p(E, eff_k),
+                                        sigma=deff_k, absolute_sigma=True,
+                                        maxfev=MC_MAXFEV, method="lm",
+                                        ftol=MC_TOL, xtol=MC_TOL,
+                                        gtol=MC_TOL)
                 if np.all(np.isfinite(pp_r)) and np.all(np.abs(pp_r) < 500):
                     rw_store.append(pp_r)
             except Exception:
@@ -484,7 +616,7 @@ class EfficiencyResult:
         grid = np.asarray(grid, dtype=float)
         if model == "kfr":
             return f_kfr(grid, *self.fit.kfr_params)
-        return f_radware_5p(grid, *self.fit.rw_params)
+        return f_radware_5p(grid, *self.fit.rw_params) / self.fit.rw_scale
 
     def _mc_mean_raw(self, grid, model):
         """Mean of the Monte Carlo family at each energy, un-normalised.
@@ -509,6 +641,7 @@ class EfficiencyResult:
         if samples is None or len(samples) == 0:
             return np.full(grid.shape, float("nan"))
         func = f_kfr if model == "kfr" else f_radware_5p
+        scale = 1.0 if model == "kfr" else self.fit.rw_scale
         out = np.empty(grid.shape, dtype=float)
         step = max(1, 2000000 // max(len(samples), 1))
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
@@ -516,7 +649,7 @@ class EfficiencyResult:
                 chunk = grid[start:start + step]
                 family = func(chunk[None, :],
                               *[samples[:, i:i + 1]
-                                for i in range(samples.shape[1])])
+                                for i in range(samples.shape[1])]) / scale
                 finite = np.isfinite(family)
                 n_ok = finite.sum(axis=0)
                 total = np.where(finite, family, 0.0).sum(axis=0)
@@ -624,8 +757,10 @@ class EfficiencyResult:
         if samples is None or len(samples) == 0:
             return float("nan"), float("nan"), best
         func = f_kfr if which == "kfr" else f_radware_5p
+        scale = 1.0 if which == "kfr" else self.fit.rw_scale
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-            values = func(float(energy), *[samples[:, i]
-                                           for i in range(samples.shape[1])])
+            values = func(float(energy),
+                          *[samples[:, i]
+                            for i in range(samples.shape[1])]) / scale
         mean, std = finite_mean_std(values, min_n=MIN_MC_SAMPLES)
         return mean * self.normalisation, std * self.normalisation, best
