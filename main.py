@@ -1,5 +1,6 @@
 import os
 import sys
+import threading
 
 #: Set on the re-exec below, so the fallback can only ever happen once.
 _FALLBACK_ENV = "SPECTRATOOLS_PLATFORM_FALLBACK"
@@ -77,6 +78,36 @@ from dialog_utils import RaiseOnClickFilter
 from main_window import MainWindow
 
 
+def _warm_up_scipy_modules():
+    """Import the scipy-backed modules on a background thread.
+
+    scipy is deliberately NOT on the startup path -- v5.2.5 took it off and
+    measured 209 -> 145 DLLs, 35.3 MB of them, and a warm start of 1218 ->
+    1035 ms. The cost does not vanish, it moves: the first action needing
+    scipy pays all of it at once. Measured on this machine, opening the
+    Automatic Calibration dialog for the first time spends 1.10 s importing
+    and 0.01 s building the dialog, against 0.00 s every later time. The
+    user sees a frozen window and no explanation.
+
+    Starting the import here keeps both halves of that. The main window is
+    already on screen, so nothing the user watches gets slower, and by the
+    time they reach a fit or a calibration the import has usually finished.
+
+    A click that beats the thread is not penalised: Python's import lock
+    makes the second importer wait for the first, so it waits exactly as
+    long as it would have with no warm-up -- never longer.
+    """
+    def load():
+        try:
+            import auto_calibrate_dialog  # noqa: F401 - pulls in scipy
+        except Exception:
+            # A warm-up must never take the app down. The real import runs
+            # again on first use and reports its failure properly there.
+            pass
+
+    threading.Thread(target=load, name="scipy-warmup", daemon=True).start()
+
+
 def main():
     app = QApplication(sys.argv)
     # Click any of the app's overlapping windows to bring it forward. Held
@@ -108,6 +139,10 @@ def main():
         program, argv = fallback_command()
         os.execv(program, argv)
 
+    # After the re-exec check, not before: on WSL the branch above replaces
+    # this process outright, and a thread started first would be spawned
+    # only to be thrown away.
+    _warm_up_scipy_modules()
     sys.exit(app.exec())
 
 

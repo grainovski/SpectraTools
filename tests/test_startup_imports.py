@@ -18,6 +18,7 @@ question and always pass.
 import subprocess
 import sys
 import os
+import textwrap
 
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -80,3 +81,81 @@ def test_restoring_an_assignment_still_reaches_scipy():
         "restore(EnergyAssignments(None, ((100.0, 121.783),)), [(100.0, 4.0)])"
     )
     assert "scipy" in loaded, "energy_assignments never bound scipy.optimize"
+
+
+def _run(code, timeout=300):
+    """Run `code` in a fresh process; return (returncode, stdout, stderr)."""
+    out = subprocess.run([sys.executable, "-c", code], cwd=REPO,
+                         capture_output=True, text=True, timeout=timeout)
+    return out.returncode, out.stdout, out.stderr
+
+
+def test_the_warm_up_returns_at_once_and_loads_scipy_behind_the_window():
+    """Deferring scipy did not remove its cost, it moved it: the first
+    action needing it paid the lot. Measured, opening the Automatic
+    Calibration dialog for the first time spent 1.10 s importing and 0.01 s
+    building the dialog, against 0.00 s every time after.
+
+    The warm-up starts that import on a thread once the window is already
+    up, so the cost lands where nobody is waiting on it. It must return
+    immediately -- doing the import inline here would simply move the stall
+    back into startup, which is what v5.2.5 removed.
+    """
+    code = (
+        "import sys, time\n"
+        "import main\n"
+        "assert 'scipy' not in sys.modules, 'scipy loaded before the warm-up'\n"
+        "t = time.perf_counter()\n"
+        "main._warm_up_scipy_modules()\n"
+        "elapsed = time.perf_counter() - t\n"
+        "assert elapsed < 0.5, 'warm-up blocked for %.2f s' % elapsed\n"
+        "deadline = time.time() + 120\n"
+        "while 'scipy' not in sys.modules and time.time() < deadline:\n"
+        "    time.sleep(0.05)\n"
+        "print('loaded' if 'scipy' in sys.modules else 'NEVER LOADED')\n"
+    )
+    rc, out, err = _run(code)
+    assert rc == 0, err
+    assert out.strip() == "loaded", (
+        "the warm-up never imported scipy, so the first calibration still "
+        "pays for it: %s" % err)
+
+
+def test_a_failing_warm_up_is_silent_and_harmless():
+    """It runs for speed alone, so it must never take the app down or print
+    a traceback nobody can act on. The real import happens again on first
+    use and reports its failure there, where the user is waiting for
+    something.
+
+    The subprocess proves the import really is broken before calling the
+    warm-up. Without that, the test would pass just as happily against a
+    setup that did nothing, having exercised no failure at all.
+
+    Written as one dedented block rather than concatenated "...\n" pieces:
+    backslash escapes do not survive the way this file is edited, and a
+    mangled one turns into a syntax error rather than a wrong test.
+    """
+    code = textwrap.dedent(
+        """
+        import sys, time
+        import main
+        # Binding a module name to None is what makes `import` raise.
+        sys.modules['auto_calibrate_dialog'] = None
+        try:
+            import auto_calibrate_dialog
+        except ImportError:
+            pass
+        else:
+            print('SETUP INEFFECTIVE: the import did not raise')
+            raise SystemExit(2)
+        main._warm_up_scipy_modules()
+        time.sleep(2.0)
+        print('survived')
+        """
+    )
+    rc, out, err = _run(code)
+    assert rc != 2, "the test never broke the import: %s" % out
+    assert rc == 0, "a warm-up failure took the process down: %s" % err
+    assert out.strip() == "survived"
+    assert "Traceback" not in err, (
+        "the warm-up printed a traceback the user cannot act on: %s" % err)
