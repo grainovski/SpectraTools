@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from caleneff_export import ExportError, build_rows, write_caleneff
 from calibration_quality import reduced_chi_squared
+from dialog_utils import close_previous
 from value_format import compact
 
 #: Points drawn along the fitted curve. Enough that a quadratic reads as
@@ -604,10 +605,10 @@ class CalibrationPlotDialog(QDialog):
         if window is not None:
             window.set_efficiency(result)
         energy_errors = self._literature_errors(result.fit.E)
-        previous = getattr(self, "_efficiency_dialog", None)
-        if previous is not None:
-            previous.close()
-            previous.deleteLater()
+        # Tolerates the user having closed it: WA_DeleteOnClose destroys
+        # the C++ object while this attribute keeps the wrapper. See
+        # dialog_utils for why that silently swallowed the second open.
+        close_previous(getattr(self, "_efficiency_dialog", None))
         self._efficiency_dialog = EfficiencyDialog(
             self, result, energy_errors,
             theme=getattr(self.parent(), "_theme", "light"),

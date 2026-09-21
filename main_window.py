@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 
 from calibration import turning_point
 from calibration_plot_dialog import CalibrationPlotDialog
+from dialog_utils import close_previous
 from calibration_view import (
     CalibrationViewMixin,
     wheel_zoom_factor,
@@ -1007,10 +1008,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             return
         from efficiency_dialog import EfficiencyDialog
 
-        previous = getattr(self, "_efficiency_dialog", None)
-        if previous is not None:
-            previous.close()
-            previous.deleteLater()
+        close_previous(getattr(self, "_efficiency_dialog", None))
         errors = [0.0] * len(self._efficiency.fit.E)
         self._efficiency_dialog = EfficiencyDialog(
             self, self._efficiency, errors, theme=self._theme,
@@ -1428,10 +1426,9 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # so without this a second calibration leaves the first window on
         # screen showing different coefficients and offering to export to
         # the same filename.
-        previous = getattr(self, "_calibration_plot", None)
-        if previous is not None:
-            previous.close()
-            previous.deleteLater()
+        # ...and the user may have closed it already, which destroys the
+        # C++ object out from under the attribute. See dialog_utils.
+        close_previous(getattr(self, "_calibration_plot", None))
         self._calibration_plot = CalibrationPlotDialog(
             self, calibration, points, source_lines,
             len(spectrum.data) - 1, default_path, excluded=excluded,
