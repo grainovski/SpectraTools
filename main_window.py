@@ -1062,12 +1062,14 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         if out.zeroed_nonpositive or out.zeroed_nonfinite:
             parts = []
             if out.zeroed_low:
+                from efficiency_apply import ZEROED_BELOW_KEV
+
                 parts.append(
-                    "%d were the lowest channels, zeroed whatever their "
+                    "%d lay below %g keV and are zeroed whatever their "
                     "efficiency, because dividing by an efficiency "
                     "extrapolated that far below the lowest calibration "
                     "line produces counts large enough to swamp the plot"
-                    % out.zeroed_low)
+                    % (out.zeroed_low, ZEROED_BELOW_KEV))
             if out.zeroed_nonpositive:
                 parts.append("%d had a non-positive efficiency"
                              % out.zeroed_nonpositive)
