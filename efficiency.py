@@ -320,6 +320,14 @@ class EfficiencyMC:
         reported. The reference centres on its best fit instead; the two
         differ by far less than the band's own width, but centring on the
         curve actually drawn is what keeps the band symmetric about it.
+
+        An energy where fewer than MIN_MC_SAMPLES of the family are finite
+        gets NaN, the same rule the MC mean and predict() already apply.
+        Without it `band_percentiles` would quietly take its percentiles
+        over however few samples survived -- three out of ten thousand
+        draws a band that looks exactly like any other. The mean at such an
+        energy is already NaN, so the band was the one place a number with
+        nothing behind it could still be drawn and exported.
         """
         if samples is None or len(samples) == 0:
             return centre, centre
@@ -328,6 +336,9 @@ class EfficiencyMC:
             family = func(np.asarray(grid, dtype=float)[None, :],
                           *[p[:, i:i + 1] for i in range(p.shape[1])])
             lo, hi = band_percentiles(family)
+            enough = np.isfinite(family).sum(axis=0) >= MIN_MC_SAMPLES
+        lo = np.where(enough, lo, np.nan)
+        hi = np.where(enough, hi, np.nan)
         return (centre - birge_factor * (centre - lo),
                 centre + birge_factor * (hi - centre))
 

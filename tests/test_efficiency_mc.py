@@ -190,3 +190,44 @@ def test_an_all_nan_energy_is_quiet_but_still_nan():
         [str(w.message) for w in caught]
     assert np.isnan(lo[0]) and np.isnan(hi[0]), "the bad energy stopped being NaN"
     assert np.isfinite(lo[1]) and np.isfinite(hi[1]), "a good energy was lost"
+
+
+def test_the_band_is_withheld_where_too_few_samples_survive():
+    """The band now applies MIN_MC_SAMPLES, as the MC mean and predict()
+    always have.
+
+    Without it band_percentiles takes its percentiles over however few
+    samples happened to stay finite, so three survivors out of ten thousand
+    draw a band indistinguishable from any other. The mean at such an
+    energy is already NaN, which left the band as the one place a number
+    with nothing behind it could still be drawn and exported.
+
+    `func` is supplied rather than using a real model so the survivor count
+    is set exactly, including the boundary: MIN_MC_SAMPLES itself is enough,
+    one fewer is not.
+    """
+    from efficiency import MIN_MC_SAMPLES, EfficiencyMC
+
+    n = 40
+    samples = np.ones((n, 1))
+    grid = np.array([10.0, 20.0, 30.0])
+
+    def func(g, a):
+        out = np.broadcast_to(g, (len(a), g.shape[1])).astype(float).copy()
+        row = np.arange(len(a))
+        out[:, 1] = np.where(row < MIN_MC_SAMPLES, 1.0, np.nan)
+        out[:, 2] = np.where(row < MIN_MC_SAMPLES - 1, 1.0, np.nan)
+        return out
+
+    survivors = np.isfinite(func(grid[None, :], samples)).sum(axis=0)
+    # Without this the test could pass having exercised nothing.
+    assert survivors.tolist() == [n, MIN_MC_SAMPLES, MIN_MC_SAMPLES - 1]
+
+    mc = EfficiencyMC(kfr_samples=None, rw_samples=samples,
+                      kfr_accepted=0, rw_accepted=n, rejected=0)
+    lo, hi = mc._band(grid, np.ones(3), samples, func, 1.0)
+
+    assert np.isfinite(lo[0]) and np.isfinite(hi[0]), "plenty of samples"
+    assert np.isfinite(lo[1]) and np.isfinite(hi[1]), "exactly MIN is enough"
+    assert np.isnan(lo[2]) and np.isnan(hi[2]), (
+        "a band was drawn from fewer than MIN_MC_SAMPLES survivors")
