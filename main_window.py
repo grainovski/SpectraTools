@@ -1054,14 +1054,31 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # Flagged rather than recognised by name: Apply to all skips these,
         # and a name is something the user can change.
         self.spectra[-1].efficiency_corrected = True
-        if out.zeroed:
+        # Triggered by the UNEXPECTED zeroing only. The low band goes on
+        # every single correction by design, so letting it raise a modal
+        # box would put one in front of the user every time they pressed
+        # Apply -- and a modal with nobody to dismiss it is what hung the
+        # test run that first caught this.
+        if out.zeroed_nonpositive or out.zeroed_nonfinite:
+            parts = []
+            if out.zeroed_low:
+                parts.append(
+                    "%d were the lowest channels, zeroed whatever their "
+                    "efficiency, because dividing by an efficiency "
+                    "extrapolated that far below the lowest calibration "
+                    "line produces counts large enough to swamp the plot"
+                    % out.zeroed_low)
+            if out.zeroed_nonpositive:
+                parts.append("%d had a non-positive efficiency"
+                             % out.zeroed_nonpositive)
+            if out.zeroed_nonfinite:
+                parts.append("%d a non-finite one" % out.zeroed_nonfinite)
             QMessageBox.information(
                 self, "Efficiency applied",
-                "%d of %d bins were zeroed: %d had a non-positive efficiency "
-                "and %d a non-finite one. Both lie outside the range the "
-                "curve was fitted over."
-                % (out.zeroed, len(spectrum.data), out.zeroed_nonpositive,
-                   out.zeroed_nonfinite))
+                "%d of %d bins were zeroed: %s. A non-positive or non-finite "
+                "efficiency means the curve was evaluated outside the range "
+                "it was fitted over."
+                % (out.zeroed, len(spectrum.data), "; ".join(parts)))
 
     def _open_save_spectrum_dialog(self):
         active = active_spectrum(self.spectra)
