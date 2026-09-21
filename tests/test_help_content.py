@@ -1421,3 +1421,21 @@ def test_the_knowledge_database_explains_the_relative_scale():
     assert "live time" in html, "the common-mode factors are not named"
     assert "photoelectric" in html, (
         "the KFR terms are stated without saying what they represent")
+
+
+def test_the_howto_distinguishes_clearing_from_toggling_the_calibration():
+    """Two Operations entries that sound alike and are not. Toggle keeps
+    the coefficients and is its own undo; Clear discards them and cannot
+    be reversed. Naming only one of them, or describing them in the same
+    words, is worse than describing neither -- the user picks the
+    irreversible one expecting the reversible one.
+    """
+    from help_content import build_howto_html
+
+    html = _flat(build_howto_html())
+    assert "Clear Calibration" in html, (
+        "the HowTo never names Clear Calibration")
+    assert "Toggle Calibration Active" in html, (
+        "the HowTo never names the entry Clear Calibration is confused with")
+    assert "starting from scratch" in html, (
+        "nothing says clearing cannot be undone")

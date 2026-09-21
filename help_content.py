@@ -251,6 +251,20 @@ whether it's actually applied -- with it active, the plot's X axis and
 every fit parameter that has units (position, FWHM) switch from raw
 channels to keV. Calibration is shared across every loaded spectrum.</p>
 
+<p>Two nearby entries sound alike and differ in the one way that matters,
+what happens to the coefficients. <b>Toggle Calibration Active</b>
+(Ctrl+T) only changes how the axis is shown: the calibration is kept
+and can be switched straight back on, so it is its own undo and asks
+nothing. <b>Clear Calibration</b> discards the coefficients outright --
+the axis returns to channels and there is nothing left to switch on, so
+calibrating again means starting from scratch. That one asks first, and
+both entries are greyed out until a calibration exists.</p>
+
+<p>Clearing the calibration deliberately leaves a fitted efficiency alone.
+The curve is still valid; it simply cannot be applied until some
+calibration is active again, because applying it is what gives each bin an
+energy.</p>
+
 <h3>5. Multiply, Rebin, and Normalize</h3>
 <p><b>Multiply by Factor...</b> (<kbd>Ctrl+M</kbd>) scales the active
 spectrum's counts by a factor you enter. <b>Rebin by Factor...</b>
