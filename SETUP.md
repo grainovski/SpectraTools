@@ -88,18 +88,20 @@ Verify:
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expect **1517 passed, 0 failed** (as of v5.2.1). A smaller number that
+Expect **1707 collected, 0 failed** (as of v6.0.3). A smaller number that
 still passes is the failure to watch for: a missing optional dependency
 makes pytest skip whole files rather than error, so read the count, not
-the colour. No test needs deselecting
-any more: the decode-speed guard used to assert an absolute wall-clock bound
-calibrated on one machine and failed on slower hardware with no regression
-present, but it now times the decoder against a frozen copy of the
-pre-optimization implementation in the same process and asserts a ratio,
-which holds anywhere. The guard also alternates its two
-timing windows and takes six samples a side, so background load reaches
-both decoders equally -- it used to time one to completion and then the
-other, which false-failed once on a loaded machine.
+the colour.
+
+Two of the 1707 may report as **skipped** rather than passed, and that is
+normal. The decode-speed guard and its control compare `lc_codec.decode_row`
+against a frozen copy of the pre-optimization decoder in the same process
+and assert a ratio, which cancels machine speed. It cannot cancel machine
+*noise*, so before asserting anything it times the frozen decoder against
+itself and skips when the spread of those ratios exceeds the margin the
+verdict rests on. On a thermally limited laptop that happens often; the skip
+message prints the measured spread. A skip there says the timing could not
+resolve the question, not that the decoder regressed.
 
 **Budget real time for it.** The Qt and matrix tests dominate: a full run
 took just over three hours on the machine this was last measured on, and
@@ -111,8 +113,8 @@ while iterating.
 `tests/test_root_io.py` and `tests/test_root_ui.py` open with
 `pytest.importorskip("uproot")`, so a virtualenv predating v4.0.0 — when
 `uproot` was added to `requirements.txt` — silently collects 30 fewer tests
-and still reports all-passed. If the count comes out 30 short (1154 rather
-than 1184), that is this, and the fix is to re-run the install step above. Note
+and still reports all-passed. If the count comes out 30 short (1677 rather
+than 1707), that is this, and the fix is to re-run the install step above. Note
 the Windows build needs `uproot` too: `build.ps1` passes
 `--collect-all awkward_cpp`, which fails outright without it.
 

@@ -4,6 +4,26 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [6.0.3] - 2026-09-21
+
+### Fixed
+
+- **A window the user had closed would not open again.** The efficiency
+  window appeared the first time and then, once closed, never came back --
+  no window, no error, nothing in any log. **Show Efficiency...** was the
+  most visible casualty, since keeping an efficiency after its window is
+  closed is precisely what 6.0.2 added it for, but the same defect hit the
+  efficiency window opened after a fit and the energy-calibration plot
+  window as well. All three now reopen.
+
+  These windows are held on an attribute so they can be reopened, and are
+  also set to delete themselves on close so that a second calibration
+  cannot leave the first window on screen showing different coefficients.
+  Both behaviours are wanted; together they left the owner holding a
+  reference to a window Qt had already destroyed, and reaching for it to
+  close it raised an error inside a Qt signal handler. A packaged build has
+  nowhere to print such an error, which is why it failed in silence.
+
 ## [6.0.2] - 2026-09-20
 
 ### Added
