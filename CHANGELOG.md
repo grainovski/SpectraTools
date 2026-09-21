@@ -4,27 +4,32 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
-## [6.0.7] - 2026-09-21
+## [6.0.8] - 2026-09-21
 
 ### Fixed
 
-- **A window opened by another window is no longer stuck on top of it.**
+- **The calibration windows now stack freely instead of being pinned.**
   In the automatic calibration, the **Calibrate from Fitted Peaks** dialog
   stayed underneath the **Energy Calibration** graph however often it was
-  clicked — it would become active, but never come forward.
+  clicked. Each of these windows belonged to another one, and Windows keeps
+  a window that belongs to another permanently above it, so no amount of
+  clicking could reorder them.
 
-  The graph belonged to that dialog, and Windows keeps a window that
-  belongs to another one above it no matter what the application asks. The
-  graph is now independent of the dialog, so the two stack in whatever
-  order you last clicked them. The same arrangement applied to the
-  efficiency window opened from the calibration plot, and is fixed with it.
+  All three — the main window, the dialog and the graph — are now
+  independent. Whichever you click comes to the front, including the main
+  window, which previously could never be brought forward at all.
 
-  While the dialog is open, other windows in the application now stay
-  usable rather than being blocked. The dialog still blocks the main
-  window, which is the point of it being modal.
+  The same arrangement applied to the efficiency window opened from the
+  calibration plot, and is fixed with it.
 
-  6.0.5 and 6.0.6 each carried an attempt at this that could not have
-  worked; neither was published.
+- **While the Calibrate dialog is open the main window is no longer
+  blocked.** This follows from the above rather than being a separate
+  choice: a window blocked by a modal dialog cannot be raised by clicking
+  it, so the main window had to stay usable for it to come forward at all.
+  The dialog's OK and Cancel behave exactly as before.
+
+  6.0.5, 6.0.6 and 6.0.7 each carried an attempt at this; none was
+  published.
 
 ## [6.0.5] - 2026-09-21
 
