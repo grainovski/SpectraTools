@@ -157,9 +157,22 @@ def test_knowledge_database_html_documents_fix_checkbox_zero_uncertainty():
     assert "uncertainty is reported as exactly zero" in html
 
 
-def test_knowledge_database_html_embeds_seven_figures():
+def test_knowledge_database_html_embeds_every_figure():
+    """Nine since 6.1.0, when the efficiency section gained one showing the
+    two models over the same points and one showing the Monte Carlo band.
+
+    The count is asserted against help_figures rather than written out, so
+    adding a figure and forgetting to embed it fails here instead of
+    shipping a section that refers to a picture nobody can see.
+    """
+    import help_figures
+
+    expected = len([n for n in dir(help_figures) if n.endswith("_figure")])
     html = build_knowledge_database_html()
-    assert html.count("data:image/png;base64,") == 7
+    assert expected == 9, "figure count changed; was 9 at 6.1.0"
+    assert html.count("data:image/png;base64,") == expected, (
+        "help_figures defines %d figures but the page embeds %d"
+        % (expected, html.count("data:image/png;base64,")))
 
 
 def test_knowledge_database_html_has_no_external_links():
@@ -1439,3 +1452,56 @@ def test_the_howto_distinguishes_clearing_from_toggling_the_calibration():
         "the HowTo never names the entry Clear Calibration is confused with")
     assert "starting from scratch" in html, (
         "nothing says clearing cannot be undone")
+
+
+def test_the_knowledge_database_gives_the_radware_function_explicitly():
+    """The model is named in the summary and drawn on the plot, so a reader
+    who wants to check a number, or reproduce the fit elsewhere, needs the
+    formula rather than a description of it. Both reference energies, both
+    fixed constants and the soft-minimum join are asserted because dropping
+    any one of them leaves a formula that cannot be evaluated."""
+    from help_content import build_knowledge_database_html
+
+    html = _flat(build_knowledge_database_html())
+    for piece in ("ln(E/100)", "ln(E/1000)", "min(f1, f2)", "max(f1, f2)"):
+        assert piece in html, "the Radware function is missing %r" % piece
+    assert "C = 0" in html and "G = 15" in html, (
+        "the fixed constants are not stated, so the formula has free "
+        "parameters the fit does not")
+
+
+def test_the_knowledge_database_explains_the_uncertainty_band():
+    """A band is only useful if the reader knows what it is a band OF. The
+    three things that make it interpretable: where a point's own error comes
+    from, that the band is a percentile of refits rather than a formula, and
+    that Birge scaling widens it when the points disagree."""
+    from help_content import build_knowledge_database_html
+
+    html = _flat(build_knowledge_database_html())
+    assert "15.87" in html and "84.13" in html, (
+        "the band's percentiles are not stated")
+    assert "Birge" in html, "Birge scaling is not explained"
+    for piece in ("&sigma;N / N", "&sigma;I / I"):
+        assert piece in build_knowledge_database_html(), (
+            "the per-point error formula is missing %r" % piece)
+
+
+def test_the_efficiency_figures_come_from_the_apps_own_models():
+    """The figures are drawn by evaluating efficiency.f_kfr and
+    f_radware_5p on stored fit parameters, not sketched. If the models ever
+    change shape the pictures must follow, so this pins that they are
+    computed rather than pasted."""
+    import numpy as np
+
+    from efficiency import f_kfr, f_radware_5p
+    from help_figures import _EFF_KFR, _EFF_RW, _EFF_NORM
+
+    E = np.array([300.0, 900.0, 2000.0])
+    kfr = f_kfr(E, *_EFF_KFR) * _EFF_NORM
+    rw = f_radware_5p(E, *_EFF_RW) * _EFF_NORM
+    assert np.all(np.isfinite(kfr)) and np.all(np.isfinite(rw))
+    # Both are fits to the same points, so they must agree inside the
+    # measured range -- a sign the stored parameters belong together.
+    assert np.max(np.abs(rw / kfr - 1.0)) < 0.05, (
+        "the stored KFR and Radware parameters disagree by more than 5%; "
+        "they are supposed to be two fits to the same 23 points")

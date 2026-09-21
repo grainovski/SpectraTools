@@ -18,6 +18,8 @@ from PySide6.QtGui import QDesktopServices
 from help_figures import (
     anatomy_of_a_fit_figure,
     calibration_curve_figure,
+    efficiency_band_figure,
+    efficiency_models_figure,
     integration_background_figure,
     matrix_projection_cut_figure,
     multiplet_figure,
@@ -720,6 +722,8 @@ def build_knowledge_database_html():
     behavior through two rounds of correction after the first draft
     shipped wrong claims about area terminology and multiplet parameter
     sharing (see commits f9c73cd and ce57765)."""
+    efficiency_models_src = _embed_png(efficiency_models_figure())
+    efficiency_band_src = _embed_png(efficiency_band_figure())
     anatomy_src = _embed_png(anatomy_of_a_fit_figure())
     tail_src = _embed_png(tail_effect_figure())
     sigma_fwhm_src = _embed_png(sigma_fwhm_figure())
@@ -1431,14 +1435,41 @@ energy, where fewer gammas deposit their full energy in the crystal. Four
 parameters are enough for an ordinary HPGe or NaI curve across a
 calibration source's range.</p>
 <p><b>Radware</b>, five free parameters, following Radford's EFFIT (v4.0,
-<i>effit.c</i>): a pair of quadratics in ln(E/100) and ln(E/1000) joined
-smoothly, with Radford's own defaults C = 0 and G = 15 held fixed.
-Fixing those two is what makes the fit stable on ordinary detector
-data.</p>
+<i>effit.c</i>). Two quadratics in the logarithm of energy, one anchored at
+100 keV and one at 1000 keV, joined by a smooth minimum:</p>
+
+<pre>  x = ln(E/100)                  y = ln(E/1000)
+
+  f1 = a1 + a2&middot;x + C&middot;x&sup2;         (the low-energy branch)
+  f2 = a4 + a5&middot;y + a6&middot;y&sup2;        (the high-energy branch)
+
+  f  = min(f1, f2)    F = max(f1, f2)    r = f / F
+
+  ln &epsilon;(E) = f &middot; (1 + r<sup>G</sup>)<sup>-1/G</sup></pre>
+
+<p>Both branches are <i>log</i>-efficiencies and are normally negative. The
+last line is a soft minimum: where one branch is far below the other,
+r is small, the bracket is almost 1, and the result is just that
+branch; where the two approach each other the bracket rounds the corner
+between them. <b>G</b> controls how sharp that corner is.</p>
+
+<p>Five free parameters, not seven: <b>C = 0</b> and <b>G = 15</b> are held
+at Radford's own defaults, which is what makes the fit stable on ordinary
+detector data. Note the consequence for the low-energy branch -- with C
+fixed at zero, f1 is a straight line in x, so a1 and a2 are the only
+description the fit has of the whole low-energy side.</p>
 <p>Fitting two models that were derived independently is a check you
 cannot get from one. Where they agree, the curve is well determined by
 the data; where they separate, it is not, and the gap between them says
 how much.</p>
+
+<img src="{efficiency_models_src}" alt="KFR and Radware fitted to the same 23 Ra-226 points,
+with the percentage difference between them underneath">
+
+<p>Both curves above are fits to the same 23 Ra-226 lines, 186 to 2448 keV
+(shaded). Across the measured range they lie within a fraction of a percent
+of each other. Outside it they part company, and neither is more right than
+the other there -- the data simply stopped.</p>
 
 <h3>The Monte Carlo, and what number is reported</h3>
 <p>The uncertainty comes from resampling rather than from a formula.
@@ -1459,6 +1490,53 @@ of the same family, Birge-scaled.</p>
 <p>The fit-quality numbers in the summary -- chi-squared, ndf, Birge,
 RMS -- describe the <i>best fit</i>, since that is what they are
 statistics of.</p>
+
+<h3>Where the uncertainties come from</h3>
+<p>Each point carries its own error before any fitting happens. Both the
+net area and the emission intensity are measured numbers, and they combine
+in the ordinary way for a ratio:</p>
+
+<pre>  &epsilon; = N / I        (&sigma;&epsilon; / &epsilon;)&sup2; = (&sigma;N / N)&sup2; + (&sigma;I / I)&sup2;</pre>
+
+<p>The area error comes from your fit; the intensity error comes from the
+source file. A line whose literature intensity is poorly known is a weak
+constraint on the curve however well you fitted its peak, and the second
+term is what says so.</p>
+
+<p>Those errors are the weights in the fit, and they are also what the
+Monte Carlo resamples. Each of the 10,000 draws moves every area and every
+intensity independently within its own error, refits both models from
+scratch, and keeps the parameters. The band is the 15.87 and 84.13
+percentiles of that family of curves -- the same fractions that bound one
+sigma of a Gaussian -- so it answers a question no single fit can: across
+all the datasets the measurement could plausibly have produced, where did
+the curve go?</p>
+
+<p>The percentiles are then <b>Birge-scaled</b> about the curve. The Birge
+ratio is &radic;(&chi;&sup2;/ndf): when the points scatter about the fit by
+more than their stated errors, &chi;&sup2;/ndf exceeds 1 and the band is
+widened by that factor. It is the standard admission that the quoted errors
+were optimistic -- either the peak-area errors, the literature intensities,
+or the model's ability to describe the data. A Birge ratio well above 1 is
+worth looking at rather than scaling away.</p>
+
+<img src="{efficiency_band_src}" alt="The 1-sigma band on the same fit,
+narrow across the measured range and flaring outside it, with the band
+half-width plotted underneath as a percentage">
+
+<p>The upper panel is that band on the same Ra-226 fit; the lower one is
+its half-width as a percentage of the curve. The shape is the point. Across
+the measured range the band is a fraction of a percent -- about a tenth of
+one at 600 keV. Beyond the lowest and highest lines (dotted) it flares
+quickly: roughly 6% just 60 keV below the first point, and similar above
+the last. The extrapolated curve looks perfectly ordinary; the band is the
+only thing that says it is guesswork.</p>
+
+<p>Two practical consequences. An efficiency read off outside the range of
+your calibration lines is worth much less than one inside it, and the band
+tells you how much less. And a band that is wide <i>inside</i> the range
+means the points disagree with each other or with the model -- look at the
+residual strip before trusting the curve.</p>
 
 <p>The band is left blank at an energy where fewer than ten of the stored
 curves are still finite. Far outside the fitted range most of them diverge,
