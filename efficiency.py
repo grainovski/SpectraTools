@@ -437,7 +437,10 @@ class EfficiencyMC:
     rejected: int
 
     def _band(self, grid, centre, samples, func, birge_factor, scale=1.0):
-        """Percentile envelope, Birge-scaled about `centre`.
+        """Percentile envelope, Birge-INFLATED about `centre`.
+
+        The scaling only ever widens: see the clamp below for why a Birge
+        ratio under 1 must not narrow the band.
 
         `centre` is normally the MC mean, because that is the curve being
         reported. The reference centres on its best fit instead; the two
@@ -462,8 +465,29 @@ class EfficiencyMC:
             enough = np.isfinite(family).sum(axis=0) >= MIN_MC_SAMPLES
         lo = np.where(enough, lo, np.nan)
         hi = np.where(enough, hi, np.nan)
-        return (centre - birge_factor * (centre - lo),
-                centre + birge_factor * (hi - centre))
+        # Inflate-only, the PDG convention. B > 1 means the points scatter
+        # by more than their stated errors, and widening the band by it is
+        # the standard admission that those errors are too small. B < 1 says
+        # the opposite -- the fit tracks the data BETTER than their errors
+        # require -- and the honest reading of that is that the errors were
+        # overstated, not that the curve is known more sharply than the
+        # resampling found. Scaling down on it reports a precision nothing
+        # measured.
+        #
+        # Reachable on real data, not a theoretical worry: demo1 gives
+        # B = 0.891 (KFR) and 0.640 (Radware), so the band was drawn at 89%
+        # and 64% of the Monte Carlo percentiles. The Radware figure got
+        # worse when the scale ladder improved that fit -- a better fit
+        # shrank the band further, which is exactly backwards.
+        #
+        # The reference scales unconditionally (ra226_gui.py:1553-1554 and
+        # 1570-1571), so this is a deliberate parity break. fit.kfr_birge
+        # and fit.rw_birge keep the TRUE ratio: B < 1 is a real diagnostic
+        # about the input errors and stays visible in the dialog and the
+        # export. It just no longer narrows the band.
+        factor = max(1.0, float(birge_factor))
+        return (centre - factor * (centre - lo),
+                centre + factor * (hi - centre))
 
     def kfr_band(self, grid, fit, centre=None):
         if centre is None:

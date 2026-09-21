@@ -1481,6 +1481,16 @@ def test_the_knowledge_database_explains_the_uncertainty_band():
     assert "15.87" in html and "84.13" in html, (
         "the band's percentiles are not stated")
     assert "Birge" in html, "Birge scaling is not explained"
+    # The clamp is a documented deviation from the reference and changes
+    # every band on a well-fitting calibration, so the reader has to be
+    # told the scaling only ever widens -- see
+    # test_the_birge_scaling_never_narrows_the_band.
+    assert "only ever widens" in html, (
+        "the Knowledge Database does not say that Birge scaling never "
+        "narrows the band")
+    assert "below" in html and "floored at 1" in html, (
+        "the Knowledge Database does not explain that a Birge ratio below "
+        "1 is still reported as measured")
     for piece in ("&sigma;N / N", "&sigma;I / I"):
         assert piece in build_knowledge_database_html(), (
             "the per-point error formula is missing %r" % piece)

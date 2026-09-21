@@ -88,12 +88,12 @@ Verify:
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expect **1743 collected, 0 failed** (as of 6.1.0 development). A smaller
+Expect **1751 collected, 0 failed** (as of 6.1.0 development). A smaller
 number that still passes is the failure to watch for: a missing optional
 dependency makes pytest skip whole files rather than error, so read the
 count, not the colour.
 
-Two of the 1743 may report as **skipped** rather than passed, and that is
+Two of the 1751 may report as **skipped** rather than passed, and that is
 normal. The decode-speed guard and its control compare `lc_codec.decode_row`
 against a frozen copy of the pre-optimization decoder in the same process
 and assert a ratio, which cancels machine speed. It cannot cancel machine

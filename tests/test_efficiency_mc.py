@@ -69,12 +69,28 @@ def test_the_band_brackets_its_centre(mc):
     assert np.all(hi >= centre - 1e-12)
 
 
-def test_the_band_can_be_centred_somewhere_else(mc):
+def test_the_band_can_be_centred_somewhere_else():
     """Task 5 reports the MC mean rather than the best fit, and the band has
-    to follow it. Passing an explicit centre must move the band."""
+    to follow it. Passing an explicit centre must move the band.
+
+    demo2, NOT the demo1 fixture the rest of this file shares, and that is
+    load-bearing. The band is `centre +- factor * (centre - percentile)`, so
+    when factor is exactly 1 the centre cancels and the band IS the raw
+    percentile interval, unmoved by any centre passed in. demo1's Birge
+    ratio is below 1 and is clamped to exactly 1 (see
+    test_the_birge_scaling_never_narrows_the_band), so this property has no
+    content there. demo2 scores B = 1.78, where the scaling is live and the
+    centre really does anchor it.
+    """
     from efficiency import f_kfr
 
-    fit, out = mc
+    N, dN, E, I, dI = _load("demo2.txt")
+    fit = fit_efficiency(E, N, dN, I, dI)
+    assert fit.kfr_birge > 1.0, (
+        "demo2 no longer inflates (B = %.4f), so the centre cancels out of "
+        "the band and this test is vacuous" % fit.kfr_birge)
+    out = run_monte_carlo(fit, N, dN, I, dI, iterations=400)
+
     grid = np.linspace(fit.E.min(), fit.E.max(), 20)
     default = out.kfr_band(grid, fit)
     shifted = out.kfr_band(grid, fit, f_kfr(grid, *fit.kfr_params) * 1.5)
@@ -248,3 +264,85 @@ def test_the_band_is_withheld_where_too_few_samples_survive():
     assert np.isfinite(lo[1]) and np.isfinite(hi[1]), "exactly MIN is enough"
     assert np.isnan(lo[2]) and np.isnan(hi[2]), (
         "a band was drawn from fewer than MIN_MC_SAMPLES survivors")
+
+
+def _band_vs_percentiles(name, model):
+    """(reported band width) / (raw Monte Carlo percentile width).
+
+    The raw width is the same call with the Birge factor forced to 1, so
+    the two differ only by the scaling under test.
+    """
+    import efficiency
+
+    N, dN, E, I, dI = _load(name)
+    fit = fit_efficiency(E, N, dN, I, dI)
+    mc = run_monte_carlo(fit, N, dN, I, dI, iterations=800,
+                         seed=efficiency.EFFICIENCY_SEED)
+    grid = np.linspace(E.min(), E.max(), 80)
+
+    if model == "kfr":
+        func, samples, scale = efficiency.f_kfr, mc.kfr_samples, 1.0
+        centre = func(grid, *fit.kfr_params)
+    else:
+        func, samples, scale = (efficiency.f_radware_5p, mc.rw_samples,
+                                fit.rw_scale)
+        centre = func(grid, *fit.rw_params) / scale
+
+    reported = (mc.kfr_band(grid, fit) if model == "kfr"
+                else mc.rw_band(grid, fit))
+    raw = mc._band(grid, centre, samples, func, 1.0, scale=scale)
+
+    width = lambda b: float(np.nanmax(np.asarray(b[1]) - np.asarray(b[0])))
+    return width(reported) / width(raw), getattr(fit, model + "_birge")
+
+
+@pytest.mark.parametrize("model", ("kfr", "rw"))
+@pytest.mark.parametrize("name", ("226Ra_En_Area.txt", "demo1.txt",
+                                  "demo2.txt"))
+def test_the_birge_scaling_never_narrows_the_band(name, model):
+    """A Birge ratio below 1 must leave the band alone, not shrink it.
+
+    B < 1 means the fit tracks the points better than their stated errors
+    require. The honest reading is that those errors were overstated, not
+    that the curve is known more sharply than the resampling found, so
+    scaling down on it would report a precision nothing measured. This is
+    the PDG convention and a deliberate break from the reference, which
+    scales unconditionally.
+
+    demo1 is the case that makes it real: B = 0.891 (KFR) and 0.640
+    (Radware), the second of which got worse when the scale ladder improved
+    that fit.
+    """
+    ratio, b = _band_vs_percentiles(name, model)
+    assert ratio >= 1.0 - 1e-9, (
+        "%s %s: the reported band is %.4f of the Monte Carlo percentiles, "
+        "i.e. narrower than the spread it came from (B = %.4f)"
+        % (name, model, ratio, b))
+    expected = max(1.0, b)
+    assert ratio == pytest.approx(expected, rel=1e-6), (
+        "%s %s: band scaled by %.6f, expected max(1, B) = %.6f"
+        % (name, model, ratio, expected))
+
+
+def test_a_birge_below_one_really_does_occur():
+    """Control. Every assertion above holds trivially if no fixture ever
+    produces B < 1 -- the clamp would then never be exercised and the test
+    would be pinning nothing."""
+    N, dN, E, I, dI = _load("demo1.txt")
+    fit = fit_efficiency(E, N, dN, I, dI)
+    assert fit.kfr_birge < 1.0 and fit.rw_birge < 1.0, (
+        "demo1 no longer produces a Birge ratio below 1 (KFR %.4f, Radware "
+        "%.4f), so the clamp is untested. Find a fixture that does."
+        % (fit.kfr_birge, fit.rw_birge))
+
+
+def test_the_reported_birge_is_still_the_true_ratio():
+    """The clamp belongs to the band, not to the number. B < 1 says
+    something real about the input errors, so the dialog and the export must
+    keep showing it rather than a floored 1.0."""
+    N, dN, E, I, dI = _load("demo1.txt")
+    fit = fit_efficiency(E, N, dN, I, dI)
+    assert fit.kfr_birge == pytest.approx(
+        np.sqrt(fit.kfr_chi2 / fit.kfr_ndf))
+    assert fit.rw_birge == pytest.approx(np.sqrt(fit.rw_chi2 / fit.rw_ndf))
+    assert fit.rw_birge < 1.0, "expected demo1 Radware to sit below 1"

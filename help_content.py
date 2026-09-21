@@ -1520,6 +1520,20 @@ were optimistic -- either the peak-area errors, the literature intensities,
 or the model's ability to describe the data. A Birge ratio well above 1 is
 worth looking at rather than scaling away.</p>
 
+<p><b>The scaling only ever widens.</b> A Birge ratio <i>below</i> 1 means
+the curve tracks the points more closely than their stated errors require,
+and the band is then left at the Monte Carlo percentiles rather than being
+shrunk by it. The reason is that a low ratio says something about the
+<i>inputs</i>, not about the curve: the honest reading is that the errors
+fed in were overstated, not that the efficiency is known more sharply than
+resampling those errors produced. Narrowing on it would report a precision
+nothing measured. This is the usual convention for scaled uncertainties.</p>
+
+<p>The ratio itself is still reported as measured, and is not floored at 1.
+Seeing a Birge of, say, 0.64 beside a fit is useful -- it is a hint that the
+peak-area or intensity errors are too generous, and that the calibration may
+deserve a second look even though it looks excellent.</p>
+
 <img src="{efficiency_band_src}" alt="The 1-sigma band on the same fit,
 narrow across the measured range and flaring outside it, with the band
 half-width plotted underneath as a percentage">

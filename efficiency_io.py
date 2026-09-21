@@ -49,6 +49,15 @@ def _header_lines(result, extra=()):
             "%d samples rejected" %
             (result.mc.kfr_accepted, result.mc.rw_accepted,
              result.mc.rejected))
+        # Stated because the file is read on its own, away from the Help.
+        # Without it a reader sees "Birge 0.6398" beside the deff columns
+        # and reasonably assumes the band was scaled by it. It was not:
+        # the scaling is inflate-only.
+        applied = (fit.kfr_birge if result.model == "kfr" else fit.rw_birge)
+        lines.append(
+            "band scaling       : x%.4f   (Birge %.4f, inflate-only: a "
+            "ratio below 1 never narrows the band)"
+            % (max(1.0, applied), applied))
     if result.calibration is not None:
         lines.append("energy calibration : %s" % (result.calibration,))
     if result.source:
