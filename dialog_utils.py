@@ -1,4 +1,11 @@
-"""Reopening a window the user may already have closed.
+"""Shared window behaviour: bringing one to the front, and closing it.
+
+Two things that both follow from this app opening several non-modal
+windows at once -- the calibration plot, the energy assignment dialog, the
+efficiency window, a matrix panel and its heatmap can all be on screen
+together, overlapping.
+
+Reopening a window the user may already have closed.
 
 Every reopenable window here is stored on an attribute of its owner AND
 created with WA_DeleteOnClose. Both decisions are deliberate: the
@@ -17,6 +24,67 @@ logged, and the window simply never appears again -- see
 `test_dialog_utils.py`, which pins the behaviour, and the v5.2.1 audit,
 where an exception leaving a Qt slot hid a defect the same way.
 """
+
+from PySide6.QtCore import QEvent, QObject
+from PySide6.QtWidgets import QApplication, QWidget
+
+
+class RaiseOnClickFilter(QObject):
+    """Bring a window to the front when it is clicked anywhere.
+
+    Every window this app opens is parented to another one, so the window
+    manager treats them all as transient for the same top-level and does
+    not reorder them among themselves when one is clicked. Nothing in the
+    app asked it to either, so a half-covered calibration plot stayed
+    half-covered however often you clicked it.
+
+    Installed on the QApplication rather than overridden per window,
+    because a click almost never reaches the window itself: a matplotlib
+    canvas, a button, a table cell or a text field consumes it first, so
+    per-window mousePressEvent would catch only clicks on bare background
+    -- which is not what "click anywhere" means.
+
+    The filter never consumes the event. It returns False always, so the
+    click goes on to do whatever it was going to do; raising is on top of
+    that, not instead of it.
+    """
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.MouseButtonPress:
+            window = window_to_raise(
+                obj if isinstance(obj, QWidget) else None,
+                QApplication.activePopupWidget())
+            if window is not None:
+                window.raise_()
+                window.activateWindow()
+        return False
+
+
+def window_to_raise(widget, popup=None):
+    """The top-level window a click on `widget` should bring to the front,
+    or None if the click should change no stacking.
+
+    Split out from the event filter because everything worth getting wrong
+    is in here, and this can be tested by calling it.
+
+    Returns None when:
+
+    * there is no widget, or it has no window (events do reach objects
+      that are not widgets at all);
+    * the window is already active -- raising it again is a no-op that
+      still costs a round trip to the window manager on every single
+      click;
+    * a popup is open. A menu, a combo box drop-down and a completer are
+      all separate windows, and raising the window underneath one closes
+      it. `popup` is QApplication.activePopupWidget(), passed in rather
+      than read here so a test can set it.
+    """
+    if widget is None or popup is not None:
+        return None
+    window = widget.window()
+    if window is None or window.isActiveWindow():
+        return None
+    return window
 
 
 def close_previous(previous):

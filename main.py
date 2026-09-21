@@ -73,11 +73,18 @@ matplotlib.use("QtAgg")
 
 from PySide6.QtWidgets import QApplication
 
+from dialog_utils import RaiseOnClickFilter
 from main_window import MainWindow
 
 
 def main():
     app = QApplication(sys.argv)
+    # Click any of the app's overlapping windows to bring it forward. Held
+    # on `app` because an event filter is not kept alive by the object it
+    # is installed on, and a garbage-collected filter stops filtering
+    # silently.
+    app.raise_on_click_filter = RaiseOnClickFilter(app)
+    app.installEventFilter(app.raise_on_click_filter)
     window = MainWindow()
     window.show()
 
