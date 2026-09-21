@@ -4,6 +4,39 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [6.0.11] - 2026-09-21
+
+### Fixed
+
+- **The efficiency window had two Apply buttons, and one was mislabelled.**
+  *Apply to active spectrum*, in the bottom row, did not apply to the active
+  spectrum — it corrected whichever spectrum the **Apply to:** list had
+  selected, exactly as the **Apply** button beside that list already did. It
+  predated the target list and has been removed; **Apply** and **Apply to
+  all** are unchanged.
+
+### Changed
+
+- **The Help now covers the efficiency calibration as it actually works.**
+  The HowTo described only the removed button. It now explains choosing
+  which spectrum to correct, **Apply to all** and the two cases it skips,
+  how a corrected spectrum is named, that everything below 50 keV is set to
+  zero, and reopening a fitted efficiency from **Operations > Show
+  Efficiency...**.
+
+  The Knowledge Database explains why only the *shape* of the efficiency can
+  be measured, what each term of the KFR curve represents physically, and
+  why the correction stops below 50 keV — including the warning that the
+  zeroed range is not a measurement of a detector with no low-energy
+  response.
+
+- **Clear Calibration is documented**, beside *Toggle Calibration Active*
+  rather than apart from it: the two sound alike and differ in the only way
+  that matters. The toggle keeps the coefficients and can be switched back
+  on; clearing discards them and cannot be undone. Clearing also leaves a
+  fitted efficiency alone — the curve stays valid and simply cannot be
+  applied until some calibration is active again.
+
 ## [6.0.10] - 2026-09-21
 
 ### Fixed
