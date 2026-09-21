@@ -1329,16 +1329,54 @@ def test_the_knowledge_database_says_the_efficiency_is_not_absolute():
 
 
 def test_the_howto_covers_the_efficiency_workflow():
-    """Asserts on the button's exact label, which nothing else in the help
-    contains. Merely checking for the word "efficiency" passed before this
-    feature existed."""
+    """Asserts on the controls' exact labels, which nothing else in the
+    help contains. Merely checking for the word "efficiency" passed before
+    this feature existed.
+
+    The labels are read from the dialog rather than written out here, so
+    renaming a button in the UI fails this test instead of quietly leaving
+    the help describing a control that no longer exists -- which is exactly
+    what happened to "Apply to active spectrum", a button removed in 6.0.11
+    after the 6.0.2 target list made it a mislabelled duplicate.
+    """
     from help_content import build_howto_html
 
-    html = build_howto_html()
-    assert "Auto MC Efficiency Calibration" in _flat(html), (
+    html = _flat(build_howto_html())
+    assert "Auto MC Efficiency Calibration" in html, (
         "the HowTo does not name the button that starts the calibration")
-    assert "Apply to active spectrum" in _flat(html), (
-        "the HowTo does not describe applying the result")
+    for label in ("Apply to:", "Apply to all", "Show Efficiency"):
+        assert label in html, (
+            "the HowTo does not mention %r, a control the user has to find"
+            % label)
+
+
+def test_the_howto_states_the_low_energy_floor():
+    """The correction silently zeroes part of every corrected spectrum. A
+    user who does not know that has no way to tell it from a detector with
+    no low-energy response."""
+    from efficiency_apply import ZEROED_BELOW_KEV
+    from help_content import build_howto_html
+
+    html = _flat(build_howto_html())
+    assert "%g keV" % ZEROED_BELOW_KEV in html, (
+        "the HowTo does not say where the correction stops")
+
+
+def test_the_howto_names_no_control_the_dialog_does_not_have():
+    """The other direction, and the one that actually rots: help outliving
+    the button it describes. Checked against the dialog's own source rather
+    than a list repeated here."""
+    import io as _io
+
+    from help_content import build_howto_html
+
+    source = _io.open("efficiency_dialog.py", encoding="utf-8").read()
+    html = _flat(build_howto_html())
+    for label in ("Apply to active spectrum",):
+        if label in html:
+            assert '"%s"' % label in source, (
+                "the HowTo describes %r but the dialog no longer has it"
+                % label)
 
 
 def test_these_checks_would_have_failed_before_the_feature():
@@ -1357,3 +1395,29 @@ def test_these_checks_would_have_failed_before_the_feature():
     for marker in ("Radware", "Monte Carlo mean"):
         assert marker.lower() in _flat(build_knowledge_database_html()).lower()
     assert "Auto MC Efficiency Calibration" in _flat(build_howto_html())
+
+
+def test_the_knowledge_database_explains_the_low_energy_floor():
+    """The HowTo says the correction stops at 50 keV; this says why, and
+    warns against reading the zeroed range as a measurement. A user who
+    takes it for real detector behaviour has been actively misled."""
+    from efficiency_apply import ZEROED_BELOW_KEV
+    from help_content import build_knowledge_database_html
+
+    html = _flat(build_knowledge_database_html())
+    assert "%g keV" % ZEROED_BELOW_KEV in html, (
+        "the Knowledge Database does not state the threshold")
+    assert "not a measurement" in html, (
+        "nothing warns that the zeroed range is not detector response")
+
+
+def test_the_knowledge_database_explains_the_relative_scale():
+    """Why a relative calibration works from a source of unknown strength:
+    activity and live time are common to every point, so they rescale the
+    curve without changing its shape."""
+    from help_content import build_knowledge_database_html
+
+    html = _flat(build_knowledge_database_html())
+    assert "live time" in html, "the common-mode factors are not named"
+    assert "photoelectric" in html, (
+        "the KFR terms are stated without saying what they represent")

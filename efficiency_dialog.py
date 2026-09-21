@@ -104,6 +104,13 @@ class EfficiencyDialog(QDialog):
         self.target_combo = QComboBox()
         self.target_combo.setMinimumWidth(220)
         target_row.addWidget(self.target_combo)
+        # The only Apply. A second button reading "Apply to active
+        # spectrum" used to sit in the bottom row, left over from before
+        # this target list existed: it called the same slot, so it corrected
+        # whatever the dropdown had selected rather than the active
+        # spectrum, and its label said otherwise. It also rebound
+        # self.apply_button, leaving THIS button with no surviving
+        # reference -- harmless only because nothing enabled or disabled it.
         self.apply_button = QPushButton("Apply")
         self.apply_button.clicked.connect(self._on_apply)
         target_row.addWidget(self.apply_button)
@@ -122,10 +129,6 @@ class EfficiencyDialog(QDialog):
         self.save_button = buttons.addButton(
             "Save efficiency...", QDialogButtonBox.ButtonRole.ActionRole)
         self.save_button.clicked.connect(self._on_save)
-        self.apply_button = buttons.addButton(
-            "Apply to active spectrum",
-            QDialogButtonBox.ButtonRole.ActionRole)
-        self.apply_button.clicked.connect(self._on_apply)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 

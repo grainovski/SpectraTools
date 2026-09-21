@@ -659,13 +659,41 @@ above 1 where it sits higher -- that is the disagreement between the
 models, not an error.</p>
 <p><b>Save efficiency...</b> writes two files, one row per calibration peak
 and one row per channel. Both carry both curves.</p>
-<p><b>Apply to active spectrum</b> divides the active spectrum bin by bin
-by the selected curve and adds the result as a <i>new</i> spectrum beside
-the original, which is left untouched. It needs an active energy
-calibration, since that is what gives each bin an energy. If the active
-calibration is not the one the efficiency was fitted under, you are asked
-first -- the same curve applied through a different channel-to-energy map
-is a different correction.</p>
+<p><b>Apply to:</b> chooses which loaded spectrum to correct -- not
+necessarily the active one, since the spectrum you want corrected is often
+not the one you were looking at when the calibration finished.
+<b>Apply</b> divides that spectrum bin by bin by the selected curve and
+adds the result as a <i>new</i> spectrum beside the original, which is left
+untouched. The new spectrum is named after the original with
+<i>[eff-corrected KFR]</i> or <i>[eff-corrected RW]</i> appended, so which
+curve produced it stays visible.</p>
+
+<p><b>Apply to all</b> corrects every loaded spectrum at once. It skips two
+kinds of spectrum and says how many: ones that are already efficiency
+corrections, because correcting a correction is meaningless, and ones whose
+correction under this model already exists, so pressing the button twice
+does nothing rather than filling the plot with identical copies.</p>
+
+<p>Either way this needs an active energy calibration, since that is what
+gives each bin an energy. If the active calibration is not the one the
+efficiency was fitted under, you are asked first -- the same curve applied
+through a different channel-to-energy map is a different correction.</p>
+
+<p><b>Everything below 50 keV is set to zero</b> in the corrected spectrum,
+whatever the curve says there. Below the lowest calibration line the fitted
+efficiency falls away towards zero, and dividing by it explodes: on a
+0.5 keV/channel calibration against a curve fitted from 121.8 keV, a flat
+1000 counts becomes about 5.7&times;10<sup>96</sup> at the second channel --
+one bin like that sets the vertical scale and hides the whole spectrum. A
+spectrum whose first channel already lies above 50 keV loses nothing. Bins
+dropped for any <i>other</i> reason -- an efficiency that came out zero,
+negative, or undefined -- are reported in a message afterwards; the
+low-energy floor is not, because it applies to every correction.</p>
+
+<p>The fitted efficiency is kept after you close the window.
+<b>Operations &gt; Show Efficiency...</b> reopens it, so a spectrum loaded
+later can be corrected without refitting. The entry is greyed out until an
+efficiency has been fitted.</p>
 """
     return _page("SpectraTools -- HowTo", body)
 
@@ -1362,6 +1390,15 @@ often it does depends on energy. Dividing a peak's net area <b>N</b> by
 its line's emission intensity <b>I</b> gives a number proportional to
 that probability: <b>&epsilon; = N / I</b>. Collect one per matched peak
 and a curve through them is the detector's efficiency against energy.</p>
+<p>What makes it only a shape is that the missing factors are the same
+for every line. An absolute efficiency would divide by the source activity
+and the live time as well: <i>&epsilon; = N / (A &middot; T &middot; I)</i>.
+Both are common to every point, so leaving them out rescales the whole
+curve by one constant and changes nothing about its shape -- and their
+uncertainties shift the curve bodily rather than distorting it. That is
+why a relative calibration can be done from a source whose strength you do
+not know.</p>
+
 <p><b>This is a relative efficiency, not an absolute one.</b> Only the
 shape is measured; the overall scale is arbitrary, and is fixed here by
 normalising the curve to peak at 1. A spectrum corrected with it can be
@@ -1373,6 +1410,12 @@ corrected spectrum is arbitrary.</p>
 <p>Both are fitted, always, and you choose which to apply.</p>
 <p><b>KFR</b>, four parameters:
 <i>&epsilon;(E) = (aE + b/E) &middot; exp(cE + d/E)</i>.</p>
+<p>Its terms do recognisable physical work. <i>b/E</i> and <i>d/E</i>
+dominate at low energy, where the photoelectric cross-section rises
+steeply as the energy falls; <i>aE</i> and <i>cE</i> dominate at high
+energy, where fewer gammas deposit their full energy in the crystal. Four
+parameters are enough for an ordinary HPGe or NaI curve across a
+calibration source's range.</p>
 <p><b>Radware</b>, five free parameters, following Radford's EFFIT (v4.0,
 <i>effit.c</i>): a pair of quadratics in ln(E/100) and ln(E/1000) joined
 smoothly, with Radford's own defaults C = 0 and G = 15 held fixed.
@@ -1402,6 +1445,33 @@ of the same family, Birge-scaled.</p>
 <p>The fit-quality numbers in the summary -- chi-squared, ndf, Birge,
 RMS -- describe the <i>best fit</i>, since that is what they are
 statistics of.</p>
+
+<p>The band is left blank at an energy where fewer than ten of the stored
+curves are still finite. Far outside the fitted range most of them diverge,
+and a percentile taken over the handful that happened not to would draw an
+envelope indistinguishable from a well-determined one. The curve itself and
+the examine panel have always been blank there for the same reason; the
+band now agrees with them.</p>
+
+<h3>Why the correction stops below 50 keV</h3>
+<p>Applying an efficiency divides each bin by the curve at that bin's
+energy, and the fitted curve is only meaningful between the lowest and
+highest calibration lines. Extrapolated below the lowest one it falls away
+towards zero, so the division grows without limit: against a curve fitted
+from 121.8 keV, a 0.5 keV/channel spectrum with a flat 1000 counts comes
+out at about 5.7&times;10<sup>96</sup> in the second channel. One bin like
+that fixes the vertical scale and hides everything else.</p>
+
+<p>So every bin below <b>50 keV</b> is set to zero, whatever the curve says
+there. The threshold is an energy rather than a number of channels because
+how far the blow-up reaches depends on the energies the curve is asked
+about, not on channel numbers: the same 50 keV covers 25 channels at
+2 keV/channel, 10 at 5, and 5 at 10. A spectrum whose first channel already
+lies above 50 keV loses nothing.</p>
+
+<p>Those zeroed bins are <b>not a measurement</b> of a detector with no
+low-energy response. They are the range where this calibration has nothing
+to say, and a corrected spectrum should be read as starting at 50 keV.</p>
 
 <h3>The two files</h3>
 <p>Saving writes two, and both carry both curves so the file is a
