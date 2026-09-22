@@ -759,3 +759,87 @@ def test_variance_agrees_with_compute_cut_and_is_never_negative_or_nan():
         assert np.all(variance >= 0.0)
         assert np.all(np.isfinite(variance))
         assert np.all(np.isfinite(np.sqrt(variance)))
+
+
+# --- Structural invariants -------------------------------------------------
+#
+# Added after a randomised sweep on 2026-09-22 found no defect in this
+# module. A clean sweep is worth keeping only as the invariants it checked,
+# so the two strongest are pinned here. Both are cheap, and neither was
+# covered by the 36 tests already in this file.
+
+_SWEEP_CASES = [
+    # (ny, nx, axis, cut regions, bg regions) -- the last two overhang an
+    # edge on purpose, which is where the clipping rules actually bite.
+    (20, 30, "x", [(5, 10)], [(15, 20)]),
+    (30, 20, "y", [(4, 9), (12, 14)], [(18, 25)]),
+    (45, 45, "x", [(0, 3)], [(40, 44)]),
+    (25, 60, "y", [(-4, 6)], [(15, 22)]),
+    (60, 25, "x", [(20, 24)], [(-8, 4), (22, 24)]),
+]
+
+
+@pytest.mark.parametrize("ny,nx,axis,cut,bg", _SWEEP_CASES)
+def test_a_cut_is_the_same_on_the_transposed_matrix(ny, nx, axis, cut, bg):
+    """Cutting 'x' on M must equal cutting 'y' on M.T.
+
+    The two axes run through separate branches of every helper in this
+    module -- _axis_size, _complementary_size and the ternaries in
+    _sum_and_lines all pick a direction. Transposing swaps which branch
+    runs while leaving the answer defined, so this is the cheapest check
+    that the two directions agree, including where a region is clipped at
+    an edge.
+    """
+    rng = np.random.default_rng(ny * 1000 + nx)
+    matrix = rng.poisson(12.0, size=(ny, nx)).astype(float)
+    other = "y" if axis == "x" else "x"
+
+    got = compute_cut(matrix, axis, cut, bg)
+    mirrored = compute_cut(matrix.T, other, cut, bg)
+    assert got == pytest.approx(mirrored, rel=1e-12, abs=1e-9), (
+        "cutting %r on the matrix and %r on its transpose disagree"
+        % (axis, other))
+
+
+@pytest.mark.parametrize("ny,nx,axis,cut,bg", _SWEEP_CASES)
+def test_a_cut_is_additive_in_the_matrix(ny, nx, axis, cut, bg):
+    """cut(M1 + M2) == cut(M1) + cut(M2).
+
+    Every step is a sum or a scale by a factor that depends only on the
+    REGIONS, never on the counts, so the whole operation is linear in the
+    matrix. That makes this a strong check for very little: a clamp, an
+    abs(), a max(0, ...) or any count-dependent branch sneaking into the
+    net path would break it, while leaving a single-matrix test perfectly
+    happy.
+
+    Note it is the NET that must be additive, not the variance -- the
+    variance floors each term at zero, which is deliberate and not linear.
+    """
+    rng = np.random.default_rng(ny + nx)
+    a = rng.poisson(9.0, size=(ny, nx)).astype(float)
+    b = rng.poisson(4.0, size=(ny, nx)).astype(float)
+
+    together = compute_cut(a + b, axis, cut, bg)
+    apart = compute_cut(a, axis, cut, bg) + compute_cut(b, axis, cut, bg)
+    assert together == pytest.approx(apart, rel=1e-10, abs=1e-8)
+
+
+def test_those_invariants_can_fail():
+    """Control for both tests above. They compare one call against another
+    call of the same function, which passes trivially if the function
+    ignores the argument that is being varied."""
+    rng = np.random.default_rng(5)
+    matrix = rng.poisson(12.0, size=(20, 30)).astype(float)
+
+    # the axis genuinely changes the answer, so the transpose test is not
+    # comparing a function with itself
+    assert compute_cut(matrix, "x", [(5, 10)], [(15, 20)]).shape != \
+        compute_cut(matrix, "y", [(5, 10)], [(15, 20)]).shape
+
+    # and the counts genuinely reach the result, so additivity is not
+    # holding because the output ignores the matrix
+    doubled = compute_cut(matrix * 2.0, "x", [(5, 10)], [(15, 20)])
+    single = compute_cut(matrix, "x", [(5, 10)], [(15, 20)])
+    assert not np.allclose(doubled, single), (
+        "scaling the matrix did not change the cut; additivity would hold "
+        "for the wrong reason")
