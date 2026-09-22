@@ -4,6 +4,81 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [6.1.0] - 2026-09-22
+
+Three things that were reported before are reported differently now. If you
+are comparing an efficiency calibration against one made with 6.0.11 or
+earlier, read this section first.
+
+### Changed — numbers that move
+
+- **The efficiency curve no longer depends on how the source file scales its
+  intensities.** The intensity column is relative, and the bundled `.sou`
+  files do not agree on its normalisation — most peak at 10000, `co56.sou`
+  at 100000, `na24.sou` at 1000. Both fitted models turned out to depend on
+  that arbitrary constant, so the same measurement could give a different
+  efficiency depending only on which source file it was matched against.
+
+  The Radware model depends on it by construction: scaling the efficiency
+  shifts `ln ε`, and the `min`/`max` blend cannot absorb that shift exactly,
+  so each scale describes a genuinely different family of curve shapes.
+  Measured on reference data, a 100× change in the constant moved the
+  reported curve by up to **12% at the bottom of the range**.
+
+  KFR depends on it through its optimiser instead — its solution is
+  scale-invariant, but how well the fit converges is not. Measured across
+  150 datasets at the three scales the bundled files span, 6% moved the
+  curve by more than 1% and one by **54%**; one case scored chi-squared 37.1
+  at one scale and 5438.2 at another on identical data.
+
+  Both are now fitted at a fixed internal scale. Curves that were already
+  well determined are unchanged — the three reference datasets move by less
+  than 1e-7 — and fits that were landing badly now land well.
+
+- **Uncertainty bands no longer shrink below the Monte Carlo that produced
+  them.** The band was scaled by the Birge ratio in both directions, so a
+  fit that tracks its points *better* than their stated errors require had
+  its band narrowed. On one reference dataset the band was drawn at 89%
+  (KFR) and 64% (Radware) of the spread behind it, claiming a precision
+  nothing had measured. Scaling now only ever widens, which is the usual
+  convention. Expect wider bands wherever the reported Birge ratio is below
+  1; bands above 1 are unchanged. The ratio itself is still reported as
+  measured, because a value below 1 says something real about the input
+  uncertainties.
+
+- **The Radware fit may now be better than it was.** Because it searches
+  curves it previously could not reach, it is held to *never worse* than the
+  reference implementation rather than identical to it. On one reference
+  dataset it reaches chi-squared 1.64 where the reference gets 2.93.
+
+### Changed
+
+- **The Knowledge Database explains the efficiency calibration properly.**
+  The Radware function is written out in full, with what each parameter
+  does; the uncertainties section covers where a point's own error comes
+  from, what the Monte Carlo band is a band *of*, and why Birge scaling only
+  widens. Two figures were added: the two models fitted to the same points,
+  and the 1-sigma band with its width plotted underneath.
+
+### Fixed
+
+- **The efficiency figures in the Help showed a curve the application no
+  longer produced.** They are generated from stored fit parameters, and the
+  Radware ones had gone stale. Inside the measured range the difference was
+  negligible; below the lowest calibration line — exactly the region that
+  figure exists to illustrate — it was total.
+
+### Internal
+
+- The efficiency fit is covered against its reference implementation in more
+  places, including where the two now deliberately differ.
+- Randomised sweeps over the peak fit, the energy calibration and the matrix
+  cuts found no defects; the strongest invariants those sweeps checked are
+  kept as tests.
+- Unused imports removed, and a source-hygiene check added so the drift is
+  visible in the suite rather than invisible.
+- Suite: 1775 tests.
+
 ## [6.0.11] - 2026-09-21
 
 ### Fixed
