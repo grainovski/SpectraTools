@@ -1,5 +1,11 @@
 """Relative detector efficiency: the curve shapes.
 
+NAMING: the four-parameter model is called KRF here and everywhere in this
+application since 6.1.1. CalEnEff, the reference this module is ported from,
+labels the SAME model "KFR" -- identical formula, identical parameters. When
+comparing our output with CalEnEff's, read one as the other. Efficiency files
+saved by SpectraTools 6.1.0 and earlier also say KFR.
+
 A port of CalEnEff's two models (C:\\Users\\RIG\\Documents\\Claude\\efficieny,
 ra226_gui.py). The formulae are not ours and are not improved on here --
 matching the reference exactly is what lets tests/test_efficiency_fit.py
@@ -29,7 +35,7 @@ RADWARE_G = 15.0
 #: eps shifts ln eps by a constant, and while a1 and a4 can absorb that
 #: shift, doing so changes r = f/F and therefore the blend
 #: (1 + r**g)**(-1/g) -- so eps*k is described by a genuinely different set
-#: of curve shapes. KFR has no such problem: it is linear in a and b, so a
+#: of curve shapes. KRF has no such problem: it is linear in a and b, so a
 #: factor passes straight through.
 #:
 #: That made the fitted curve depend on the arbitrary normalisation of the
@@ -37,7 +43,7 @@ RADWARE_G = 15.0
 #: our own files -- most peak at 10000, co56.sou at 100000, na24.sou at
 #: 1000. Measured on the reference data, a 100x change in that constant
 #: moved the reported Radware curve by up to 12% at the bottom of the
-#: range, while leaving KFR identical to 2e-8.
+#: range, while leaving KRF identical to 2e-8.
 #:
 #: The fix uses the identity that fitting eps*k and reporting f/k is
 #: exactly fitting the curve f/k to the original data:
@@ -93,8 +99,8 @@ RW_SCALE_TARGETS = (1e-2, 3e-2, 1e-1, 3e-1, 1.0, 3.0, 1e1, 3e1, 1e2, 3e2,
 RW_SCALE_TIE = 1e-6
 
 
-def f_kfr(E, a, b, c, d):
-    """KFR 4-parameter efficiency: eps(E) = (aE + b/E) * exp(cE + d/E)."""
+def f_krf(E, a, b, c, d):
+    """KRF 4-parameter efficiency: eps(E) = (aE + b/E) * exp(cE + d/E)."""
     E = np.asarray(E, dtype=float)
     return (a * E + b / E) * np.exp(c * E + d / E)
 
@@ -148,8 +154,8 @@ def _need_scipy():
         curve_fit = _cf
 
 
-def kfr_seed(E, eff):
-    """Data-driven KFR start: a and b from the geometric means of E and eps
+def krf_seed(E, eff):
+    """Data-driven KRF start: a and b from the geometric means of E and eps
     so the model reproduces the right scale, c and d small so the
     exponential starts near 1."""
     E = np.asarray(E, dtype=float)
@@ -236,11 +242,11 @@ class EfficiencyFit:
     E: np.ndarray
     eff: np.ndarray
     deff: np.ndarray
-    kfr_params: tuple
-    kfr_chi2: float
-    kfr_ndf: int
-    kfr_rms: float
-    kfr_birge: float
+    krf_params: tuple
+    krf_chi2: float
+    krf_ndf: int
+    krf_rms: float
+    krf_birge: float
     rw_params: tuple = None
     rw_chi2: float = float("nan")
     rw_ndf: int = 0
@@ -248,7 +254,7 @@ class EfficiencyFit:
     rw_birge: float = 1.0
     #: The scale `rw_params` were fitted at: they describe `eff * rw_scale`,
     #: so the Radware curve on the data's own scale is
-    #: `f_radware_5p(E, *rw_params) / rw_scale`. Always 1.0 for KFR, which
+    #: `f_radware_5p(E, *rw_params) / rw_scale`. Always 1.0 for KRF, which
     #: needs no such factor -- see RW_SCALE_TARGETS for why Radware does.
     rw_scale: float = 1.0
 
@@ -262,7 +268,7 @@ def efficiency_points(N, dN, I, dI):
     are on sou_io's 0-10000 scale, the reference's are percentages, and both
     give the same normalised curve.
 
-    That holds for KFR by construction -- it is linear in a and b, so a
+    That holds for KRF by construction -- it is linear in a and b, so a
     common factor passes straight through. It does NOT hold for Radware by
     construction, and until 2026-09-21 this docstring was simply wrong about
     it: the fitted curve moved by up to 12% when the intensity column was
@@ -313,15 +319,15 @@ def birge(chi2, ndf):
     return float(np.sqrt(chi2 / ndf)) if ndf > 0 else 1.0
 
 
-#: KFR bounds from the reference: a, b >= 0 and c <= 0 keep the curve
+#: KRF bounds from the reference: a, b >= 0 and c <= 0 keep the curve
 #: physical; d is free.
-KFR_BOUNDS = ([0.0, 0.0, -np.inf, -np.inf], [np.inf, np.inf, 0.0, np.inf])
+KRF_BOUNDS = ([0.0, 0.0, -np.inf, -np.inf], [np.inf, np.inf, 0.0, np.inf])
 
 
-def _kfr_seeds(E, eff):
+def _krf_seeds(E, eff):
     """The reference's five starting points: the data-driven seed, three
     perturbations of it, and the original fixed fallback."""
-    s = kfr_seed(E, eff)
+    s = krf_seed(E, eff)
     return [
         s,
         [s[0] * 2.0, s[1] * 2.0, -1e-4, 1.0],
@@ -332,11 +338,11 @@ def _kfr_seeds(E, eff):
 
 
 def fit_efficiency(E, N, dN, I, dI):
-    """Best-fit KFR and Radware curves for one set of peaks.
+    """Best-fit KRF and Radware curves for one set of peaks.
 
-    Raises RuntimeError only if KFR fails from every starting point. A
+    Raises RuntimeError only if KRF fails from every starting point. A
     Radware failure is recorded as rw_params=None and reported to the user
-    rather than raised: KFR alone is still a usable calibration.
+    rather than raised: KRF alone is still a usable calibration.
     """
     _need_scipy()
     E = np.asarray(E, dtype=float)
@@ -344,9 +350,9 @@ def fit_efficiency(E, N, dN, I, dI):
 
     # Fitted at a canonical scale and converted back exactly.
     #
-    # KFR's SOLUTION is scale-invariant -- eps = (aE + b/E)*exp(cE + d/E) is
+    # KRF's SOLUTION is scale-invariant -- eps = (aE + b/E)*exp(cE + d/E) is
     # linear in a and b, so scaling eps just scales them -- but its SEARCH is
-    # not. The seeds' a and b track the data's magnitude, _kfr_seeds' last
+    # not. The seeds' a and b track the data's magnitude, _krf_seeds' last
     # fallback is the fixed [1.0, 1e3, -1e-3, 0.0], and trf controls its
     # steps in parameter space, so how well the fit converges depends on how
     # big a and b happen to be. The intensity column sets that, and sou_io
@@ -364,19 +370,19 @@ def fit_efficiency(E, N, dN, I, dI):
     # afterwards. Fitting eps/g and multiplying a and b back by g reproduces
     # the identical curve, so this changes which minimum is FOUND and
     # nothing about what the parameters mean.
-    kfr_geo = canonical_scale(eff)
-    eff_n, deff_n = eff / kfr_geo, deff / kfr_geo
-    kfr = multistart(f_kfr, E, eff_n, deff_n, _kfr_seeds(E, eff_n),
-                     bounds=KFR_BOUNDS, method="trf")
-    if kfr is None:
+    krf_geo = canonical_scale(eff)
+    eff_n, deff_n = eff / krf_geo, deff / krf_geo
+    krf = multistart(f_krf, E, eff_n, deff_n, _krf_seeds(E, eff_n),
+                     bounds=KRF_BOUNDS, method="trf")
+    if krf is None:
         raise RuntimeError(
-            "The KFR efficiency fit did not converge from any starting "
+            "The KRF efficiency fit did not converge from any starting "
             "point. Check that every peak has a positive area and every "
             "source line a positive intensity.")
-    kfr = np.array([kfr[0] * kfr_geo, kfr[1] * kfr_geo, kfr[2], kfr[3]])
-    res_k = eff - f_kfr(E, *kfr)
-    kfr_chi2 = float(np.sum((res_k / deff) ** 2))
-    kfr_ndf = len(E) - 4
+    krf = np.array([krf[0] * krf_geo, krf[1] * krf_geo, krf[2], krf[3]])
+    res_k = eff - f_krf(E, *krf)
+    krf_chi2 = float(np.sum((res_k / deff) ** 2))
+    krf_ndf = len(E) - 4
 
     # Radware: LM without bounds, parset seed first then the polyfit one.
     # Parameters beyond +-500 mean the polynomials have run away rather than
@@ -432,14 +438,14 @@ def fit_efficiency(E, N, dN, I, dI):
                 # converge simply loses, which is the point of having
                 # fifteen of them. All of them failing leaves rw as None,
                 # which fit_efficiency records and reports rather than
-                # raising -- KFR alone is still a usable calibration.
+                # raising -- KRF alone is still a usable calibration.
                 pass
 
     out = EfficiencyFit(
         E=E, eff=eff, deff=deff,
-        kfr_params=tuple(kfr), kfr_chi2=kfr_chi2, kfr_ndf=kfr_ndf,
-        kfr_rms=float(np.sqrt(np.mean(res_k ** 2))),
-        kfr_birge=birge(kfr_chi2, kfr_ndf),
+        krf_params=tuple(krf), krf_chi2=krf_chi2, krf_ndf=krf_ndf,
+        krf_rms=float(np.sqrt(np.mean(res_k ** 2))),
+        krf_birge=birge(krf_chi2, krf_ndf),
     )
     if rw is not None:
         # On the data's own scale, so chi2, RMS and the residuals plotted
@@ -498,9 +504,9 @@ def band_percentiles(band, lo=15.87, hi=84.13):
 
 @dataclass
 class EfficiencyMC:
-    kfr_samples: np.ndarray
+    krf_samples: np.ndarray
     rw_samples: np.ndarray
-    kfr_accepted: int
+    krf_accepted: int
     rw_accepted: int
     rejected: int
 
@@ -543,13 +549,13 @@ class EfficiencyMC:
         # measured.
         #
         # Reachable on real data, not a theoretical worry: demo1 gives
-        # B = 0.891 (KFR) and 0.640 (Radware), so the band was drawn at 89%
+        # B = 0.891 (KRF) and 0.640 (Radware), so the band was drawn at 89%
         # and 64% of the Monte Carlo percentiles. The Radware figure got
         # worse when the scale ladder improved that fit -- a better fit
         # shrank the band further, which is exactly backwards.
         #
         # The reference scales unconditionally (ra226_gui.py:1553-1554 and
-        # 1570-1571), so this is a deliberate parity break. fit.kfr_birge
+        # 1570-1571), so this is a deliberate parity break. fit.krf_birge
         # and fit.rw_birge keep the TRUE ratio: B < 1 is a real diagnostic
         # about the input errors and stays visible in the dialog and the
         # export. It just no longer narrows the band.
@@ -557,10 +563,10 @@ class EfficiencyMC:
         return (centre - factor * (centre - lo),
                 centre + factor * (hi - centre))
 
-    def kfr_band(self, grid, fit, centre=None):
+    def krf_band(self, grid, fit, centre=None):
         if centre is None:
-            centre = f_kfr(np.asarray(grid, dtype=float), *fit.kfr_params)
-        return self._band(grid, centre, self.kfr_samples, f_kfr, fit.kfr_birge)
+            centre = f_krf(np.asarray(grid, dtype=float), *fit.krf_params)
+        return self._band(grid, centre, self.krf_samples, f_krf, fit.krf_birge)
 
     def rw_band(self, grid, fit, centre=None):
         if fit.rw_params is None:
@@ -594,7 +600,7 @@ def run_monte_carlo(fit, N, dN, I, dI, iterations=N_MC_EFFICIENCY,
     # spread of fitted parameters measures.
     deff = fit.deff
     rng = np.random.default_rng(seed)
-    kfr_store, rw_store, rejected = [], [], 0
+    krf_store, rw_store, rejected = [], [], 0
 
     for k in range(iterations):
         if progress is not None and k % 100 == 0:
@@ -612,17 +618,17 @@ def run_monte_carlo(fit, N, dN, I, dI, iterations=N_MC_EFFICIENCY,
             continue
 
         try:
-            pp, _ = curve_fit(f_kfr, E, eff_s, p0=fit.kfr_params, sigma=deff,
+            pp, _ = curve_fit(f_krf, E, eff_s, p0=fit.krf_params, sigma=deff,
                               absolute_sigma=True, maxfev=MC_MAXFEV,
                               method="lm", ftol=MC_TOL, xtol=MC_TOL,
                               gtol=MC_TOL)
             if np.all(np.isfinite(pp)):
-                kfr_store.append(pp)
+                krf_store.append(pp)
         except Exception:
             # Correct by design here, unlike the seed loops: a resampled
             # data set that will not fit is a draw the band cannot use, and
             # dropping it is the intended behaviour. It is not hidden --
-            # the sample simply never reaches kfr_store, so kfr_accepted
+            # the sample simply never reaches krf_store, so krf_accepted
             # falls and the dialog and the export both show the count. A
             # band built on 200 survivors reads differently from one built
             # on 9,900, which is exactly why that number is on screen.
@@ -651,17 +657,17 @@ def run_monte_carlo(fit, N, dN, I, dI, iterations=N_MC_EFFICIENCY,
                     rw_store.append(pp_r)
             except Exception:
                 # As above: a dropped draw is counted through rw_accepted,
-                # not swallowed. Radware rejects more often than KFR because
+                # not swallowed. Radware rejects more often than KRF because
                 # of the |p| < 500 runaway guard, which is why the two counts
                 # are reported separately rather than as one total.
                 pass
 
     return EfficiencyMC(
-        kfr_samples=(np.asarray(kfr_store, dtype=float) if kfr_store
+        krf_samples=(np.asarray(krf_store, dtype=float) if krf_store
                      else np.empty((0, 4))),
         rw_samples=(np.asarray(rw_store, dtype=float) if rw_store
                     else np.empty((0, 5))),
-        kfr_accepted=len(kfr_store), rw_accepted=len(rw_store),
+        krf_accepted=len(krf_store), rw_accepted=len(rw_store),
         rejected=rejected,
     )
 
@@ -675,7 +681,7 @@ class EfficiencyResult:
     directly comparable and may legitimately exceed 1 where it runs higher.
     """
 
-    def __init__(self, fit, mc, model="kfr", calibration=None, source=None):
+    def __init__(self, fit, mc, model="krf", calibration=None, source=None):
         self.fit = fit
         self.mc = mc
         self.calibration = calibration
@@ -693,8 +699,8 @@ class EfficiencyResult:
 
     @model.setter
     def model(self, value):
-        if value not in ("kfr", "rw"):
-            raise ValueError("model must be 'kfr' or 'rw', not %r" % (value,))
+        if value not in ("krf", "rw"):
+            raise ValueError("model must be 'krf' or 'rw', not %r" % (value,))
         if value == "rw" and self.fit.rw_params is None:
             raise ValueError("the Radware fit did not converge for this data")
         self._model = value
@@ -707,7 +713,7 @@ class EfficiencyResult:
     def _samples(self, model):
         if self.mc is None:
             return None
-        return self.mc.kfr_samples if model == "kfr" else self.mc.rw_samples
+        return self.mc.krf_samples if model == "krf" else self.mc.rw_samples
 
     def best_fit_raw(self, grid, model):
         """The best-fit curve, un-normalised.
@@ -717,8 +723,8 @@ class EfficiencyResult:
         It is NOT what gets applied or saved -- see curve().
         """
         grid = np.asarray(grid, dtype=float)
-        if model == "kfr":
-            return f_kfr(grid, *self.fit.kfr_params)
+        if model == "krf":
+            return f_krf(grid, *self.fit.krf_params)
         return f_radware_5p(grid, *self.fit.rw_params) / self.fit.rw_scale
 
     def _mc_mean_raw(self, grid, model):
@@ -743,8 +749,8 @@ class EfficiencyResult:
         samples = self._samples(model)
         if samples is None or len(samples) == 0:
             return np.full(grid.shape, float("nan"))
-        func = f_kfr if model == "kfr" else f_radware_5p
-        scale = 1.0 if model == "kfr" else self.fit.rw_scale
+        func = f_krf if model == "krf" else f_radware_5p
+        scale = 1.0 if model == "krf" else self.fit.rw_scale
         out = np.empty(grid.shape, dtype=float)
         step = max(1, 2000000 // max(len(samples), 1))
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
@@ -776,7 +782,7 @@ class EfficiencyResult:
 
         The grid runs 10% past the data on each side, as the reference does.
         The curve can crest between two measured points, or below the lowest
-        one -- for KFR the peak falls outside the measured points on two of
+        one -- for KRF the peak falls outside the measured points on two of
         the three reference datasets -- so normalising over the data range
         alone would leave the curve above 1 just outside it.
 
@@ -832,7 +838,7 @@ class EfficiencyResult:
             return nan, nan
         if centre is None:
             centre = self._mc_mean_raw(grid, which)
-        lo, hi = (self.mc.kfr_band(grid, self.fit, centre) if which == "kfr"
+        lo, hi = (self.mc.krf_band(grid, self.fit, centre) if which == "krf"
                   else self.mc.rw_band(grid, self.fit, centre))
         return lo * self.normalisation, hi * self.normalisation
 
@@ -859,8 +865,8 @@ class EfficiencyResult:
         samples = self._samples(which)
         if samples is None or len(samples) == 0:
             return float("nan"), float("nan"), best
-        func = f_kfr if which == "kfr" else f_radware_5p
-        scale = 1.0 if which == "kfr" else self.fit.rw_scale
+        func = f_krf if which == "krf" else f_radware_5p
+        scale = 1.0 if which == "krf" else self.fit.rw_scale
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
             values = func(float(energy),
                           *[samples[:, i]

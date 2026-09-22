@@ -95,17 +95,17 @@ class EfficiencyWorker(QThread):
             iterations=N_MC_EFFICIENCY if iterations is None else iterations,
             progress=self._progress)
 
-        result = EfficiencyResult(fit=fit, mc=mc, model="kfr")
+        result = EfficiencyResult(fit=fit, mc=mc, model="krf")
         # Warm the OTHER model's normalisation here, on the worker thread.
         # It means evaluating the Monte Carlo mean on a 2,000-point grid
         # across every stored sample -- about 1.2 s. Unnoticeable inside a
         # Monte Carlo the user is already watching a progress bar for, and a
         # visible stall if it happens when they click the radio button
-        # instead. Setting the model twice leaves it back on KFR with both
+        # instead. Setting the model twice leaves it back on KRF with both
         # answers cached.
         if fit.rw_params is not None:
             result.model = "rw"
-            result.model = "kfr"
+            result.model = "krf"
         return result
 
     def run(self):

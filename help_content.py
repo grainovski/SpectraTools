@@ -660,7 +660,7 @@ it does not have that, the button is disabled and its tooltip says which
 condition failed.</p>
 <p>The fit runs as a Monte Carlo and takes about a minute, on a worker
 thread with a progress dialog you can cancel. It fits two independent
-models at once -- <b>KFR</b> and <b>Radware</b> -- and the window that
+models at once -- <b>KRF</b> and <b>Radware</b> -- and the window that
 opens shows both, each with its 1-sigma band, over the measured points,
 with a residual strip underneath.</p>
 <p>Type an energy and press <b>Examine</b> to read both models at that
@@ -681,7 +681,7 @@ not the one you were looking at when the calibration finished.
 <b>Apply</b> divides that spectrum bin by bin by the selected curve and
 adds the result as a <i>new</i> spectrum beside the original, which is left
 untouched. The new spectrum is named after the original with
-<i>[eff-corrected KFR]</i> or <i>[eff-corrected RW]</i> appended, so which
+<i>[eff-corrected KRF]</i> or <i>[eff-corrected RW]</i> appended, so which
 curve produced it stays visible.</p>
 
 <p><b>Apply to all</b> corrects every loaded spectrum at once. It skips two
@@ -1426,7 +1426,7 @@ corrected spectrum is arbitrary.</p>
 
 <h3>Two models</h3>
 <p>Both are fitted, always, and you choose which to apply.</p>
-<p><b>KFR</b>, four parameters:
+<p><b>KRF</b>, four parameters:
 <i>&epsilon;(E) = (aE + b/E) &middot; exp(cE + d/E)</i>.</p>
 <p>Its terms do recognisable physical work. <i>b/E</i> and <i>d/E</i>
 dominate at low energy, where the photoelectric cross-section rises
@@ -1463,7 +1463,7 @@ cannot get from one. Where they agree, the curve is well determined by
 the data; where they separate, it is not, and the gap between them says
 how much.</p>
 
-<img src="{efficiency_models_src}" alt="KFR and Radware fitted to the same 23 Ra-226 points,
+<img src="{efficiency_models_src}" alt="KRF and Radware fitted to the same 23 Ra-226 points,
 with the percentage difference between them underneath">
 
 <p>Both curves above are fits to the same 23 Ra-226 lines, 186 to 2448 keV
@@ -1584,10 +1584,10 @@ to say, and a corrected spectrum should be read as starting at 50 keV.</p>
 complete record of the calibration rather than of one choice within
 it:</p>
 <p>Per peak, one row per calibration peak:
-<b>E &nbsp; dE &nbsp; eff_kfr &nbsp; deff_kfr &nbsp; eff_rw &nbsp;
+<b>E &nbsp; dE &nbsp; eff_krf &nbsp; deff_krf &nbsp; eff_rw &nbsp;
 deff_rw</b></p>
 <p>Per bin, one row per channel:
-<b>E &nbsp; eff_kfr &nbsp; deff_kfr &nbsp; eff_rw &nbsp; deff_rw</b></p>
+<b>E &nbsp; eff_krf &nbsp; deff_krf &nbsp; eff_rw &nbsp; deff_rw</b></p>
 <p>Neither stores a channel column. The energy calibration is available
 wherever these files are read, so a channel column would be a copy of
 something already derivable -- and one that goes stale the moment the
@@ -1613,7 +1613,7 @@ efficiency is finite and greater than zero</b>, and is set to zero
 otherwise. The count of zeroed bins is reported. Writing the rule that
 way rather than as "efficiency at or below zero" matters, because the
 two models fail differently at, say, a negative energy from a
-calibration offset -- KFR stays finite and goes negative, Radware
+calibration offset -- KRF stays finite and goes negative, Radware
 returns a NaN -- and a NaN left in a spectrum spreads into everything
 that touches it afterwards.</p>
 <p>The spectrum's own variance is divided by the efficiency squared, so

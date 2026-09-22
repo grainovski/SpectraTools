@@ -125,7 +125,7 @@ def opened(qapp):
     fit = fit_efficiency(E, N, dN, I, dI)
     result = EfficiencyResult(
         fit=fit, mc=run_monte_carlo(fit, N, dN, I, dI, iterations=200),
-        model="kfr")
+        model="krf")
     dialog = EfficiencyDialog(None, result, np.full(len(E), 0.01))
     yield dialog
     dialog.close()
@@ -142,7 +142,7 @@ def test_it_draws_a_residual_for_each_model(opened):
 
 def test_examine_reports_both_models_at_an_energy(opened):
     text = opened.examine(250.0)
-    assert "KFR" in text and "Radware" in text
+    assert "KRF" in text and "Radware" in text
     assert "250" in text
 
 
@@ -150,7 +150,7 @@ def test_examine_shows_the_mc_mean_and_the_best_fit_as_two_numbers(opened):
     """They are different quantities and CalEnEff shows both. If the window
     ever printed one of them twice, the disagreement the second exists to
     expose would be invisible."""
-    mean, sigma, best = opened.result.predict(250.0, "kfr")
+    mean, sigma, best = opened.result.predict(250.0, "krf")
     text = opened.examine(250.0)
     assert "%.6g" % mean in text
     assert "%.6g" % best in text
@@ -169,12 +169,12 @@ def test_the_summary_reports_the_mc_counts(opened):
     thousands, so the number is on screen rather than implied."""
     text = opened.summary_text()
     assert "accepted" in text.lower()
-    assert str(opened.result.mc.kfr_accepted) in text
+    assert str(opened.result.mc.krf_accepted) in text
 
 
 def test_it_survives_radware_not_converging(qapp):
     """rw_params is None whenever the Radware fit fails. The window must
-    still open on the KFR curve rather than raising -- a failed second model
+    still open on the KRF curve rather than raising -- a failed second model
     is a normal outcome, not a broken calibration."""
     import os
 
@@ -190,7 +190,7 @@ def test_it_survives_radware_not_converging(qapp):
     fit.rw_params = None                      # as a failed Radware fit leaves it
     result = EfficiencyResult(
         fit=fit, mc=run_monte_carlo(fit, N, dN, I, dI, iterations=100),
-        model="kfr")
+        model="krf")
 
     dialog = EfficiencyDialog(None, result, np.full(len(E), 0.01))
     assert "did not converge" in dialog.summary_text().lower()
@@ -266,8 +266,8 @@ def test_the_worker_computes_a_usable_result(qapp):
 
     worker = EfficiencyWorker(None, _rows_for(_points(), _lines()))
     result = worker.compute(iterations=50)
-    assert result.fit.kfr_params is not None
-    assert result.mc.kfr_accepted > 0
+    assert result.fit.krf_params is not None
+    assert result.mc.krf_accepted > 0
     worker.deleteLater()
 
 
@@ -281,9 +281,9 @@ def test_the_worker_warms_both_normalisations(qapp):
 
     worker = EfficiencyWorker(None, _rows_for(_points(), _lines()))
     result = worker.compute(iterations=50)
-    assert set(result._normalisation_cache) == {"kfr", "rw"}, (
+    assert set(result._normalisation_cache) == {"krf", "rw"}, (
         "only %s was warmed" % sorted(result._normalisation_cache))
-    assert result.model == "kfr", "the worker left the wrong model selected"
+    assert result.model == "krf", "the worker left the wrong model selected"
     worker.deleteLater()
 
 

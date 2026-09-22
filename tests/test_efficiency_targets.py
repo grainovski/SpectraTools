@@ -26,7 +26,7 @@ def result():
     fit = fit_efficiency(E, N, dN, I, dI)
     return EfficiencyResult(
         fit=fit, mc=run_monte_carlo(fit, N, dN, I, dI, iterations=200),
-        model="kfr", calibration=Calibration("linear", 50.0, 0.65))
+        model="krf", calibration=Calibration("linear", 50.0, 0.65))
 
 
 def _window(qapp, names=("a.txt", "b.txt", "c.txt")):

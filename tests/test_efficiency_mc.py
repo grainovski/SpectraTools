@@ -26,10 +26,10 @@ def mc():
 
 def test_it_stores_one_parameter_set_per_accepted_sample(mc):
     _fit, out = mc
-    assert out.kfr_samples.ndim == 2 and out.kfr_samples.shape[1] == 4
+    assert out.krf_samples.ndim == 2 and out.krf_samples.shape[1] == 4
     assert out.rw_samples.ndim == 2 and out.rw_samples.shape[1] == 5
-    assert out.kfr_accepted == len(out.kfr_samples)
-    assert out.kfr_accepted > 0
+    assert out.krf_accepted == len(out.krf_samples)
+    assert out.krf_accepted > 0
 
 
 def test_rejected_samples_are_counted_not_hidden(mc):
@@ -37,14 +37,14 @@ def test_rejected_samples_are_counted_not_hidden(mc):
     9,900. Reporting the number is what lets the user tell them apart."""
     _fit, out = mc
     assert out.rejected >= 0
-    assert out.kfr_accepted + out.rejected <= 400 + 1
+    assert out.krf_accepted + out.rejected <= 400 + 1
 
 
 def test_the_same_seed_reproduces(mc):
     fit, first = mc
     N, dN, E, I, dI = _load("demo1.txt")
     again = run_monte_carlo(fit, N, dN, I, dI, iterations=400)
-    assert again.kfr_samples == pytest.approx(first.kfr_samples)
+    assert again.krf_samples == pytest.approx(first.krf_samples)
 
 
 def test_a_different_seed_does_not(mc):
@@ -53,18 +53,18 @@ def test_a_different_seed_does_not(mc):
     fit, first = mc
     N, dN, E, I, dI = _load("demo1.txt")
     other = run_monte_carlo(fit, N, dN, I, dI, iterations=400, seed=7)
-    assert other.kfr_samples != pytest.approx(first.kfr_samples)
+    assert other.krf_samples != pytest.approx(first.krf_samples)
 
 
 def test_the_band_brackets_its_centre(mc):
     """The 1-sigma band is built around a centre curve, so it must contain
     that curve at every energy it is drawn at."""
-    from efficiency import f_kfr
+    from efficiency import f_krf
 
     fit, out = mc
     grid = np.linspace(fit.E.min(), fit.E.max(), 50)
-    lo, hi = out.kfr_band(grid, fit)
-    centre = f_kfr(grid, *fit.kfr_params)
+    lo, hi = out.krf_band(grid, fit)
+    centre = f_krf(grid, *fit.krf_params)
     assert np.all(lo <= centre + 1e-12)
     assert np.all(hi >= centre - 1e-12)
 
@@ -82,18 +82,18 @@ def test_the_band_can_be_centred_somewhere_else():
     content there. demo2 scores B = 1.78, where the scaling is live and the
     centre really does anchor it.
     """
-    from efficiency import f_kfr
+    from efficiency import f_krf
 
     N, dN, E, I, dI = _load("demo2.txt")
     fit = fit_efficiency(E, N, dN, I, dI)
-    assert fit.kfr_birge > 1.0, (
+    assert fit.krf_birge > 1.0, (
         "demo2 no longer inflates (B = %.4f), so the centre cancels out of "
-        "the band and this test is vacuous" % fit.kfr_birge)
+        "the band and this test is vacuous" % fit.krf_birge)
     out = run_monte_carlo(fit, N, dN, I, dI, iterations=400)
 
     grid = np.linspace(fit.E.min(), fit.E.max(), 20)
-    default = out.kfr_band(grid, fit)
-    shifted = out.kfr_band(grid, fit, f_kfr(grid, *fit.kfr_params) * 1.5)
+    default = out.krf_band(grid, fit)
+    shifted = out.krf_band(grid, fit, f_krf(grid, *fit.krf_params) * 1.5)
     assert shifted[0] != pytest.approx(default[0])
 
 
@@ -114,7 +114,7 @@ def test_cancelling_stops_the_run():
     fit = fit_efficiency(E, N, dN, I, dI)
     out = run_monte_carlo(fit, N, dN, I, dI, iterations=5000,
                           progress=lambda done, total: done < 100)
-    assert out.kfr_accepted < 500, "cancel was ignored"
+    assert out.krf_accepted < 500, "cancel was ignored"
 
 
 def test_the_default_iteration_count_matches_the_reference():
@@ -157,7 +157,7 @@ def test_the_mc_weights_never_change_between_samples():
     assert len(seen) > 25, "expected roughly two refits per iteration"
 
     # Two weight vectors are legitimate, and both are FIXED for the whole
-    # run: deff for the KFR arm, and deff*rw_scale for the Radware arm,
+    # run: deff for the KRF arm, and deff*rw_scale for the Radware arm,
     # which fits a scaled copy of eps (see efficiency.RW_SCALE_TARGETS).
     # Scaling data and sigma by the same constant leaves chi-squared
     # unchanged, so that arm weights the points identically.
@@ -213,7 +213,7 @@ def test_an_all_nan_energy_is_quiet_but_still_nan():
     fit = fit_efficiency(E, N, dN, I, dI)
     r = EfficiencyResult(fit=fit,
                          mc=run_monte_carlo(fit, N, dN, I, dI, iterations=100),
-                         model="kfr")
+                         model="krf")
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -256,8 +256,8 @@ def test_the_band_is_withheld_where_too_few_samples_survive():
     # Without this the test could pass having exercised nothing.
     assert survivors.tolist() == [n, MIN_MC_SAMPLES, MIN_MC_SAMPLES - 1]
 
-    mc = EfficiencyMC(kfr_samples=None, rw_samples=samples,
-                      kfr_accepted=0, rw_accepted=n, rejected=0)
+    mc = EfficiencyMC(krf_samples=None, rw_samples=samples,
+                      krf_accepted=0, rw_accepted=n, rejected=0)
     lo, hi = mc._band(grid, np.ones(3), samples, func, 1.0)
 
     assert np.isfinite(lo[0]) and np.isfinite(hi[0]), "plenty of samples"
@@ -280,15 +280,15 @@ def _band_vs_percentiles(name, model):
                          seed=efficiency.EFFICIENCY_SEED)
     grid = np.linspace(E.min(), E.max(), 80)
 
-    if model == "kfr":
-        func, samples, scale = efficiency.f_kfr, mc.kfr_samples, 1.0
-        centre = func(grid, *fit.kfr_params)
+    if model == "krf":
+        func, samples, scale = efficiency.f_krf, mc.krf_samples, 1.0
+        centre = func(grid, *fit.krf_params)
     else:
         func, samples, scale = (efficiency.f_radware_5p, mc.rw_samples,
                                 fit.rw_scale)
         centre = func(grid, *fit.rw_params) / scale
 
-    reported = (mc.kfr_band(grid, fit) if model == "kfr"
+    reported = (mc.krf_band(grid, fit) if model == "krf"
                 else mc.rw_band(grid, fit))
     raw = mc._band(grid, centre, samples, func, 1.0, scale=scale)
 
@@ -296,7 +296,7 @@ def _band_vs_percentiles(name, model):
     return width(reported) / width(raw), getattr(fit, model + "_birge")
 
 
-@pytest.mark.parametrize("model", ("kfr", "rw"))
+@pytest.mark.parametrize("model", ("krf", "rw"))
 @pytest.mark.parametrize("name", ("226Ra_En_Area.txt", "demo1.txt",
                                   "demo2.txt"))
 def test_the_birge_scaling_never_narrows_the_band(name, model):
@@ -309,7 +309,7 @@ def test_the_birge_scaling_never_narrows_the_band(name, model):
     the PDG convention and a deliberate break from the reference, which
     scales unconditionally.
 
-    demo1 is the case that makes it real: B = 0.891 (KFR) and 0.640
+    demo1 is the case that makes it real: B = 0.891 (KRF) and 0.640
     (Radware), the second of which got worse when the scale ladder improved
     that fit.
     """
@@ -330,10 +330,10 @@ def test_a_birge_below_one_really_does_occur():
     would be pinning nothing."""
     N, dN, E, I, dI = _load("demo1.txt")
     fit = fit_efficiency(E, N, dN, I, dI)
-    assert fit.kfr_birge < 1.0 and fit.rw_birge < 1.0, (
-        "demo1 no longer produces a Birge ratio below 1 (KFR %.4f, Radware "
+    assert fit.krf_birge < 1.0 and fit.rw_birge < 1.0, (
+        "demo1 no longer produces a Birge ratio below 1 (KRF %.4f, Radware "
         "%.4f), so the clamp is untested. Find a fixture that does."
-        % (fit.kfr_birge, fit.rw_birge))
+        % (fit.krf_birge, fit.rw_birge))
 
 
 def test_the_reported_birge_is_still_the_true_ratio():
@@ -342,7 +342,7 @@ def test_the_reported_birge_is_still_the_true_ratio():
     keep showing it rather than a floored 1.0."""
     N, dN, E, I, dI = _load("demo1.txt")
     fit = fit_efficiency(E, N, dN, I, dI)
-    assert fit.kfr_birge == pytest.approx(
-        np.sqrt(fit.kfr_chi2 / fit.kfr_ndf))
+    assert fit.krf_birge == pytest.approx(
+        np.sqrt(fit.krf_chi2 / fit.krf_ndf))
     assert fit.rw_birge == pytest.approx(np.sqrt(fit.rw_chi2 / fit.rw_ndf))
     assert fit.rw_birge < 1.0, "expected demo1 Radware to sit below 1"

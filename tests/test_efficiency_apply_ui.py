@@ -21,7 +21,7 @@ def result():
     fit = fit_efficiency(E, N, dN, I, dI)
     return EfficiencyResult(
         fit=fit, mc=run_monte_carlo(fit, N, dN, I, dI, iterations=200),
-        model="kfr", calibration=Calibration("linear", 50.0, 0.65))
+        model="krf", calibration=Calibration("linear", 50.0, 0.65))
 
 
 def _window(qapp, calibrated=True, channels=512):
@@ -54,12 +54,12 @@ def test_the_new_spectrum_is_named_for_the_model_used(qapp, result):
     distinguishable afterwards, or the plot is ambiguous."""
     window, original = _window(qapp)
     window.apply_efficiency(original, result)
-    assert "KFR" in window.spectra[-1].path
+    assert "KRF" in window.spectra[-1].path
 
     result.model = "rw"
     window.apply_efficiency(original, result)
     assert "RW" in window.spectra[-1].path
-    result.model = "kfr"
+    result.model = "krf"
     window.close()
 
 

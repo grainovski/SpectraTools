@@ -19,7 +19,7 @@ What is compared, and why in this order:
 
 WHERE WE DELIBERATELY NO LONGER MATCH THE REFERENCE
 
-KFR still has to reproduce CalEnEff outright, and does. Radware is held to
+KRF still has to reproduce CalEnEff outright, and does. Radware is held to
 "never worse", because efficiency.RW_SCALE_TARGETS searches curves the
 reference cannot reach.
 
@@ -28,17 +28,17 @@ on eps, so the fitted curve depended on the arbitrary normalisation of the
 intensity column -- a constant our own .sou files do not agree on (most peak
 at 10000, co56.sou at 100000, na24.sou at 1000). Measured before the fix, a
 100x change in it moved the reported curve by up to 12% at the bottom of the
-range while leaving KFR identical to 2e-8 on these three files. The reference
+range while leaving KRF identical to 2e-8 on these three files. The reference
 has the same property and does nothing about it, so removing it necessarily
 means parting company with the reference on any file whose scale differs from
 the one it happened to be handed.
 
-KFR turned out to have the same disease by a different route -- its solution
+KRF turned out to have the same disease by a different route -- its solution
 is scale-invariant but its SEARCH was not, and a sweep found data where the
 same points scored 21.707 at one intensity scale and 136.412 at another. It
 is fitted at a canonical scale too now, but that conversion is EXACT, so it
 still reproduces the reference here. See
-test_the_kfr_fit_does_not_depend_on_the_intensity_scale.
+test_the_krf_fit_does_not_depend_on_the_intensity_scale.
 
 On 226Ra and demo2 the ladder lands on the reference's own answer and the
 full strict comparison still applies. On demo1 it finds a genuinely better
@@ -89,27 +89,27 @@ FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "caleneff")
 GOLDEN = {
     "226Ra_En_Area.txt": {
         "n": 23,
-        "kfr": [6.274371440450e-01, 7.844365398647e+05,
+        "krf": [6.274371440450e-01, 7.844365398647e+05,
                 -7.258867102388e-04, -1.467068952279e+02],
-        "kfr_chi2": 117.5085777268, "kfr_ndf": 19,
+        "krf_chi2": 117.5085777268, "krf_ndf": 19,
         "rw": [-3.765575465541e+01, 7.438801254775e+01, 6.386965185696e+00,
                -7.193596739758e-01, -2.424310667484e-02],
         "rw_chi2": 97.8603554131, "rw_ndf": 18,
     },
     "demo1.txt": {
         "n": 9,
-        "kfr": [1.138577308963e+03, 2.962038674033e+07,
+        "krf": [1.138577308963e+03, 2.962038674033e+07,
                 -5.801324494336e-03, -1.015250508519e+02],
-        "kfr_chi2": 3.9694346123, "kfr_ndf": 5,
+        "krf_chi2": 3.9694346123, "krf_ndf": 5,
         "rw": [12.192811084709, -0.257477640308, 8.924249211442,
                -2.565507279293, -0.599464105736],
         "rw_chi2": 2.9281520555, "rw_ndf": 4,
     },
     "demo2.txt": {
         "n": 19,
-        "kfr": [8.896741862449e+00, 7.089236616431e+06,
+        "krf": [8.896741862449e+00, 7.089236616431e+06,
                 -1.081881901237e-03, -1.160635814659e+02],
-        "kfr_chi2": 47.6128442300, "kfr_ndf": 15,
+        "krf_chi2": 47.6128442300, "krf_ndf": 15,
         "rw": [3.012598062741e+00, 3.897772490500e+01, 8.473633125424e+00,
                -8.688228294051e-01, -3.357195834004e-02],
         "rw_chi2": 42.1858733891, "rw_ndf": 14,
@@ -165,7 +165,7 @@ def _chi2(model, got, params, scale=1.0):
 
 @pytest.mark.parametrize("name", sorted(GOLDEN))
 def test_our_fit_reproduces_caleneff(name):
-    from efficiency import f_kfr, f_radware_5p
+    from efficiency import f_krf, f_radware_5p
 
     want = GOLDEN[name]
     N, dN, E, I, dI = _load(name)
@@ -173,24 +173,24 @@ def test_our_fit_reproduces_caleneff(name):
 
     got = fit_efficiency(E, N, dN, I, dI)
 
-    # KFR still has to reproduce the reference outright. It is fitted at a
+    # KRF still has to reproduce the reference outright. It is fitted at a
     # canonical scale now too, but that conversion is exact (the model is
     # linear in a and b), so unlike the Radware ladder it changes which
     # minimum is found and never what the answer means.
-    assert f_kfr(E, *got.kfr_params) == pytest.approx(
-        f_kfr(E, *want["kfr"]), rel=1e-6), (
-        "%s: our KFR curve differs from CalEnEff's at the data energies"
+    assert f_krf(E, *got.krf_params) == pytest.approx(
+        f_krf(E, *want["krf"]), rel=1e-6), (
+        "%s: our KRF curve differs from CalEnEff's at the data energies"
         % name)
-    assert got.kfr_chi2 == pytest.approx(want["kfr_chi2"], rel=1e-6)
-    assert got.kfr_ndf == want["kfr_ndf"]
+    assert got.krf_chi2 == pytest.approx(want["krf_chi2"], rel=1e-6)
+    assert got.krf_ndf == want["krf_ndf"]
     assert got.rw_ndf == want["rw_ndf"]
-    ours_kfr = _chi2(f_kfr, got, got.kfr_params)
-    theirs_kfr = _chi2(f_kfr, got, want["kfr"])
-    assert abs(ours_kfr - theirs_kfr) < _EQUIVALENT_CHI2, (
-        "%s: our KFR parameters and CalEnEff's are not the same fit -- "
+    ours_krf = _chi2(f_krf, got, got.krf_params)
+    theirs_krf = _chi2(f_krf, got, want["krf"])
+    assert abs(ours_krf - theirs_krf) < _EQUIVALENT_CHI2, (
+        "%s: our KRF parameters and CalEnEff's are not the same fit -- "
         "they score %.9f and %.9f on the same data, a gap of %.3e against "
         "a one-sigma contour of 1.0"
-        % (name, ours_kfr, theirs_kfr, abs(ours_kfr - theirs_kfr)))
+        % (name, ours_krf, theirs_krf, abs(ours_krf - theirs_krf)))
 
     # Radware: never worse than the reference. It is allowed to be BETTER,
     # because the scale ladder searches curves the reference cannot reach,
@@ -229,13 +229,13 @@ def test_the_oracle_can_fail():
     """Control. Without this the comparison above would pass just as happily
     against a curve that is wrong everywhere, if approx were mis-set or the
     golden values were accidentally derived from our own output."""
-    from efficiency import f_kfr
+    from efficiency import f_krf
 
     want = GOLDEN["226Ra_En_Area.txt"]
     _, _, E, _, _ = _load("226Ra_En_Area.txt")
-    wrong = list(want["kfr"])
+    wrong = list(want["krf"])
     wrong[0] *= 1.10                      # a 10% error in one parameter
-    assert f_kfr(E, *wrong) != pytest.approx(f_kfr(E, *want["kfr"]), rel=1e-6)
+    assert f_krf(E, *wrong) != pytest.approx(f_krf(E, *want["krf"]), rel=1e-6)
 
 
 def test_the_equivalence_check_is_blind_only_to_the_free_direction():
@@ -315,7 +315,7 @@ def _demo_result(name="demo1.txt"):
     N, dN, E, I, dI = _load(name)
     fit = fit_efficiency(E, N, dN, I, dI)
     mc = run_monte_carlo(fit, N, dN, I, dI, iterations=200)
-    return EfficiencyResult(fit=fit, mc=mc, model="kfr")
+    return EfficiencyResult(fit=fit, mc=mc, model="krf")
 
 
 def _norm_grid(r):
@@ -323,7 +323,7 @@ def _norm_grid(r):
 
     It deliberately runs 10% past the data on each side, as the reference
     does. Testing the peak over the narrower data range instead would be
-    wrong: for KFR the maximum falls OUTSIDE the measured points on two of
+    wrong: for KRF the maximum falls OUTSIDE the measured points on two of
     the three reference datasets (109.6 keV against data from 122 keV on
     demo2; 167.6 keV against data from 186 keV on Ra-226), so such a test
     would pass on demo1 by luck and fail on the others.
@@ -376,7 +376,7 @@ def test_the_normalised_curve_ignores_the_intensity_scale():
     completely unchanged. Without this, the port would appear to work on the
     reference's data and quietly produce a differently-scaled curve on ours.
 
-    KFR ONLY, and that is the gap this test used to have. The invariant
+    KRF ONLY, and that is the gap this test used to have. The invariant
     above is the right one, but it was only ever exercised against the model
     that satisfies it by construction, so Radware breaking it went unnoticed
     until the 2026-09-21 audit -- by up to 12% of the reported curve. Radware
@@ -392,9 +392,9 @@ def test_the_normalised_curve_ignores_the_intensity_scale():
     grid = np.linspace(E.min(), E.max(), 200)
 
     a = EfficiencyResult(fit=fit_efficiency(E, N, dN, I, dI), mc=None,
-                         model="kfr")
+                         model="krf")
     b = EfficiencyResult(fit=fit_efficiency(E, N, dN, I * 137.0, dI * 137.0),
-                         mc=None, model="kfr")
+                         mc=None, model="krf")
     assert a.curve(grid) == pytest.approx(b.curve(grid), rel=1e-6)
 
 
@@ -405,7 +405,7 @@ def test_the_curve_is_the_mc_mean_not_the_best_fit():
     corrected spectrum."""
     r = _demo_result()
     grid = np.linspace(r.fit.E.min(), r.fit.E.max(), 40)
-    expected = r._mc_mean_raw(grid, "kfr") * r.normalisation
+    expected = r._mc_mean_raw(grid, "krf") * r.normalisation
     assert r.curve(grid) == pytest.approx(expected, rel=1e-12, nan_ok=True)
 
 
@@ -413,11 +413,11 @@ def test_the_best_fit_would_fail_that():
     """Control, and the reason the test above is not vacuous: the two curves
     really are different. If this ever passes, the MC has collapsed onto the
     best fit and neither test is testing anything."""
-    from efficiency import f_kfr
+    from efficiency import f_krf
 
     r = _demo_result()
     grid = np.linspace(r.fit.E.min(), r.fit.E.max(), 40)
-    best = f_kfr(grid, *r.fit.kfr_params) * r.normalisation
+    best = f_krf(grid, *r.fit.krf_params) * r.normalisation
     assert r.curve(grid) != pytest.approx(best, rel=1e-12)
 
 
@@ -429,7 +429,7 @@ def test_the_applied_curve_is_the_one_that_peaks_at_one():
     r = _demo_result()
     grid = _norm_grid(r)
     assert np.nanmax(r.curve(grid)) == pytest.approx(1.0, rel=1e-6)
-    best = r.best_fit_raw(grid, "kfr") * r.normalisation
+    best = r.best_fit_raw(grid, "krf") * r.normalisation
     assert np.nanmax(best) != pytest.approx(1.0, rel=1e-9)
 
 
@@ -445,7 +445,7 @@ def test_predict_reports_the_mc_mean_and_the_best_fit_separately():
     assert np.isfinite(mean) and np.isfinite(sigma) and np.isfinite(best)
     assert mean == pytest.approx(float(r.curve([energy])[0]), rel=1e-12)
     assert best == pytest.approx(
-        float(r.best_fit_raw([energy], "kfr")[0]) * r.normalisation, rel=1e-12)
+        float(r.best_fit_raw([energy], "krf")[0]) * r.normalisation, rel=1e-12)
     assert mean != pytest.approx(best, rel=1e-12), (
         "predict returned the same number for the MC mean and the best fit")
     assert sigma > 0.0
@@ -457,7 +457,7 @@ def test_predict_still_gives_the_best_fit_without_a_monte_carlo():
 
     N, dN, E, I, dI = _load("demo1.txt")
     r = EfficiencyResult(fit=fit_efficiency(E, N, dN, I, dI), mc=None,
-                         model="kfr")
+                         model="krf")
     mean, sigma, best = r.predict(float(np.median(E)))
     assert np.isnan(mean) and np.isnan(sigma)
     assert np.isfinite(best) and best > 0.0
@@ -466,12 +466,12 @@ def test_predict_still_gives_the_best_fit_without_a_monte_carlo():
 def test_an_unnormalised_curve_would_fail_that():
     """Control: raw eps does depend on the intensity scale, by exactly the
     factor applied."""
-    from efficiency import f_kfr, fit_efficiency
+    from efficiency import f_krf, fit_efficiency
 
     N, dN, E, I, dI = _load("demo1.txt")
-    raw_a = f_kfr(E, *fit_efficiency(E, N, dN, I, dI).kfr_params)
-    raw_b = f_kfr(E, *fit_efficiency(E, N, dN, I * 137.0,
-                                     dI * 137.0).kfr_params)
+    raw_a = f_krf(E, *fit_efficiency(E, N, dN, I, dI).krf_params)
+    raw_b = f_krf(E, *fit_efficiency(E, N, dN, I * 137.0,
+                                     dI * 137.0).krf_params)
     assert raw_a != pytest.approx(raw_b, rel=1e-6)
 
 
@@ -538,7 +538,7 @@ def test_that_scale_check_can_fail():
         "the data's own scale spread chi2 by only %.3e" % spread)
 
 
-#: Eight points that expose KFR's conditioning problem. Found by sweeping
+#: Eight points that expose KRF's conditioning problem. Found by sweeping
 #: 150 synthetic data sets on 2026-09-22; the three CalEnEff fixtures are all
 #: well conditioned and show none of it, which is why it stayed invisible.
 #: Kept as literals rather than regenerated so the case cannot drift away
@@ -563,8 +563,8 @@ def _ill_conditioned():
             np.array(d["I"]), np.array(d["dI"]))
 
 
-def test_the_kfr_fit_does_not_depend_on_the_intensity_scale():
-    """KFR's solution is scale-invariant; its SEARCH was not.
+def test_the_krf_fit_does_not_depend_on_the_intensity_scale():
+    """KRF's solution is scale-invariant; its SEARCH was not.
 
     The seeds' a and b track the data's magnitude and trf controls its steps
     in parameter space, so how well the fit converged depended on the
@@ -573,18 +573,18 @@ def test_the_kfr_fit_does_not_depend_on_the_intensity_scale():
     21.707 at two scales and 136.412 at the third.
 
     fit_efficiency now fits at a canonical scale and converts back, which is
-    exact for KFR because the model is linear in a and b.
+    exact for KRF because the model is linear in a and b.
     """
     E, N, dN, I, dI = _ill_conditioned()
-    got = [fit_efficiency(E, N, dN, I * s, dI * s).kfr_chi2
+    got = [fit_efficiency(E, N, dN, I * s, dI * s).krf_chi2
            for s in (1.0, 10.0, 100.0)]
     spread = (max(got) - min(got)) / float(np.mean(got))
     assert spread < 1e-6, (
-        "the KFR fit still depends on the intensity scale: chi-squared came "
+        "the KRF fit still depends on the intensity scale: chi-squared came "
         "out %s across factors of 1, 10 and 100" % [round(v, 6) for v in got])
 
 
-def test_that_kfr_scale_check_can_fail():
+def test_that_krf_scale_check_can_fail():
     """Control. Fitting this data WITHOUT the canonical scale must still
     drift, or the test above is pinning nothing -- most data is well
     conditioned and passes it for free."""
@@ -595,31 +595,31 @@ def test_that_kfr_scale_check_can_fail():
     for s in (1.0, 10.0, 100.0):
         eff, deff = efficiency.efficiency_points(N, dN, I * s, dI * s)
         p = efficiency.multistart(
-            efficiency.f_kfr, E, eff, deff, efficiency._kfr_seeds(E, eff),
-            bounds=efficiency.KFR_BOUNDS, method="trf")
+            efficiency.f_krf, E, eff, deff, efficiency._krf_seeds(E, eff),
+            bounds=efficiency.KRF_BOUNDS, method="trf")
         assert p is not None
-        got.append(float(np.sum(((eff - efficiency.f_kfr(E, *p)) / deff) ** 2)))
+        got.append(float(np.sum(((eff - efficiency.f_krf(E, *p)) / deff) ** 2)))
     spread = (max(got) - min(got)) / float(np.mean(got))
     assert spread > 0.5, (
         "the un-normalised fit no longer drifts on this data (chi-squared "
-        "%s), so test_the_kfr_fit_does_not_depend_on_the_intensity_scale is "
+        "%s), so test_the_krf_fit_does_not_depend_on_the_intensity_scale is "
         "measuring nothing" % [round(v, 6) for v in got])
 
 
-def test_the_canonical_scale_conversion_is_exact_for_kfr():
-    """The conversion back must be exact, not approximate. KFR is linear in
+def test_the_canonical_scale_conversion_is_exact_for_krf():
+    """The conversion back must be exact, not approximate. KRF is linear in
     a and b, so fitting eps/g and multiplying them by g has to reproduce the
     same curve -- this is what lets fit_efficiency avoid carrying a divisor
     the way Radware does with rw_scale."""
-    from efficiency import f_kfr
+    from efficiency import f_krf
 
     E, N, dN, I, dI = _ill_conditioned()
     fit = fit_efficiency(E, N, dN, I, dI)
-    a, b, c, d = fit.kfr_params
+    a, b, c, d = fit.krf_params
     g = 1234.5
-    scaled = f_kfr(E, a * g, b * g, c, d)
-    assert scaled == pytest.approx(g * f_kfr(E, a, b, c, d), rel=1e-12), (
-        "scaling a and b no longer scales the KFR curve exactly; the "
+    scaled = f_krf(E, a * g, b * g, c, d)
+    assert scaled == pytest.approx(g * f_krf(E, a, b, c, d), rel=1e-12), (
+        "scaling a and b no longer scales the KRF curve exactly; the "
         "canonical-scale conversion in fit_efficiency relies on it")
 
 

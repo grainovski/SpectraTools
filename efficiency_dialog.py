@@ -25,10 +25,10 @@ from theme import style_axes
 
 #: Mid-tone on white and on #1e1e1e alike, and clear of the red-to-blue
 #: spectrum ramp so a curve is never mistaken for a trace.
-KFR_COLOR = "#2AA198"      # teal
+KRF_COLOR = "#2AA198"      # teal
 RADWARE_COLOR = "#D9822B"  # amber
 
-MODEL_LABELS = (("kfr", "KFR"), ("rw", "Radware"))
+MODEL_LABELS = (("krf", "KRF"), ("rw", "Radware"))
 
 
 class EfficiencyDialog(QDialog):
@@ -72,7 +72,7 @@ class EfficiencyDialog(QDialog):
             button = QRadioButton(label)
             button.setChecked(key == result.model)
             # Radware may simply not have converged for this data.
-            button.setEnabled(key == "kfr" or result.fit.rw_params is not None)
+            button.setEnabled(key == "krf" or result.fit.rw_params is not None)
             button.toggled.connect(
                 lambda checked, k=key: checked and self.select_model(k))
             self._model_buttons.addButton(button)
@@ -173,8 +173,8 @@ class EfficiencyDialog(QDialog):
         9,900, and nothing else would reveal which this is.
         """
         fit = self.result.fit
-        out = ["KFR      chi2/ndf %.2f/%d   Birge %.3f   RMS %.4g"
-               % (fit.kfr_chi2, fit.kfr_ndf, fit.kfr_birge, fit.kfr_rms)]
+        out = ["KRF      chi2/ndf %.2f/%d   Birge %.3f   RMS %.4g"
+               % (fit.krf_chi2, fit.krf_ndf, fit.krf_birge, fit.krf_rms)]
         if fit.rw_params is None:
             out.append("Radware  did not converge")
         else:
@@ -183,8 +183,8 @@ class EfficiencyDialog(QDialog):
         mc = self.result.mc
         if mc is not None:
             out.append(
-                "Monte Carlo: KFR %d accepted, Radware %d accepted, "
-                "%d rejected" % (mc.kfr_accepted, mc.rw_accepted, mc.rejected))
+                "Monte Carlo: KRF %d accepted, Radware %d accepted, "
+                "%d rejected" % (mc.krf_accepted, mc.rw_accepted, mc.rejected))
         out.append("Fitted range %.2f - %.2f keV   applied: %s"
                    % (fit.E.min(), fit.E.max(),
                       dict(MODEL_LABELS)[self.result.model]))
@@ -212,8 +212,8 @@ class EfficiencyDialog(QDialog):
         for key, label in MODEL_LABELS:
             if key == "rw" and fit.rw_params is None:
                 continue
-            colour = KFR_COLOR if key == "kfr" else RADWARE_COLOR
-            style = "-" if key == "kfr" else "--"
+            colour = KRF_COLOR if key == "krf" else RADWARE_COLOR
+            style = "-" if key == "krf" else "--"
             with np.errstate(over="ignore", invalid="ignore",
                              divide="ignore"):
                 # One MC-mean evaluation, reused as the band's centre.

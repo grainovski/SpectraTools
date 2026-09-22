@@ -253,7 +253,7 @@ def _real_result(name="demo1.txt"):
     N, dN, E, I, dI = d[:, 2], d[:, 3], d[:, 4], d[:, 5], d[:, 6]
     fit = fit_efficiency(E, N, dN, I, dI)
     mc = run_monte_carlo(fit, N, dN, I, dI, iterations=200)
-    return EfficiencyResult(fit=fit, mc=mc, model="kfr")
+    return EfficiencyResult(fit=fit, mc=mc, model="krf")
 
 
 def test_a_real_efficiency_result_plugs_in():
@@ -283,7 +283,7 @@ def test_a_negative_calibration_offset_zeroes_those_bins():
     """Real calibrations routinely have a negative offset, so the lowest
     channels map to negative energies. With a real curve those are the bins
     that used to produce NaN (Radware takes ln E) or a negative efficiency
-    (KFR stays finite and goes <= 0).
+    (KRF stays finite and goes <= 0).
 
     The threshold now catches them first, and that is the point: a negative
     energy is below 50 keV by definition, so the user never sees either

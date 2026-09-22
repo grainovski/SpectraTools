@@ -9,20 +9,20 @@ directly from the published formulae rather than against our own output.
 import numpy as np
 import pytest
 
-from efficiency import f_kfr, f_radware, f_radware_5p, RADWARE_C, RADWARE_G
+from efficiency import f_krf, f_radware, f_radware_5p, RADWARE_C, RADWARE_G
 
 
-def test_kfr_matches_its_formula():
+def test_krf_matches_its_formula():
     """eps(E) = (aE + b/E) * exp(cE + d/E), evaluated by hand."""
     a, b, c, d = 0.5, 1000.0, -1e-3, -50.0
     E = 500.0
     expected = (a * E + b / E) * np.exp(c * E + d / E)
-    assert f_kfr(E, a, b, c, d) == pytest.approx(expected, rel=1e-12)
+    assert f_krf(E, a, b, c, d) == pytest.approx(expected, rel=1e-12)
 
 
-def test_kfr_is_vectorised():
+def test_krf_is_vectorised():
     E = np.array([100.0, 500.0, 1000.0])
-    out = f_kfr(E, 0.5, 1000.0, -1e-3, -50.0)
+    out = f_krf(E, 0.5, 1000.0, -1e-3, -50.0)
     assert out.shape == E.shape
     assert np.all(np.isfinite(out))
 
@@ -65,7 +65,7 @@ def test_a_constant_model_would_fail_these():
     positivity checks."""
     E = np.array([100.0, 1000.0])
     constant = np.ones_like(E)
-    assert not np.allclose(f_kfr(E, 0.5, 1000.0, -1e-3, -50.0), constant)
+    assert not np.allclose(f_krf(E, 0.5, 1000.0, -1e-3, -50.0), constant)
     assert not np.allclose(f_radware_5p(E, -3.5, 1.5, -0.9, -0.5, -0.02), constant)
 
 
@@ -77,15 +77,15 @@ def test_a_constant_model_would_fail_these():
 # constant factor and any fixed seed would be wrong for one of them.
 
 
-def test_kfr_seed_scales_with_the_data():
+def test_krf_seed_scales_with_the_data():
     """Doubling every efficiency must move the seed, or the seed is not
     data-driven and will be wrong on any spectrum with a different scale."""
-    from efficiency import kfr_seed
+    from efficiency import krf_seed
 
     E = np.array([100.0, 500.0, 1000.0])
     eff = np.array([0.05, 0.02, 0.01])
-    s1 = kfr_seed(E, eff)
-    s2 = kfr_seed(E, eff * 2.0)
+    s1 = krf_seed(E, eff)
+    s2 = krf_seed(E, eff * 2.0)
     assert len(s1) == 4
     assert s2[0] == pytest.approx(s1[0] * 2.0, rel=1e-9)
     assert s2[1] == pytest.approx(s1[1] * 2.0, rel=1e-9)

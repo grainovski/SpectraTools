@@ -26,7 +26,7 @@ def result():
     return EfficiencyResult(fit=fit,
                             mc=run_monte_carlo(fit, N, dN, I, dI,
                                                iterations=200),
-                            model="kfr")
+                            model="krf")
 
 
 def _rows(path):
@@ -85,7 +85,7 @@ def test_the_header_records_what_the_numbers_depend_on(tmp_path, result):
     path = str(tmp_path / "p.txt")
     write_per_peak(path, result, np.full(len(result.fit.E), 0.01))
     header = _header(path)
-    assert "kfr" in header.lower()
+    assert "krf" in header.lower()
     assert "normalis" in header.lower() or "normaliz" in header.lower()
     assert "%.6g" % result.normalisation in header
 
@@ -93,8 +93,8 @@ def test_the_header_records_what_the_numbers_depend_on(tmp_path, result):
 def test_the_selected_curve_never_exceeds_one_in_the_file(tmp_path, result):
     path = str(tmp_path / "p.txt")
     write_per_peak(path, result, np.full(len(result.fit.E), 0.01))
-    eff_kfr = np.array([float(r.split()[2]) for r in _rows(path)])
-    assert np.all(eff_kfr <= 1.0 + 1e-9), eff_kfr.max()
+    eff_krf = np.array([float(r.split()[2]) for r in _rows(path)])
+    assert np.all(eff_krf <= 1.0 + 1e-9), eff_krf.max()
 
 
 def test_a_big_per_bin_file_is_written_in_seconds_not_minutes(tmp_path, result):
@@ -114,8 +114,8 @@ def test_a_big_per_bin_file_is_written_in_seconds_not_minutes(tmp_path, result):
     # since the cost depends only on the array shapes.
     from efficiency import EfficiencyResult
 
-    big = EfficiencyResult(fit=result.fit, mc=result.mc, model="kfr")
-    big.mc.kfr_samples = np.tile(result.mc.kfr_samples, (50, 1))[:10000]
+    big = EfficiencyResult(fit=result.fit, mc=result.mc, model="krf")
+    big.mc.krf_samples = np.tile(result.mc.krf_samples, (50, 1))[:10000]
     big.mc.rw_samples = np.tile(result.mc.rw_samples, (50, 1))[:10000]
 
     path = str(tmp_path / "big.txt")
@@ -133,7 +133,7 @@ def test_interpolation_stays_far_below_the_stated_uncertainty(result):
     energies = np.linspace(float(result.fit.E.min()),
                            float(result.fit.E.max()), FILE_KNOTS * 4)
     approx = _both(result, energies)[0]
-    exact = result.curve(energies, "kfr")
+    exact = result.curve(energies, "krf")
     good = np.isfinite(approx) & np.isfinite(exact) & (exact != 0)
     assert good.any()
     error = np.max(np.abs(approx[good] - exact[good]) / np.abs(exact[good]))
@@ -149,7 +149,7 @@ def test_a_small_file_is_not_interpolated_at_all(result):
     energies = np.linspace(float(result.fit.E.min()),
                            float(result.fit.E.max()), FILE_KNOTS // 2)
     approx = _both(result, energies)[0]
-    exact = result.curve(energies, "kfr")
+    exact = result.curve(energies, "krf")
     assert approx == pytest.approx(exact, rel=1e-12, nan_ok=True)
 
 

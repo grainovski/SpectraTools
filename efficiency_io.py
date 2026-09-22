@@ -7,7 +7,7 @@ column: the energy calibration is available wherever these are read.
 
 import numpy as np
 
-MODEL_NAMES = {"kfr": "KFR", "rw": "Radware"}
+MODEL_NAMES = {"krf": "KRF", "rw": "Radware"}
 
 #: Above this many energies the curves are evaluated on this many evenly
 #: spaced knots and interpolated. See _both for the measurements behind it.
@@ -24,10 +24,10 @@ def _header_lines(result, extra=()):
         result.normalisation,
         "fitted energy range: %.4f .. %.4f keV" % (fit.E.min(), fit.E.max()),
         "peaks              : %d" % len(fit.E),
-        "KFR  params        : %s" % ", ".join("%.12g" % v
-                                              for v in fit.kfr_params),
-        "KFR  chi2/ndf      : %.6f / %d   Birge %.4f   RMS %.6g" %
-        (fit.kfr_chi2, fit.kfr_ndf, fit.kfr_birge, fit.kfr_rms),
+        "KRF  params        : %s" % ", ".join("%.12g" % v
+                                              for v in fit.krf_params),
+        "KRF  chi2/ndf      : %.6f / %d   Birge %.4f   RMS %.6g" %
+        (fit.krf_chi2, fit.krf_ndf, fit.krf_birge, fit.krf_rms),
     ]
     if fit.rw_params is None:
         lines.append("Radware            : did not converge")
@@ -45,15 +45,15 @@ def _header_lines(result, extra=()):
         ]
     if result.mc is not None:
         lines.append(
-            "Monte Carlo        : KFR %d accepted, Radware %d accepted, "
+            "Monte Carlo        : KRF %d accepted, Radware %d accepted, "
             "%d samples rejected" %
-            (result.mc.kfr_accepted, result.mc.rw_accepted,
+            (result.mc.krf_accepted, result.mc.rw_accepted,
              result.mc.rejected))
         # Stated because the file is read on its own, away from the Help.
         # Without it a reader sees "Birge 0.6398" beside the deff columns
         # and reasonably assumes the band was scaled by it. It was not:
         # the scaling is inflate-only.
-        applied = (fit.kfr_birge if result.model == "kfr" else fit.rw_birge)
+        applied = (fit.krf_birge if result.model == "krf" else fit.rw_birge)
         lines.append(
             "band scaling       : x%.4f   (Birge %.4f, inflate-only: a "
             "ratio below 1 never narrows the band)"
@@ -96,7 +96,7 @@ def _both(result, energies):
              if interpolated else energies)
 
     out = []
-    for model in ("kfr", "rw"):
+    for model in ("krf", "rw"):
         if model == "rw" and result.fit.rw_params is None:
             nan = np.full(len(energies), float("nan"))
             out += [nan, nan]
@@ -114,7 +114,7 @@ def _both(result, energies):
 
 
 def write_per_peak(path, result, energy_errors):
-    """One row per calibration peak: E dE eff_kfr deff_kfr eff_rw deff_rw."""
+    """One row per calibration peak: E dE eff_krf deff_krf eff_rw deff_rw."""
     E = result.fit.E
     dE = np.asarray(energy_errors, dtype=float)
     if len(dE) != len(E):
@@ -123,13 +123,13 @@ def write_per_peak(path, result, energy_errors):
     k, dk, r, dr = _both(result, E)
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(_header_lines(
-            result, ["", "columns: E  dE  eff_kfr  deff_kfr  eff_rw  deff_rw"]))
+            result, ["", "columns: E  dE  eff_krf  deff_krf  eff_rw  deff_rw"]))
         for row in zip(E, dE, k, dk, r, dr):
             fh.write("%14.6f %12.6f %14.8g %14.8g %14.8g %14.8g\n" % row)
 
 
 def write_per_bin(path, result, calibration, channels):
-    """One row per channel: E eff_kfr deff_kfr eff_rw deff_rw.
+    """One row per channel: E eff_krf deff_krf eff_rw deff_rw.
 
     No dE column -- a sampled curve point has no energy uncertainty, and a
     zero column would be a meaningless number written to disk.
@@ -144,7 +144,7 @@ def write_per_bin(path, result, calibration, channels):
             "curves interpolated from %d knots; max relative error ~2e-6, "
             "far below the Monte Carlo uncertainty in the deff columns"
             % FILE_KNOTS)
-    notes.append("columns: E  eff_kfr  deff_kfr  eff_rw  deff_rw")
+    notes.append("columns: E  eff_krf  deff_krf  eff_rw  deff_rw")
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(_header_lines(result, notes))
         for row in zip(energies, k, dk, r, dr):

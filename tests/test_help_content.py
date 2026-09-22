@@ -1305,7 +1305,7 @@ def _flat(html):
 # --- the efficiency calibration (6.0.0) ---------------------------------
 #
 # These assert on content that can ONLY come from the new sections. The
-# obvious versions -- "efficiency" appears, "KFR" appears, "relative"
+# obvious versions -- "efficiency" appears, "KRF" appears, "relative"
 # appears -- all passed BEFORE a word was written, because the CalEnEff
 # export documentation already used those words. A help test that passes
 # against the help you have not written yet is worse than no test.
@@ -1394,7 +1394,7 @@ def test_the_howto_names_no_control_the_dialog_does_not_have():
 
 def test_these_checks_would_have_failed_before_the_feature():
     """Control. The prose already in the help for the CalEnEff export uses
-    the words "efficiency", "KFR" and "relative", so assertions built on
+    the words "efficiency", "KRF" and "relative", so assertions built on
     those alone cannot distinguish the new sections from the old ones. This
     pins that the markers above are genuinely new.
     """
@@ -1433,7 +1433,7 @@ def test_the_knowledge_database_explains_the_relative_scale():
     html = _flat(build_knowledge_database_html())
     assert "live time" in html, "the common-mode factors are not named"
     assert "photoelectric" in html, (
-        "the KFR terms are stated without saying what they represent")
+        "the KRF terms are stated without saying what they represent")
 
 
 def test_the_howto_distinguishes_clearing_from_toggling_the_calibration():
@@ -1505,12 +1505,12 @@ def _baked_curves(grid):
     """
     import numpy as np
 
-    from efficiency import f_kfr, f_radware_5p
-    from help_figures import (_EFF_KFR, _EFF_RW, _EFF_RW_SCALE, _EFF_NORM)
+    from efficiency import f_krf, f_radware_5p
+    from help_figures import (_EFF_KRF, _EFF_RW, _EFF_RW_SCALE, _EFF_NORM)
 
-    kfr = f_kfr(grid, *_EFF_KFR) * _EFF_NORM
+    krf = f_krf(grid, *_EFF_KRF) * _EFF_NORM
     rw = f_radware_5p(grid, *_EFF_RW) / _EFF_RW_SCALE * _EFF_NORM
-    return np.asarray(kfr), np.asarray(rw)
+    return np.asarray(krf), np.asarray(rw)
 
 
 def test_the_efficiency_figures_come_from_the_apps_own_models():
@@ -1518,14 +1518,14 @@ def test_the_efficiency_figures_come_from_the_apps_own_models():
 
     This used to compare the two baked parameter sets against EACH OTHER
     and nothing else, which could not detect either going stale: a change
-    to f_kfr or f_radware_5p moves both curves together and the comparison
+    to f_krf or f_radware_5p moves both curves together and the comparison
     still passes. It imported the very constants it was pinning. The stored
     inputs are baked too, so the honest check is to put them back through
     fit_efficiency and see whether the same curves come out.
     """
     import numpy as np
 
-    from efficiency import f_kfr, f_radware_5p, fit_efficiency
+    from efficiency import f_krf, f_radware_5p, fit_efficiency
     from help_figures import _EFF_E, _EFF_Y, _EFF_DY
 
     E = np.array(_EFF_E)
@@ -1534,13 +1534,13 @@ def test_the_efficiency_figures_come_from_the_apps_own_models():
     grid = np.geomspace(120.0, 3200.0, 400)
     inside = (grid >= E.min()) & (grid <= E.max())
 
-    kfr_baked, rw_baked = _baked_curves(grid)
-    assert np.all(np.isfinite(kfr_baked))
+    krf_baked, rw_baked = _baked_curves(grid)
+    assert np.all(np.isfinite(krf_baked))
 
     # I = 1, dI = 0 makes efficiency_points return exactly (y, dy), so this
     # is the real fitting path on the real stored inputs.
     fit = fit_efficiency(E, y, dy, np.ones_like(y), np.zeros_like(y))
-    kfr_live = f_kfr(grid, *fit.kfr_params)
+    krf_live = f_krf(grid, *fit.krf_params)
     rw_live = f_radware_5p(grid, *fit.rw_params) / fit.rw_scale
 
     def worst(a, b, mask=None):
@@ -1550,10 +1550,10 @@ def test_the_efficiency_figures_come_from_the_apps_own_models():
 
     # Measured 2026-09-22: 5.9e-05. The inputs are stored to five
     # significant figures, which is the floor here, so 1e-3 leaves ~17x.
-    assert worst(kfr_baked, kfr_live) < 1e-3, (
-        "the baked KFR figure parameters no longer reproduce from "
+    assert worst(krf_baked, krf_live) < 1e-3, (
+        "the baked KRF figure parameters no longer reproduce from "
         "fit_efficiency (worst %.3e) -- the figure is stale"
-        % worst(kfr_baked, kfr_live))
+        % worst(krf_baked, krf_live))
 
     # Radware only INSIDE the measured range, deliberately. Outside it the
     # flat direction described in tests/test_efficiency_fit.py leaves the
@@ -1568,10 +1568,10 @@ def test_the_efficiency_figures_come_from_the_apps_own_models():
     # Kept from the original test: two fits to the same 23 points have to
     # agree where those points are. This is what catches a dropped
     # _EFF_RW_SCALE divisor, which leaves them a factor of 600 apart.
-    assert worst(rw_baked, kfr_baked, inside) < 0.10, (
-        "the stored KFR and Radware curves disagree by %.1f%% inside the "
+    assert worst(rw_baked, krf_baked, inside) < 0.10, (
+        "the stored KRF and Radware curves disagree by %.1f%% inside the "
         "measured range; they are two fits to the same 23 points"
-        % (100.0 * worst(rw_baked, kfr_baked, inside)))
+        % (100.0 * worst(rw_baked, krf_baked, inside)))
 
 
 def test_that_figure_check_can_fail():
@@ -1580,8 +1580,8 @@ def test_that_figure_check_can_fail():
     curve that is wrong. Bending one side must be caught."""
     import numpy as np
 
-    from efficiency import f_kfr, fit_efficiency
-    from help_figures import _EFF_E, _EFF_Y, _EFF_DY, _EFF_NORM, _EFF_KFR
+    from efficiency import f_krf, fit_efficiency
+    from help_figures import _EFF_E, _EFF_Y, _EFF_DY, _EFF_NORM, _EFF_KRF
 
     E = np.array(_EFF_E)
     y = np.array(_EFF_Y)
@@ -1589,11 +1589,11 @@ def test_that_figure_check_can_fail():
     grid = np.geomspace(120.0, 3200.0, 400)
 
     fit = fit_efficiency(E, y, dy, np.ones_like(y), np.zeros_like(y))
-    live = f_kfr(grid, *fit.kfr_params)
-    bent = f_kfr(grid, *_EFF_KFR) * _EFF_NORM * 1.02
+    live = f_krf(grid, *fit.krf_params)
+    bent = f_krf(grid, *_EFF_KRF) * _EFF_NORM * 1.02
 
     worst = float(np.nanmax(np.abs(bent - live) / np.abs(live)))
     assert worst > 1e-3, (
-        "a 2%% error in the stored KFR curve scored only %.3e against the "
+        "a 2%% error in the stored KRF curve scored only %.3e against the "
         "live fit, so the staleness check above is measuring nothing"
         % worst)

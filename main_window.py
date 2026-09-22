@@ -1044,7 +1044,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         second identical one.
         """
         return "%s [eff-corrected %s]" % (
-            spectrum.path, "KFR" if result.model == "kfr" else "RW")
+            spectrum.path, "KRF" if result.model == "krf" else "RW")
 
     def can_apply_efficiency(self):
         """An efficiency correction needs an energy per bin, which only an

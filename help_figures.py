@@ -322,7 +322,7 @@ def matrix_projection_cut_figure():
 # Carlo over it. Refitting here instead would be honest too and cost about
 # 0.9 s every time the Knowledge Database is opened, against 1.38 s for
 # the seven figures that were already there. The curves below are drawn by
-# evaluating efficiency.f_kfr and f_radware_5p on these parameters, so the
+# evaluating efficiency.f_krf and f_radware_5p on these parameters, so the
 # shapes are the app's own, not a sketch of them.
 #
 # The fixture is not shipped with the application, which is the other
@@ -338,7 +338,7 @@ _EFF_DY = (0.015205, 0.016887, 0.010867, 0.0069168, 0.00023863, 0.01077,
            0.0078908, 0.010245, 0.0088543, 0.0072234, 0.0038482, 0.0059169,
            0.0046294, 0.0052519, 0.0052159, 0.0045652, 0.0050075, 0.0039573,
            0.002575, 0.0041746, 0.003811, 0.0035953, 0.0031401)
-_EFF_KFR = (0.62743716, 784436.54, -0.00072588672, -146.70689)
+_EFF_KRF = (0.62743716, 784436.54, -0.00072588672, -146.70689)
 #: Radware parameters and the scale they were fitted at. They describe
 #: eff*_EFF_RW_SCALE, exactly as EfficiencyFit.rw_params does, so the curve
 #: is f_radware_5p(E, *_EFF_RW) / _EFF_RW_SCALE -- see
@@ -370,7 +370,7 @@ _EFF_HI = (1.0767, 1.0789, 1.0747, 1.065, 1.05, 1.0301, 1.0063, 0.97915,
 
 
 def efficiency_models_figure():
-    """KFR and Radware fitted to the same 23 Ra-226 points, with the
+    """KRF and Radware fitted to the same 23 Ra-226 points, with the
     residuals underneath.
 
     The point of drawing both is that they were derived independently, so
@@ -379,13 +379,13 @@ def efficiency_models_figure():
     closely across the measured range and part company outside it, which is
     exactly the region a user is most tempted to read off.
     """
-    from efficiency import f_kfr, f_radware_5p
+    from efficiency import f_krf, f_radware_5p
 
     E = np.array(_EFF_E)
     y = np.array(_EFF_Y)
     dy = np.array(_EFF_DY)
     grid = np.geomspace(120.0, 3200.0, 400)
-    kfr = f_kfr(grid, *_EFF_KFR) * _EFF_NORM
+    krf = f_krf(grid, *_EFF_KRF) * _EFF_NORM
     rw = f_radware_5p(grid, *_EFF_RW) / _EFF_RW_SCALE * _EFF_NORM
 
     fig = Figure(figsize=(7.5, 5.4), dpi=110)
@@ -395,7 +395,7 @@ def efficiency_models_figure():
     ax.axvspan(E.min(), E.max(), color="0.92", zorder=0)
     ax.errorbar(E, y, yerr=dy, fmt="o", ms=4, color="black",
                 ecolor="0.4", capsize=2, zorder=3, label="Measured points")
-    ax.plot(grid, kfr, color=_DATA_COLOR, label="KFR (4 parameters)")
+    ax.plot(grid, krf, color=_DATA_COLOR, label="KRF (4 parameters)")
     ax.plot(grid, rw, color=_FIT_COLOR, linestyle="--",
             label="Radware (5 free)")
     ax.set_xscale("log")
@@ -405,10 +405,10 @@ def efficiency_models_figure():
 
     ax_res.axvspan(E.min(), E.max(), color="0.92", zorder=0)
     ax_res.axhline(0.0, color="gray", linewidth=0.8)
-    ax_res.plot(grid, 100.0 * (rw - kfr) / kfr, color=_REGION_FIT_COLOR)
+    ax_res.plot(grid, 100.0 * (rw - krf) / krf, color=_REGION_FIT_COLOR)
     ax_res.set_xscale("log")
     ax_res.set_xlabel("Energy (keV)")
-    ax_res.set_ylabel("Radware - KFR (%)")
+    ax_res.set_ylabel("Radware - KRF (%)")
     ax_res.set_title("Disagreement between the models", fontsize=9)
 
     fig.tight_layout()
