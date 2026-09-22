@@ -28,10 +28,17 @@ on eps, so the fitted curve depended on the arbitrary normalisation of the
 intensity column -- a constant our own .sou files do not agree on (most peak
 at 10000, co56.sou at 100000, na24.sou at 1000). Measured before the fix, a
 100x change in it moved the reported curve by up to 12% at the bottom of the
-range while leaving KFR identical to 2e-8. The reference has the same
-property and does nothing about it, so removing it necessarily means parting
-company with the reference on any file whose scale differs from the one it
-happened to be handed.
+range while leaving KFR identical to 2e-8 on these three files. The reference
+has the same property and does nothing about it, so removing it necessarily
+means parting company with the reference on any file whose scale differs from
+the one it happened to be handed.
+
+KFR turned out to have the same disease by a different route -- its solution
+is scale-invariant but its SEARCH was not, and a sweep found data where the
+same points scored 21.707 at one intensity scale and 136.412 at another. It
+is fitted at a canonical scale too now, but that conversion is EXACT, so it
+still reproduces the reference here. See
+test_the_kfr_fit_does_not_depend_on_the_intensity_scale.
 
 On 226Ra and demo2 the ladder lands on the reference's own answer and the
 full strict comparison still applies. On demo1 it finds a genuinely better
@@ -166,8 +173,10 @@ def test_our_fit_reproduces_caleneff(name):
 
     got = fit_efficiency(E, N, dN, I, dI)
 
-    # KFR is untouched by the scale ladder -- it is exactly scale-invariant,
-    # so it still has to reproduce the reference outright.
+    # KFR still has to reproduce the reference outright. It is fitted at a
+    # canonical scale now too, but that conversion is exact (the model is
+    # linear in a and b), so unlike the Radware ladder it changes which
+    # minimum is found and never what the answer means.
     assert f_kfr(E, *got.kfr_params) == pytest.approx(
         f_kfr(E, *want["kfr"]), rel=1e-6), (
         "%s: our KFR curve differs from CalEnEff's at the data energies"
@@ -527,3 +536,132 @@ def test_that_scale_check_can_fail():
     assert spread > 1e-3, (
         "the scale-free check cannot detect the bug it guards: fitting at "
         "the data's own scale spread chi2 by only %.3e" % spread)
+
+
+#: Eight points that expose KFR's conditioning problem. Found by sweeping
+#: 150 synthetic data sets on 2026-09-22; the three CalEnEff fixtures are all
+#: well conditioned and show none of it, which is why it stayed invisible.
+#: Kept as literals rather than regenerated so the case cannot drift away
+#: from under the test.
+_ILL_CONDITIONED = {
+    "E":  (712.684, 861.667, 1055.5, 1099.85, 1216.52, 1240.93, 1429.48,
+           1458.97),
+    "N":  (1393.6, 1703.89, 1356.83, 113.403, 822.243, 471.786, 581.889,
+           877.972),
+    "dN": (7.97158, 60.1638, 33.4524, 5.39977, 27.3365, 8.06416, 21.2795,
+           26.614),
+    "I":  (3295.49, 4270.63, 4826.71, 437.052, 3034.21, 1989.43, 2434.29,
+           3601.65),
+    "dI": (141.566, 116.188, 219.386, 15.5743, 71.1513, 19.5244, 67.368,
+           147.967),
+}
+
+
+def _ill_conditioned():
+    d = _ILL_CONDITIONED
+    return (np.array(d["E"]), np.array(d["N"]), np.array(d["dN"]),
+            np.array(d["I"]), np.array(d["dI"]))
+
+
+def test_the_kfr_fit_does_not_depend_on_the_intensity_scale():
+    """KFR's solution is scale-invariant; its SEARCH was not.
+
+    The seeds' a and b track the data's magnitude and trf controls its steps
+    in parameter space, so how well the fit converged depended on the
+    arbitrary normalisation of the intensity column -- which sou_io records
+    our own files disagreeing on by 100x. On this data the old path scored
+    21.707 at two scales and 136.412 at the third.
+
+    fit_efficiency now fits at a canonical scale and converts back, which is
+    exact for KFR because the model is linear in a and b.
+    """
+    E, N, dN, I, dI = _ill_conditioned()
+    got = [fit_efficiency(E, N, dN, I * s, dI * s).kfr_chi2
+           for s in (1.0, 10.0, 100.0)]
+    spread = (max(got) - min(got)) / float(np.mean(got))
+    assert spread < 1e-6, (
+        "the KFR fit still depends on the intensity scale: chi-squared came "
+        "out %s across factors of 1, 10 and 100" % [round(v, 6) for v in got])
+
+
+def test_that_kfr_scale_check_can_fail():
+    """Control. Fitting this data WITHOUT the canonical scale must still
+    drift, or the test above is pinning nothing -- most data is well
+    conditioned and passes it for free."""
+    import efficiency
+
+    E, N, dN, I, dI = _ill_conditioned()
+    got = []
+    for s in (1.0, 10.0, 100.0):
+        eff, deff = efficiency.efficiency_points(N, dN, I * s, dI * s)
+        p = efficiency.multistart(
+            efficiency.f_kfr, E, eff, deff, efficiency._kfr_seeds(E, eff),
+            bounds=efficiency.KFR_BOUNDS, method="trf")
+        assert p is not None
+        got.append(float(np.sum(((eff - efficiency.f_kfr(E, *p)) / deff) ** 2)))
+    spread = (max(got) - min(got)) / float(np.mean(got))
+    assert spread > 0.5, (
+        "the un-normalised fit no longer drifts on this data (chi-squared "
+        "%s), so test_the_kfr_fit_does_not_depend_on_the_intensity_scale is "
+        "measuring nothing" % [round(v, 6) for v in got])
+
+
+def test_the_canonical_scale_conversion_is_exact_for_kfr():
+    """The conversion back must be exact, not approximate. KFR is linear in
+    a and b, so fitting eps/g and multiplying them by g has to reproduce the
+    same curve -- this is what lets fit_efficiency avoid carrying a divisor
+    the way Radware does with rw_scale."""
+    from efficiency import f_kfr
+
+    E, N, dN, I, dI = _ill_conditioned()
+    fit = fit_efficiency(E, N, dN, I, dI)
+    a, b, c, d = fit.kfr_params
+    g = 1234.5
+    scaled = f_kfr(E, a * g, b * g, c, d)
+    assert scaled == pytest.approx(g * f_kfr(E, a, b, c, d), rel=1e-12), (
+        "scaling a and b no longer scales the KFR curve exactly; the "
+        "canonical-scale conversion in fit_efficiency relies on it")
+
+
+def test_canonical_scale_ignores_non_positive_points():
+    """Both fits run at canonical_scale(eff) and convert back, so a single
+    bad point must not be able to destroy that scale.
+
+    A peak area can come out negative on a weak line after background
+    subtraction. Clamping such a point to 1e-300 instead of dropping it
+    pulled the geometric mean to 3.1e-50 on six points, handing the fit
+    values around 1e+50 -- finite and positive, so nothing downstream would
+    have caught it.
+    """
+    from efficiency import canonical_scale
+
+    healthy = np.array([9.0, 7.0, 5.0, 3.8, 3.0, 2.4])
+    clean = canonical_scale(healthy)
+    assert clean == pytest.approx(float(np.exp(np.mean(np.log(healthy)))))
+
+    for spoiled in ([-50.0] + list(healthy[1:]),
+                    [0.0] + list(healthy[1:]),
+                    [np.nan] + list(healthy[1:]),
+                    [-50.0, -20.0, -5.0] + list(healthy[3:])):
+        got = canonical_scale(np.array(spoiled, dtype=float))
+        assert 0.1 < got < 100.0, (
+            "one bad point moved the canonical scale to %.3e; it is meant "
+            "to be the geometric mean of the POSITIVE points" % got)
+
+    assert canonical_scale(np.array([-9.0, -7.0, -5.0])) == 1.0
+    assert canonical_scale(np.array([])) == 1.0
+
+
+def test_the_canonical_scale_is_equivariant():
+    """Scaling every point must scale the answer by the same factor -- that
+    property is the whole reason both fits are independent of the intensity
+    column's normalisation. Without it the ladder rungs would move with the
+    caller's units."""
+    from efficiency import canonical_scale
+
+    eff = np.array([9.0, 7.0, 5.0, 3.8, 3.0, 2.4])
+    base = canonical_scale(eff)
+    for factor in (1e-9, 1e-3, 7.0, 1e3, 1e9):
+        assert canonical_scale(eff * factor) == pytest.approx(
+            base * factor, rel=1e-12), (
+            "canonical_scale is not equivariant at factor %g" % factor)

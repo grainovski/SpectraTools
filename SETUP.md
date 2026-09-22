@@ -88,12 +88,12 @@ Verify:
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expect **1759 collected, 0 failed** (as of 6.1.0 development). A smaller
+Expect **1764 collected, 0 failed** (as of 6.1.0 development). A smaller
 number that still passes is the failure to watch for: a missing optional
 dependency makes pytest skip whole files rather than error, so read the
 count, not the colour.
 
-Two of the 1759 may report as **skipped** rather than passed, and that is
+Two of the 1764 may report as **skipped** rather than passed, and that is
 normal. The decode-speed guard and its control compare `lc_codec.decode_row`
 against a frozen copy of the pre-optimization decoder in the same process
 and assert a ratio, which cancels machine speed. It cannot cancel machine
@@ -113,8 +113,8 @@ while iterating.
 `tests/test_root_io.py` and `tests/test_root_ui.py` open with
 `pytest.importorskip("uproot")`, so a virtualenv predating v4.0.0 — when
 `uproot` was added to `requirements.txt` — silently collects 30 fewer tests
-and still reports all-passed. If the count comes out 30 short (1729 rather
-than 1759), that is this, and the fix is to re-run the install step above. Note
+and still reports all-passed. If the count comes out 30 short (1734 rather
+than 1764), that is this, and the fix is to re-run the install step above. Note
 the Windows build needs `uproot` too: `build.ps1` passes
 `--collect-all awkward_cpp`, which fails outright without it.
 
