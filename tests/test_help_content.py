@@ -1597,3 +1597,112 @@ def test_that_figure_check_can_fail():
         "a 2%% error in the stored KRF curve scored only %.3e against the "
         "live fit, so the staleness check above is measuring nothing"
         % worst)
+
+
+# --- The Birge ratio section ------------------------------------------------
+
+
+def _birge_section():
+    """The Knowledge Database's Birge section, flattened, up to the next h3."""
+    import re
+
+    from help_content import build_knowledge_database_html
+
+    html = build_knowledge_database_html()
+    start = html.find("<h3>The Birge ratio, and how to use it</h3>")
+    assert start >= 0, "the Knowledge Database has no Birge ratio section"
+    end = html.find("<h3>", start + 1)
+    return html[start:end if end > 0 else len(html)], re
+
+
+def test_the_birge_section_cites_its_sources():
+    """The user asked for a proper external reference. Both are pinned by
+    their identifiers, since a citation that drifts to the wrong volume or
+    page is worse than none -- it sends the reader somewhere else.
+
+    A reference, NOT a link: the Knowledge Database has no external links by
+    the user's own choice (docs/superpowers/specs/2026-07-30-help-menu-
+    design.md), and test_knowledge_database_html_has_no_external_links
+    holds it to that. The DOI is written as text, the way print cites."""
+    section, _ = _birge_section()
+    assert "10.1103/PhysRev.40.207" in section, "Birge 1932 DOI missing"
+    assert "Phys. Rev.</i> <b>40</b>, 207 (1932)" in section
+    assert "075021" in section and "5.2.2" in section, (
+        "the PDG scale-factor reference (J. Phys. G 37, 075021, Sec. 5.2.2) "
+        "is missing")
+
+
+def test_the_birge_significance_table_matches_the_statistics():
+    """The table says what range B falls in 95% of the time when the errors
+    are exactly right. Those are chi-squared quantiles, so they are checked
+    against the distribution itself: a hand-typed table that drifted would
+    tell users a significant result was ordinary, or the reverse."""
+    import numpy as np
+    from scipy.stats import chi2
+
+    section, re = _birge_section()
+    rows = re.findall(
+        r"<tr><td>(\d+)</td><td>([\d.]+) &ndash; ([\d.]+)</td></tr>", section)
+    assert len(rows) >= 5, "the significance table is missing or malformed"
+    for nu, lo, hi in rows:
+        nu = int(nu)
+        want_lo = np.sqrt(chi2.ppf(0.025, nu) / nu)
+        want_hi = np.sqrt(chi2.ppf(0.975, nu) / nu)
+        assert abs(float(lo) - want_lo) <= 0.006, (
+            "nu=%d: table says B >= %s, the distribution gives %.3f"
+            % (nu, lo, want_lo))
+        assert abs(float(hi) - want_hi) <= 0.006, (
+            "nu=%d: table says B <= %s, the distribution gives %.3f"
+            % (nu, hi, want_hi))
+
+
+def test_the_birge_table_check_can_fail():
+    """Control for the test above: a deliberately wrong row must not pass
+    the same comparison."""
+    import numpy as np
+    from scipy.stats import chi2
+
+    nu, wrong_hi = 10, 1.60     # the real upper bound at nu=10 is 1.43
+    assert abs(wrong_hi - np.sqrt(chi2.ppf(0.975, nu) / nu)) > 0.006
+
+
+def test_the_birge_worked_examples_are_true():
+    """The section reads two real reference fits against the table. Those
+    sentences are claims about this program's output, so they are checked
+    against it rather than trusted."""
+    import numpy as np
+    from scipy.stats import chi2
+
+    from efficiency import fit_efficiency
+
+    here = os.path.join(os.path.dirname(__file__), "fixtures", "caleneff")
+    section, _ = _birge_section()
+
+    d = np.loadtxt(os.path.join(here, "226Ra_En_Area.txt"), ndmin=2)
+    ra = fit_efficiency(d[:, 4], d[:, 2], d[:, 3], d[:, 5], d[:, 6])
+    assert ra.krf_ndf == 19 and "B = 2.49" in section
+    assert round(ra.krf_birge, 2) == 2.49
+    assert 1e-16 < chi2.sf(ra.krf_chi2, ra.krf_ndf) < 1e-15, (
+        "the 'about three times in 10^16' claim no longer holds")
+
+    d = np.loadtxt(os.path.join(here, "demo1.txt"), ndmin=2)
+    dm = fit_efficiency(d[:, 4], d[:, 2], d[:, 3], d[:, 5], d[:, 6])
+    assert dm.rw_ndf == 4 and "B = 0.64" in section
+    assert round(dm.rw_birge, 2) == 0.64
+    lo = np.sqrt(chi2.ppf(0.025, 4) / 4)
+    hi = np.sqrt(chi2.ppf(0.975, 4) / 4)
+    assert lo < dm.rw_birge < hi, (
+        "demo1's Radware Birge ratio is no longer inside the chance range "
+        "the Help says it is inside")
+
+
+def test_the_birge_section_explains_how_to_act_on_it():
+    """'How to use it' was the request. The three residual patterns and
+    what each one points at are the practical content; pin that they are
+    there, and that the exclusion advice names the control that exists."""
+    section, _ = _birge_section()
+    flat = _flat(section)
+    for piece in ("One point far off", "A smooth trend", "Scatter everywhere",
+                  "untick it in the calibration window",
+                  "only ever widens", "not floored at 1"):
+        assert piece in flat, "the Birge section no longer says %r" % piece

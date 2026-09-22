@@ -1512,27 +1512,10 @@ sigma of a Gaussian -- so it answers a question no single fit can: across
 all the datasets the measurement could plausibly have produced, where did
 the curve go?</p>
 
-<p>The percentiles are then <b>Birge-scaled</b> about the curve. The Birge
-ratio is &radic;(&chi;&sup2;/ndf): when the points scatter about the fit by
-more than their stated errors, &chi;&sup2;/ndf exceeds 1 and the band is
-widened by that factor. It is the standard admission that the quoted errors
-were optimistic -- either the peak-area errors, the literature intensities,
-or the model's ability to describe the data. A Birge ratio well above 1 is
-worth looking at rather than scaling away.</p>
-
-<p><b>The scaling only ever widens.</b> A Birge ratio <i>below</i> 1 means
-the curve tracks the points more closely than their stated errors require,
-and the band is then left at the Monte Carlo percentiles rather than being
-shrunk by it. The reason is that a low ratio says something about the
-<i>inputs</i>, not about the curve: the honest reading is that the errors
-fed in were overstated, not that the efficiency is known more sharply than
-resampling those errors produced. Narrowing on it would report a precision
-nothing measured. This is the usual convention for scaled uncertainties.</p>
-
-<p>The ratio itself is still reported as measured, and is not floored at 1.
-Seeing a Birge of, say, 0.64 beside a fit is useful -- it is a hint that the
-peak-area or intensity errors are too generous, and that the calibration may
-deserve a second look even though it looks excellent.</p>
+<p>The percentiles are then <b>Birge-scaled</b> about the curve: widened
+when the points scatter about the fit by more than their stated errors
+allow. What the Birge ratio is, how to judge whether yours is too high, and
+what to do about it are covered in their own section below.</p>
 
 <img src="{efficiency_band_src}" alt="The 1-sigma band on the same fit,
 narrow across the measured range and flaring outside it, with the band
@@ -1558,6 +1541,121 @@ and a percentile taken over the handful that happened not to would draw an
 envelope indistinguishable from a well-determined one. The curve itself and
 the examine panel have always been blank there for the same reason; the
 band now agrees with them.</p>
+
+<h3>The Birge ratio, and how to use it</h3>
+
+<p>Every efficiency fit reports a <b>Birge ratio</b> beside its
+&chi;&sup2; -- in the summary line under the plot in the efficiency window,
+and in the header of both saved files:</p>
+
+<pre>  B = &radic;( &chi;&sup2; / &nu; )        &nu; = number of points &minus; number of fitted parameters</pre>
+
+<p>&nu; is the number of degrees of freedom: the number of calibration
+lines minus four for KRF, minus five for Radware. The ratio is named after
+R. T. Birge, who introduced it in 1932 to compare two estimates of the same
+uncertainty: the <i>external</i> one, read from how far the points actually
+scatter about the fitted curve, and the <i>internal</i> one, propagated from
+the errors each point was given. When the stated errors are right the two
+agree, and B comes out close to 1. When the points scatter by much more than
+their errors allow, Birge's own reading was that something the errors do
+not include -- a systematic effect -- is almost certainly present.</p>
+
+<h4>How far from 1 is too far</h4>
+
+<p><b>That depends on how many lines you have.</b> Even with perfect
+errors, &chi;&sup2;/&nu; varies from one measurement to the next by about
+&radic;(2/&nu;), so a B that is alarming with twenty lines means nothing
+with five. The table gives the range B falls in 95% of the time when the
+errors are exactly right:</p>
+
+<table border="1" cellpadding="4" cellspacing="0">
+<tr><th>&nu;</th><th>B falls within (95%)</th></tr>
+<tr><td>3</td><td>0.27 &ndash; 1.77</td></tr>
+<tr><td>4</td><td>0.35 &ndash; 1.67</td></tr>
+<tr><td>5</td><td>0.41 &ndash; 1.60</td></tr>
+<tr><td>10</td><td>0.57 &ndash; 1.43</td></tr>
+<tr><td>15</td><td>0.65 &ndash; 1.35</td></tr>
+<tr><td>20</td><td>0.69 &ndash; 1.31</td></tr>
+<tr><td>30</td><td>0.75 &ndash; 1.25</td></tr>
+</table>
+
+<p>Two real cases show why the table matters. A 23-line Ra-226 calibration
+(&nu; = 19 for KRF) gives B = 2.49 -- far outside 0.68&ndash;1.31. A
+&chi;&sup2; that large would turn up by chance about three times in
+10<sup>16</sup>, so something is genuinely wrong with the errors or the
+model. A 9-line calibration fitted with Radware (&nu; = 4) gives B = 0.64,
+which looks suspiciously good and is not: it sits comfortably inside
+0.35&ndash;1.67, the ordinary spread for so few degrees of freedom. Read the
+number against its own &nu;, never against 1 alone.</p>
+
+<h4>What the program does with it</h4>
+
+<p>The band is widened by B when B is above 1, and left alone when it is
+not. This is the convention the Particle Data Group uses for combining
+measurements: when &chi;&sup2;/&nu; is above 1 they scale the quoted error
+up by exactly this factor, on the reasoning that a large &chi;&sup2; most
+likely means at least one input error is underestimated and, not knowing
+which, all are treated alike; when it is at or below 1 the errors are
+accepted as they stand. Their scale factor S and this program's B are the
+same quantity -- the PDG divides by N &minus; 1 because it averages a single
+number, where a curve with p parameters divides by N &minus; p.</p>
+
+<p><b>The scaling only ever widens</b>, and it never moves the curve
+itself -- only its band. A ratio <i>below</i> 1 leaves the band at the Monte
+Carlo percentiles rather than shrinking it, because a low ratio is a
+statement about the inputs, not a measurement of the curve: at best it says
+the errors fed in were overstated, and narrowing on that would report a
+precision nothing measured. The ratio itself is still reported as measured
+and is not floored at 1, since a value below the table's range is worth
+knowing about.</p>
+
+<h4>When B is too high</h4>
+
+<p>Widening the band makes the uncertainty honest about the scatter, but it
+spreads a problem that may belong to one line over the whole curve. Finding
+the cause is better than scaling it. The <b>residual strip</b> under the
+efficiency plot shows which kind of problem you have:</p>
+
+<ul>
+<li><b>One point far off, the rest well behaved.</b> Suspect that line: an
+unresolved doublet or multiplet inflating its area, a peak assigned to the
+wrong energy, or a line whose tabulated intensity is poorly known. If it
+cannot be fixed, untick it in the calibration window -- a line left out of
+the energy calibration is left out of the efficiency fit as well -- and
+refit.</li>
+<li><b>A smooth trend across the energy range.</b> The model cannot follow
+the shape of your curve; try the other one. Or an effect neither model has
+a term for is bending the points, such as true-coincidence summing, which
+distorts the peak areas of a cascading source like Ra-226, Eu-152 or Co-60
+measured close to the detector.</li>
+<li><b>Scatter everywhere with no pattern.</b> The stated errors are
+simply too small. A peak area's error is counting statistics only; it says
+nothing about how well the peak's shape and background were modelled, and
+that part of the uncertainty is missing from every point.</li>
+</ul>
+
+<h4>When B is too low</h4>
+
+<p>Only a ratio below the table's range means anything. It says the errors
+are larger than the scatter supports -- often an uncertainty that is really
+common to many lines, such as one normalisation shared by a whole source,
+counted as if it were independent on each. The band is not narrowed for it,
+for the reason above. Inside the range, a low B is chance and needs no
+action.</p>
+
+<h4>References</h4>
+
+<ul>
+<li>R. T. Birge, &ldquo;The Calculation of Errors by the Method of Least
+Squares&rdquo;, <i>Phys. Rev.</i> <b>40</b>, 207 (1932),
+doi:10.1103/PhysRev.40.207 -- the origin of the ratio, as a comparison of
+external and internal errors.</li>
+<li>K. Nakamura <i>et al.</i> (Particle Data Group), &ldquo;Review of
+Particle Physics&rdquo;, <i>J. Phys. G</i> <b>37</b>, 075021 (2010),
+Introduction, Sec. 5.2.2, &ldquo;Unconstrained averaging&rdquo;. -- the
+scale factor S = &radic;(&chi;&sup2;/(N&minus;1)) and the rule of applying
+it only when &chi;&sup2;/&nu; exceeds 1.</li>
+</ul>
 
 <h3>Why the correction stops below 50 keV</h3>
 <p>Applying an efficiency divides each bin by the curve at that bin's
