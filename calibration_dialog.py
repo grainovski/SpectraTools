@@ -43,7 +43,10 @@ class CalibrationDialog(QDialog):
         self._c_label = QLabel("c:")
 
         self._load_button = QPushButton("Load from file...")
-        self._load_button.clicked.connect(self._on_load_file)
+        # Through a lambda: clicked() passes a `checked` bool, which would
+        # land in _on_load_file's optional `path` -- and open(False) opens
+        # file descriptor 0, standard input.
+        self._load_button.clicked.connect(lambda: self._on_load_file())
 
         self._active_checkbox = QCheckBox("Active")
 
@@ -83,11 +86,42 @@ class CalibrationDialog(QDialog):
         self._c_field.setVisible(is_quadratic)
         self._c_label.setVisible(is_quadratic)
 
-    def _on_load_file(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Load Calibration Coefficients", "", "Text files (*.txt);;All files (*)"
-        )
-        if not path:
+    def _on_load_file(self, path=None):
+        """Fill the fields from a file: either a plain coefficients file
+        (one number per line), or an efficiency saved by this program.
+
+        The second matters because it is the only place an energy
+        calibration the program produced is ever written down. A saved
+        efficiency records the exact calibration it was made under, kind
+        included, so loading one sets the linear/quadratic choice as well as
+        the numbers -- a plain coefficients file cannot say which it is and
+        still relies on the choice made above.
+
+        `path` skips the file dialog, which is how the tests reach this.
+        """
+        from efficiency_io import (
+            SavedEfficiencyError, is_saved_efficiency, read_energy_calibration)
+
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Load Calibration Coefficients", "",
+                "Text files (*.txt);;All files (*)"
+            )
+            if not path:
+                return
+        if is_saved_efficiency(path):
+            try:
+                calibration = read_energy_calibration(path)
+            except SavedEfficiencyError as exc:
+                QMessageBox.warning(self, "Calibration", str(exc))
+                return
+            quadratic = calibration.kind == "quadratic"
+            self._quadratic_radio.setChecked(quadratic)
+            self._linear_radio.setChecked(not quadratic)
+            self._a_field.setText(str(calibration.a))
+            self._b_field.setText(str(calibration.b))
+            self._c_field.setText(str(calibration.c))
+            self._update_c_field_visibility()
             return
         try:
             values = read_coefficients_file(path, quadratic=self._quadratic_radio.isChecked())

@@ -253,6 +253,16 @@ whether it's actually applied -- with it active, the plot's X axis and
 every fit parameter that has units (position, FWHM) switch from raw
 channels to keV. Calibration is shared across every loaded spectrum.</p>
 
+<p>The dialog's <b>Load from file...</b> takes either of two files. A
+plain coefficients file holds one number per line -- two for linear,
+three for quadratic -- and uses whichever of linear or quadratic is
+selected in the dialog, since the file cannot say. An efficiency you saved
+earlier (its <b>_bins</b> or <b>_peaks</b> file) works too, and is the
+more useful of the two: it records the exact energy calibration the
+efficiency was made under, kind included, so loading it sets linear or
+quadratic as well as the numbers. It is also the only place a calibration
+this program produced is ever written down.</p>
+
 <p>Two nearby entries sound alike and differ in the one way that matters,
 what happens to the coefficients. <b>Toggle Calibration Active</b>
 (Ctrl+T) only changes how the axis is shown: the calibration is kept
@@ -710,6 +720,24 @@ low-energy floor is not, because it applies to every correction.</p>
 <b>Operations &gt; Show Efficiency...</b> reopens it, so a spectrum loaded
 later can be corrected without refitting. The entry is greyed out until an
 efficiency has been fitted.</p>
+
+<p><b>Operations &gt; Load Efficiency...</b> brings back one saved in an
+earlier session -- pick its <b>_bins</b> file, or its <b>_peaks</b> file
+with the _bins file beside it. A small window shows what the file holds,
+lets you choose KRF or Radware, and applies it through the same <b>Apply
+to</b> list and the same rules as the fitted one. <b>Use its energy
+calibration</b> makes the calibration the efficiency was made under the
+active one; skip it if you have already calibrated the new spectrum
+yourself.</p>
+
+<p>What comes back is the curve that was applied when you saved it, not a
+refit. It is read from the saved curve rather than rebuilt from the saved
+parameters, because the two are not the same: the program applies the
+Monte Carlo mean, and for Radware the single best fit can sit ten percent
+away from that mean inside the fitted range. Only the finished curve is
+saved -- not the measured points or the Monte Carlo behind it -- so a
+loaded efficiency can be applied but not shown as a fit, and bins beyond
+the energies the file covers are zeroed rather than guessed at.</p>
 """
     return _page("SpectraTools -- HowTo", body)
 
@@ -1693,12 +1721,20 @@ calibration changes. The per-bin file has no <b>dE</b> either: a point
 sampled off a curve has no energy uncertainty, and a column of zeros
 would be a meaningless number written to disk.</p>
 <p>Above 2,048 rows the per-bin curves are interpolated from that many
-knots rather than evaluated at every channel. The header records when
-this happened. The error it introduces is about 2 parts in a million,
-some three thousand times smaller than the Monte Carlo uncertainty
-already in the <b>deff</b> columns; evaluating every channel exactly
-would spend a minute and a half of your time buying precision the
-numbers do not have.</p>
+knots rather than evaluated at every channel, and every interval between
+knots is checked against the exact curve: any that misses by more than one
+part in 100,000 is evaluated exactly at every channel it covers. The
+header records this. Evaluating every channel exactly would take a minute
+and a half; the check keeps a save to a few seconds while holding the
+whole file within that bound.</p>
+
+<p>Files saved before version 6.1.1 were interpolated without the check,
+and it mattered. The Radware curve can fall off a cliff at the lowest
+calibration line -- on one reference set it drops from 1.0 to 0.03 within
+3 keV -- and interpolating straight across that put values up to several
+times too large into the few rows beside the lowest line. The KRF curve
+has no such cliff and was within a few parts in 10,000. If you keep an
+older per-bin file and use Radware, save the efficiency again.</p>
 
 <h3>Applying it to a spectrum</h3>
 <p>Each bin's counts are divided by the efficiency at that bin's energy,

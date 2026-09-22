@@ -545,6 +545,16 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self.show_efficiency_action.triggered.connect(self.show_efficiency)
         self.operations_menu.addAction(self.show_efficiency_action)
 
+        self.load_efficiency_action = QAction("Load Efficiency...", self)
+        self.load_efficiency_action.setToolTip(
+            "Read back an efficiency saved earlier -- together with the "
+            "energy calibration it was made under -- and apply it to a "
+            "spectrum without fitting again"
+        )
+        self.load_efficiency_action.triggered.connect(
+            lambda: self.load_efficiency())
+        self.operations_menu.addAction(self.load_efficiency_action)
+
         # After the two existing calibration entries rather than between
         # them: those two are the primitives (set the coefficients, turn
         # them on) and belong together, while this one is a way of
@@ -1033,6 +1043,48 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self._efficiency_dialog.setAttribute(
             Qt.WidgetAttribute.WA_DeleteOnClose)
         self._efficiency_dialog.show()
+
+    def load_efficiency(self, path=None):
+        """Read a saved efficiency and open a window to apply it.
+
+        `path` skips the file dialog, which is how the tests reach this.
+        Returns the window, or None if nothing was loaded.
+        """
+        from efficiency_io import SavedEfficiencyError, read_saved_efficiency
+        from saved_efficiency_dialog import SavedEfficiencyDialog
+
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Load Efficiency", "",
+                "Saved efficiency (*_bins.txt *_peaks.txt);;"
+                "Text files (*.txt);;All files (*)")
+            if not path:
+                return None
+        try:
+            saved = read_saved_efficiency(path)
+        except SavedEfficiencyError as exc:
+            QMessageBox.warning(self, "Could not load efficiency", str(exc))
+            return None
+        close_previous(getattr(self, "_saved_efficiency_dialog", None))
+        # Parentless for the same reason as the fitted-efficiency window:
+        # a widget parent makes a window Win32-owned and pins it above this
+        # one whatever is clicked.
+        self._saved_efficiency_dialog = SavedEfficiencyDialog(
+            None, saved, main_window=self)
+        self._saved_efficiency_dialog.setAttribute(
+            Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._saved_efficiency_dialog.show()
+        return self._saved_efficiency_dialog
+
+    def use_calibration(self, calibration):
+        """Make `calibration` the active energy calibration.
+
+        The same path the calibration dialog's OK takes, so a calibration
+        read from a file keeps the view in place, carries open matrix panels
+        along, and still triggers the warning for a quadratic that folds
+        inside the loaded data.
+        """
+        self._apply_calibration_change(calibration, True)
 
     @staticmethod
     def efficiency_label(spectrum, result):

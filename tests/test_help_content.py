@@ -1706,3 +1706,28 @@ def test_the_birge_section_explains_how_to_act_on_it():
                   "untick it in the calibration window",
                   "only ever widens", "not floored at 1"):
         assert piece in flat, "the Birge section no longer says %r" % piece
+
+
+def test_loading_a_saved_calibration_is_documented():
+    """A menu entry nobody can find is a feature that did not ship. The
+    HowTo must name both routes -- the new Load Efficiency window and the
+    calibration dialog reading a saved efficiency -- by their real labels."""
+    from help_content import build_howto_html
+
+    howto = _flat(build_howto_html())
+    for piece in ("Operations &gt; Load Efficiency...",
+                  "Use its energy calibration", "Load from file...",
+                  "_bins", "_peaks"):
+        assert piece in howto, "the HowTo no longer mentions %r" % piece
+
+
+def test_the_files_section_no_longer_claims_two_parts_per_million():
+    """That claim was never measured and was wrong by up to 527% for
+    Radware. The replacement states the bound the writer now enforces."""
+    from efficiency_io import REFINE_TOL
+    from help_content import build_knowledge_database_html
+
+    kb = _flat(build_knowledge_database_html())
+    assert "2 parts in a million" not in kb
+    assert "one part in 100,000" in kb
+    assert REFINE_TOL == 1e-5, "the Help states 1 in 100,000; keep them equal"

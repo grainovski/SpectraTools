@@ -4,7 +4,8 @@ NAMING: the four-parameter model is called KRF here and everywhere in this
 application since 6.1.1. CalEnEff, the reference this module is ported from,
 labels the SAME model "KFR" -- identical formula, identical parameters. When
 comparing our output with CalEnEff's, read one as the other. Efficiency files
-saved by SpectraTools 6.1.0 and earlier also say KFR.
+saved by SpectraTools 6.1.0 and earlier also say KFR; efficiency_io reads
+both spellings.
 
 A port of CalEnEff's two models (C:\\Users\\RIG\\Documents\\Claude\\efficieny,
 ra226_gui.py). The formulae are not ours and are not improved on here --
