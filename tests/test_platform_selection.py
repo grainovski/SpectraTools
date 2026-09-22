@@ -23,7 +23,6 @@ import main as main_module
 def test_module_import_does_not_force_a_platform(monkeypatch):
     """Importing must not pin QT_QPA_PLATFORM: that is what sent every WSL
     user through XWayland."""
-    import importlib
 
     monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
     monkeypatch.setattr(

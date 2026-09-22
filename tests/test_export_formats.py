@@ -1,6 +1,5 @@
 """X8: CSV and LaTeX exports, and X6: reloading a spectrum from disk."""
 
-import math
 import os
 
 import numpy as np

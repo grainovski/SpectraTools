@@ -339,7 +339,13 @@ _EFF_DY = (0.015205, 0.016887, 0.010867, 0.0069168, 0.00023863, 0.01077,
            0.0046294, 0.0052519, 0.0052159, 0.0045652, 0.0050075, 0.0039573,
            0.002575, 0.0041746, 0.003811, 0.0035953, 0.0031401)
 _EFF_KFR = (0.62743716, 784436.54, -0.00072588672, -146.70689)
-_EFF_RW = (-37.655755, 74.388013, 6.3869652, -0.71935967, -0.024243107)
+#: Radware parameters and the scale they were fitted at. They describe
+#: eff*_EFF_RW_SCALE, exactly as EfficiencyFit.rw_params does, so the curve
+#: is f_radware_5p(E, *_EFF_RW) / _EFF_RW_SCALE -- see
+#: efficiency.RW_SCALE_TARGETS. Dividing is not optional: without it the
+#: curve is out by a factor of 600.
+_EFF_RW = (-4.9085424, 9.6394293, -0.028632029, -0.71935966, -0.024243189)
+_EFF_RW_SCALE = 0.0016358426
 _EFF_NORM = 0.00056591026
 _EFF_GRID = (120, 129.08, 138.85, 149.36, 160.67, 172.83, 185.91, 199.99,
              215.12, 231.41, 248.92, 267.76, 288.03, 309.83, 333.29, 358.51,
@@ -380,7 +386,7 @@ def efficiency_models_figure():
     dy = np.array(_EFF_DY)
     grid = np.geomspace(120.0, 3200.0, 400)
     kfr = f_kfr(grid, *_EFF_KFR) * _EFF_NORM
-    rw = f_radware_5p(grid, *_EFF_RW) * _EFF_NORM
+    rw = f_radware_5p(grid, *_EFF_RW) / _EFF_RW_SCALE * _EFF_NORM
 
     fig = Figure(figsize=(7.5, 5.4), dpi=110)
     ax = fig.add_subplot(211)

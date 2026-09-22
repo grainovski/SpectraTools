@@ -9,7 +9,6 @@ The arithmetic is shared by the main window and the matrix panel's
 projection, which each had their own copy.
 """
 
-import math
 
 import pytest
 

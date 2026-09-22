@@ -11,7 +11,6 @@ one of them has lost its reason to exist.
 """
 
 import numpy as np
-import pytest
 
 from calibration import Calibration
 from main_window import MainWindow

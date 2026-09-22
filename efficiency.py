@@ -209,6 +209,21 @@ def multistart(func, E, eff, deff, seeds, bounds=None, method="trf",
             if chi2 < best_chi2:
                 best_chi2, best_p = chi2, p
         except Exception:
+            # A seed that leads nowhere is expected, not exceptional:
+            # curve_fit raises RuntimeError when it will not converge and
+            # ValueError on input it cannot use, and trying several starting
+            # points is the whole reason this function exists. Every seed
+            # failing is not silent -- best_p stays None and fit_efficiency
+            # turns that into a RuntimeError the user reads.
+            #
+            # Deliberately broad, with a known cost: a programming error
+            # inside one of the seed functions would be swallowed here and
+            # reported as "did not converge", which points at the user's data
+            # instead of at this file. Narrowing to (RuntimeError, ValueError)
+            # would surface that, at the price of crashing a whole
+            # calibration on one awkward data set. Graceful degradation wins
+            # while the seeds stay covered by tests; revisit if a real bug
+            # ever hides here.
             pass
     return best_p
 
@@ -365,6 +380,11 @@ def fit_efficiency(E, N, dN, I, dI):
                       and norm < best_norm):
                     best, best_norm, rw, rw_scale = min(chi2, best), norm, pp, k
             except Exception:
+                # Same bargain as multistart above: a rung that will not
+                # converge simply loses, which is the point of having
+                # fifteen of them. All of them failing leaves rw as None,
+                # which fit_efficiency records and reports rather than
+                # raising -- KFR alone is still a usable calibration.
                 pass
 
     out = EfficiencyFit(
@@ -551,6 +571,13 @@ def run_monte_carlo(fit, N, dN, I, dI, iterations=N_MC_EFFICIENCY,
             if np.all(np.isfinite(pp)):
                 kfr_store.append(pp)
         except Exception:
+            # Correct by design here, unlike the seed loops: a resampled
+            # data set that will not fit is a draw the band cannot use, and
+            # dropping it is the intended behaviour. It is not hidden --
+            # the sample simply never reaches kfr_store, so kfr_accepted
+            # falls and the dialog and the export both show the count. A
+            # band built on 200 survivors reads differently from one built
+            # on 9,900, which is exactly why that number is on screen.
             pass
 
         if fit.rw_params is not None:
@@ -575,6 +602,10 @@ def run_monte_carlo(fit, N, dN, I, dI, iterations=N_MC_EFFICIENCY,
                 if np.all(np.isfinite(pp_r)) and np.all(np.abs(pp_r) < 500):
                     rw_store.append(pp_r)
             except Exception:
+                # As above: a dropped draw is counted through rw_accepted,
+                # not swallowed. Radware rejects more often than KFR because
+                # of the |p| < 500 runaway guard, which is why the two counts
+                # are reported separately rather than as one total.
                 pass
 
     return EfficiencyMC(

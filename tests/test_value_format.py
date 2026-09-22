@@ -4,7 +4,6 @@ The parenthesised digits are the uncertainty expressed in units of the
 last decimal place shown, the convention used in nuclear data tables.
 """
 
-import math
 
 import pytest
 

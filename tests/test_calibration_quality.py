@@ -1,7 +1,6 @@
 """Reduced chi-squared for an energy calibration, and the three cases
 where it does not exist."""
 
-import math
 
 import pytest
 

@@ -1496,22 +1496,104 @@ def test_the_knowledge_database_explains_the_uncertainty_band():
             "the per-point error formula is missing %r" % piece)
 
 
-def test_the_efficiency_figures_come_from_the_apps_own_models():
-    """The figures are drawn by evaluating efficiency.f_kfr and
-    f_radware_5p on stored fit parameters, not sketched. If the models ever
-    change shape the pictures must follow, so this pins that they are
-    computed rather than pasted."""
+def _baked_curves(grid):
+    """The two curves the efficiency figures draw, on `grid`.
+
+    The Radware divisor is part of reading the parameters: they describe
+    eff*_EFF_RW_SCALE, exactly as EfficiencyFit.rw_params does. Dropping it
+    puts the curve out by a factor of 600.
+    """
     import numpy as np
 
     from efficiency import f_kfr, f_radware_5p
-    from help_figures import _EFF_KFR, _EFF_RW, _EFF_NORM
+    from help_figures import (_EFF_KFR, _EFF_RW, _EFF_RW_SCALE, _EFF_NORM)
 
-    E = np.array([300.0, 900.0, 2000.0])
-    kfr = f_kfr(E, *_EFF_KFR) * _EFF_NORM
-    rw = f_radware_5p(E, *_EFF_RW) * _EFF_NORM
-    assert np.all(np.isfinite(kfr)) and np.all(np.isfinite(rw))
-    # Both are fits to the same points, so they must agree inside the
-    # measured range -- a sign the stored parameters belong together.
-    assert np.max(np.abs(rw / kfr - 1.0)) < 0.05, (
-        "the stored KFR and Radware parameters disagree by more than 5%; "
-        "they are supposed to be two fits to the same 23 points")
+    kfr = f_kfr(grid, *_EFF_KFR) * _EFF_NORM
+    rw = f_radware_5p(grid, *_EFF_RW) / _EFF_RW_SCALE * _EFF_NORM
+    return np.asarray(kfr), np.asarray(rw)
+
+
+def test_the_efficiency_figures_come_from_the_apps_own_models():
+    """The stored parameters must still be what the app's own fit produces.
+
+    This used to compare the two baked parameter sets against EACH OTHER
+    and nothing else, which could not detect either going stale: a change
+    to f_kfr or f_radware_5p moves both curves together and the comparison
+    still passes. It imported the very constants it was pinning. The stored
+    inputs are baked too, so the honest check is to put them back through
+    fit_efficiency and see whether the same curves come out.
+    """
+    import numpy as np
+
+    from efficiency import f_kfr, f_radware_5p, fit_efficiency
+    from help_figures import _EFF_E, _EFF_Y, _EFF_DY
+
+    E = np.array(_EFF_E)
+    y = np.array(_EFF_Y)
+    dy = np.array(_EFF_DY)
+    grid = np.geomspace(120.0, 3200.0, 400)
+    inside = (grid >= E.min()) & (grid <= E.max())
+
+    kfr_baked, rw_baked = _baked_curves(grid)
+    assert np.all(np.isfinite(kfr_baked))
+
+    # I = 1, dI = 0 makes efficiency_points return exactly (y, dy), so this
+    # is the real fitting path on the real stored inputs.
+    fit = fit_efficiency(E, y, dy, np.ones_like(y), np.zeros_like(y))
+    kfr_live = f_kfr(grid, *fit.kfr_params)
+    rw_live = f_radware_5p(grid, *fit.rw_params) / fit.rw_scale
+
+    def worst(a, b, mask=None):
+        if mask is not None:
+            a, b = a[mask], b[mask]
+        return float(np.nanmax(np.abs(a - b) / np.maximum(np.abs(b), 1e-30)))
+
+    # Measured 2026-09-22: 5.9e-05. The inputs are stored to five
+    # significant figures, which is the floor here, so 1e-3 leaves ~17x.
+    assert worst(kfr_baked, kfr_live) < 1e-3, (
+        "the baked KFR figure parameters no longer reproduce from "
+        "fit_efficiency (worst %.3e) -- the figure is stale"
+        % worst(kfr_baked, kfr_live))
+
+    # Radware only INSIDE the measured range, deliberately. Outside it the
+    # flat direction described in tests/test_efficiency_fit.py leaves the
+    # curve under-determined, and refitting lands somewhere else along it --
+    # 8.8 relative on this data. Pinning that would be pinning where one
+    # machine's optimizer stopped. Measured inside: 4.7e-03, so 2e-2.
+    assert worst(rw_baked, rw_live, inside) < 2e-2, (
+        "the baked Radware figure parameters no longer reproduce inside the "
+        "measured range (worst %.3e) -- the figure is stale"
+        % worst(rw_baked, rw_live, inside))
+
+    # Kept from the original test: two fits to the same 23 points have to
+    # agree where those points are. This is what catches a dropped
+    # _EFF_RW_SCALE divisor, which leaves them a factor of 600 apart.
+    assert worst(rw_baked, kfr_baked, inside) < 0.10, (
+        "the stored KFR and Radware curves disagree by %.1f%% inside the "
+        "measured range; they are two fits to the same 23 points"
+        % (100.0 * worst(rw_baked, kfr_baked, inside)))
+
+
+def test_that_figure_check_can_fail():
+    """Control. Both assertions above compare a stored curve with a freshly
+    fitted one, so they are only worth having if that comparison reacts to a
+    curve that is wrong. Bending one side must be caught."""
+    import numpy as np
+
+    from efficiency import f_kfr, fit_efficiency
+    from help_figures import _EFF_E, _EFF_Y, _EFF_DY, _EFF_NORM, _EFF_KFR
+
+    E = np.array(_EFF_E)
+    y = np.array(_EFF_Y)
+    dy = np.array(_EFF_DY)
+    grid = np.geomspace(120.0, 3200.0, 400)
+
+    fit = fit_efficiency(E, y, dy, np.ones_like(y), np.zeros_like(y))
+    live = f_kfr(grid, *fit.kfr_params)
+    bent = f_kfr(grid, *_EFF_KFR) * _EFF_NORM * 1.02
+
+    worst = float(np.nanmax(np.abs(bent - live) / np.abs(live)))
+    assert worst > 1e-3, (
+        "a 2%% error in the stored KFR curve scored only %.3e against the "
+        "live fit, so the staleness check above is measuring nothing"
+        % worst)

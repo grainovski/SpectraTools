@@ -10,7 +10,6 @@ chi^2, which never had one.
 """
 
 import numpy as np
-import pytest
 from PySide6.QtWidgets import QHeaderView
 
 from calibration import Calibration
