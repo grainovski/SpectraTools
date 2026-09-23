@@ -74,6 +74,117 @@ def efficiency_area_error(area_err, reduced_chi2):
     return area_err * math.sqrt(reduced_chi2)
 
 
+#: How near a fitted peak's centroid, in that fit's own FWHM, a line of the
+#: source must fall for the peak to be taken as containing it -- when no
+#: other peak is nearer and no peak has been given that line's energy. One
+#: width: a single-peak fit of two lines that close broadens to take in
+#: both (386.77 and 388.89 keV fitted as one peak came out 3.45 keV wide,
+#: where that spectrum's lines are 2.0), while a line further out keeps
+#: most of its counts outside the fitted shape and is usually found as a
+#: peak of its own. The automatic refit's blends sit at a third of a width
+#: on real spectra, well inside this.
+SHARED_PEAK_FWHM = 1.0
+
+
+def blend_partners(peaks, energies, source_lines, calibration):
+    """{peak index: [SourceLine]}, the unassigned lines inside each assigned
+    peak -- see share_blended_areas for `peaks` and `energies`.
+
+    A line is inside a peak when the calibration puts it nearer to that
+    peak than to any other, within SHARED_PEAK_FWHM of the peak's fitted
+    width, and no peak has been given its energy. A peak fitted for the
+    line itself sits at the line's place, nearer than any other -- the
+    second peak the automatic refit pins there sits exactly on it -- so a
+    line with a peak of its own is not counted as part of another's.
+    """
+    if calibration is None or not source_lines or not peaks:
+        return {}
+    taken = set()
+    for energy in energies:
+        if energy is not None:
+            line = _matching_line(energy, source_lines)
+            if line is not None:
+                taken.add(line.energy)
+    partners = {}
+    for line in source_lines:
+        if line.energy in taken:
+            continue
+        try:
+            channel = float(calibration.invert(line.energy))
+        except Exception:  # noqa: BLE001 -- a line the calibration cannot place
+            continue
+        if not math.isfinite(channel):
+            continue
+        nearest = min(range(len(peaks)), key=lambda i: abs(peaks[i][0] - channel))
+        centre, _err, fwhm, _area, _area_err = peaks[nearest]
+        if energies[nearest] is None or fwhm is None or not (fwhm > 0.0):
+            continue
+        if abs(channel - centre) <= SHARED_PEAK_FWHM * fwhm:
+            partners.setdefault(nearest, []).append(line)
+    return partners
+
+
+def committed_peaks(fits, energy_of):
+    """(peaks, energies) for share_blended_areas, from fit results: every
+    peak of every fit, in order, with the area error an efficiency point
+    carries (efficiency_area_error). `energy_of` maps id(peak) to the
+    energy that peak was given; any other peak gets None. Results without
+    peaks -- integrations -- contribute nothing.
+    """
+    peaks, energies = [], []
+    for result in fits:
+        for peak in getattr(result, "peaks", None) or []:
+            peaks.append((peak.position, peak.position_err or 0.0, peak.fwhm, peak.area,
+                          efficiency_area_error(peak.area_err,
+                                                getattr(result, "reduced_chi2", None))))
+            energies.append(energy_of.get(id(peak)))
+    return peaks, energies
+
+
+def share_blended_areas(peaks, energies, source_lines, calibration):
+    """Efficiency points, each carrying only its own line's share of its
+    peak.
+
+    `peaks` is (channel, channel_err, fwhm, area, area_err) for EVERY peak
+    on the spectrum, assigned or not -- a peak nobody named still says
+    where a line's counts went. `energies` is parallel to it: the energy
+    given to each peak, or None. Returns (channel, channel_err, area,
+    area_err, energy) for each assigned peak, in `peaks` order: what the
+    calibration plot fits and build_rows writes.
+
+    A line of the source that nobody assigned but that lies inside an
+    assigned peak (blend_partners) is part of it, unresolved, and its
+    counts are in the fitted area. That area is shared in proportion to
+    intensity -- what a merged doublet in a .sou does -- and the partners'
+    intensity uncertainty joins the area's: N_line = N * I / (I + S), so
+    dN_line / N_line gains dS / (I + S) in quadrature. On real Ra-226
+    spectra the Bi-214 line at 273.79 keV sits inside 274.80 keV like
+    this, a third as strong, and would otherwise add 38% of its counts.
+
+    One rule for both routes to an efficiency: the automatic calibration
+    and Calibrate from Fitted Peaks each pass their peaks through here, so
+    reopening the dialog after an automatic run shows the same points the
+    run did. Without a calibration or a source there is nothing to place a
+    partner with, and the areas pass through unchanged.
+    """
+    partners = blend_partners(peaks, energies, source_lines, calibration)
+    points = []
+    for index, ((channel, channel_err, _fwhm, area, area_err), energy) in enumerate(
+            zip(peaks, energies)):
+        if energy is None:
+            continue
+        sharing = partners.get(index, ())
+        line = _matching_line(energy, source_lines) if sharing else None
+        if line is not None and line.intensity > 0.0:
+            total = line.intensity + sum(other.intensity for other in sharing)
+            share = line.intensity / total
+            extra = math.sqrt(sum(other.intensity_err ** 2 for other in sharing)) / total
+            area_err = math.hypot(area_err * share, area * share * extra)
+            area = area * share
+        points.append((channel, channel_err, area, area_err, energy))
+    return points
+
+
 @dataclass(frozen=True)
 class ExportRow:
     channel: float

@@ -300,3 +300,26 @@ def test_the_refit_still_accounts_for_every_line(eu152):
              + len(refit.results))
     assert total == len(lines)
     assert refit.runaway >= 1, "the 674.64/678.62 stray is still supposed to be caught"
+
+
+def test_the_points_share_exactly_the_lines_the_refit_counted_as_blended(eu152):
+    """The status bar says "N blended into a stronger neighbour, the area
+    shared by intensity", counted by the refit from the found peaks; the
+    sharing itself is done afterwards, by caleneff_export's rule from the
+    fitted peaks. On this real spectrum the two must name the same line
+    -- 963.37 keV inside 964.06 keV -- or the message promises a split
+    the points do not make."""
+    from caleneff_export import blend_partners, committed_peaks
+
+    counts, lines, _outcome = eu152
+    refit = _refit(counts, lines)
+    peaks, energies = committed_peaks(
+        refit.results,
+        {id(r.peaks[0]): e for r, (_c, e) in zip(refit.results, refit.pairs)})
+    cal = C.Calibration(kind="linear", a=0.0, b=0.6249)
+    partners = blend_partners(peaks, energies, lines, cal)
+    shared = sorted(line.energy for group in partners.values() for line in group)
+    assert refit.blended == len(shared) == 1
+    assert abs(shared[0] - 963.37) < 0.01
+    named = [energies[i] for i in partners]
+    assert len(named) == 1 and abs(named[0] - 964.057) < 1e-3

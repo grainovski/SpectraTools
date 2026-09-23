@@ -497,3 +497,45 @@ def test_the_plot_is_given_the_efficiency_points_not_the_raw_fits(
     # Not vacuous: at least one of these fits is worse than its counting
     # statistics, so the check above compared two different numbers.
     assert widened >= 1
+
+
+def test_reopening_calibrate_from_fitted_peaks_shows_the_points_the_run_showed(
+        qapp, tmp_path, monkeypatch):
+    """6.1.1: after an automatic run, the plot shares a blended peak's area
+    by intensity. Reopening Calibrate from Fitted Peaks on the same fits
+    used to hand the named line the WHOLE peak again -- the hand path had
+    no such rule. Both now go through share_blended_areas; this pins that
+    the dialog, reopened, exports exactly the points the run did."""
+    from synthetic_calibration import true_fwhm
+
+    offset, gain = 12.5, 0.40
+    centre = (778.9045 - offset) / gain
+    partner = 778.9045 + 0.25 * true_fwhm(centre) * gain     # inside the peak
+    source = _write_sou(tmp_path, EIGHT_LINES + [(partner, 400.0)], "blend.sou")
+    window, active = _window(tmp_path, source, offset, gain)
+    _run_and_accept(window, monkeypatch, source)
+
+    # The scenario: the refit counted the partner as blended, and the run's
+    # point for 778.9 keV carries less than its fit's whole area.
+    assert "blended into a stronger neighbour" in window.statusBar().currentMessage()
+    run = {round(p[4], 4): p for p in window._calibration_plot._points}
+    fit = [f for f in active.fits if abs(f.peaks[0].position - centre) < 3.0][0]
+    assert run[778.9045][2] < 0.8 * fit.peaks[0].area
+
+    reopened = []
+
+    class _Look(assign_module.EnergyAssignDialog):
+        def __init__(self, parent, peaks, **kwargs):
+            super().__init__(parent, peaks, **kwargs)
+            reopened.append(self)
+
+        def exec(self):
+            return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(assign_module, "EnergyAssignDialog", _Look)
+    window._open_calibrate_from_peaks_dialog()
+    manual = {round(p[4], 4): p for p in reopened[0].export_points()}
+    assert manual.keys() == run.keys()
+    for energy, point in run.items():
+        assert manual[energy][2] == pytest.approx(point[2], rel=1e-9), energy
+        assert manual[energy][3] == pytest.approx(point[3], rel=1e-9), energy

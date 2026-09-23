@@ -489,7 +489,10 @@ seven-column file for the efficiency-calibration program: channel and
 its error, net area and its error, energy, and relative intensity with
 its error. The area's error is the fit's own, widened where the fit
 describes its peak poorly -- see "The CalEnEff export" in the Knowledge
-Database.</p>
+Database. A peak that also holds another line of the loaded source -- one
+within the peak's own fitted width, nearer to it than to any other peak,
+and assigned to none -- is written with only its own line's share of the
+area, split by intensity, exactly as after an automatic calibration.</p>
 <p><b>Click a point to find out which one it is.</b> Clicking a point on
 the curve or on the residual strip rings it on both, names it under the
 plot -- channel, energy, and its residual against the current fit --
@@ -558,7 +561,9 @@ line is fitted, the weaker is counted in the status bar as blended, and
 the peak's area is split between them in proportion to their
 intensities, so the stronger line's point carries only its own share --
 also when the weaker one is unticked. Fit Results still shows the whole
-peak. A line with no visible peak of its own that falls inside another
+peak. The split is the same one Calibrate from Fitted Peaks makes, so
+reopening that dialog afterwards shows the same points. A line with no
+visible peak of its own that falls inside another
 line's fit window is fitted there as a second peak, held where the
 calibration puts it and as wide as the line beside it, so that its
 counts are not taken for the other line's; it is not exported itself,
@@ -1419,11 +1424,18 @@ times &radic;(&chi;&sup2;/&nu;); at or below 1 it is left as it is, never
 narrowed. It is the rule the Birge ratio applies to the efficiency band,
 one level down, and the efficiency window fits with exactly these errors,
 so this program and CalEnEff see the same data. Fit Results, the fit logs
-and the reports keep the fit's own error. After an automatic calibration,
-a line that shares its peak with a weaker line of the source is written
-with its share of the area, as "12. Automatic calibration" in the HowTo
-describes, and the weaker line's intensity uncertainty joins the area's
-error.</p>
+and the reports keep the fit's own error.</p>
+<p><b>A peak that holds two lines is split between them.</b> A line of the
+source that no peak has been given, lying within a peak's own fitted width
+of its centroid and nearer to it than to any other peak, is inside that
+peak: unresolved, its counts are in the fitted area. The line the peak is
+named for is then written with only its share, in proportion to the lines'
+intensities, and the other lines' intensity uncertainty joins the area's
+error. A line fitted as a peak of its own -- as an automatic calibration
+does for a neighbour it finds no peak for -- is not counted this way: that
+peak is nearer to it. The rule is the same whether the energies were
+assigned by hand or by an automatic calibration, so reopening Calibrate
+from Fitted Peaks after an automatic run writes the same numbers.</p>
 <p>Source files carry intensities on no common scale, so the strongest
 line in the loaded source is normalised to <b>100</b> and every other
 line scaled by the same factor. Because efficiency is a ratio to I, a

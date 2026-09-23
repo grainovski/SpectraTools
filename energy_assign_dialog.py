@@ -433,16 +433,25 @@ class EnergyAssignDialog(QDialog):
 
     def export_points(self):
         """(channel, channel_err, area, area_err, energy) per assigned
-        row, for the plot window and the CalEnEff export."""
-        points = []
+        row, for the plot window and the CalEnEff export.
+
+        A peak that also holds an unassigned line of the loaded source
+        carries only its own line's share of the area -- the rule the
+        automatic calibration applies, applied here by the same function
+        (caleneff_export.share_blended_areas), so reopening this dialog
+        after an automatic run shows the points the run showed. It needs
+        the calibration the assignments make now, to place the other
+        lines; while they make none, the areas pass through as fitted.
+        """
+        from caleneff_export import share_blended_areas
+
+        calibration, _reason = self._compute_calibration()
+        peaks = [(peak.channel, peak.channel_err or 0.0, peak.fwhm, peak.area, peak.area_err)
+                 for peak in self._peaks]
+        energies = [None] * len(peaks)
         for row in self.rows_with_energy():
-            peak = self._peaks[row]
-            points.append((
-                peak.channel, peak.channel_err or 0.0,
-                peak.area, peak.area_err,
-                _parse_energy(self._energy_text(row)),
-            ))
-        return points
+            energies[row] = _parse_energy(self._energy_text(row))
+        return share_blended_areas(peaks, energies, self.source_lines, calibration)
 
     def suggested_rows(self):
         """Rows currently holding an untouched suggestion."""

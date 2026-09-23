@@ -756,12 +756,12 @@ class RefitOutcome:
     is known.
 
     `results` are one FitResult per line fitted; `pairs` the matching
-    [(fitted channel, energy)]; `shares` the matching (share, extra):
-    the fraction of the fitted area that belongs to the line, and the
-    relative uncertainty that split adds -- (1.0, 0.0) unless weaker
-    lines blended into the same peak (see refit_source_lines). The line
-    is always `result.peaks[0]`; any further peak in a result is a
-    listed line fitted beside it (`alongside`), never exported.
+    [(fitted channel, energy)]. The line is always `result.peaks[0]`; any
+    further peak in a result is a listed line fitted beside it
+    (`alongside`), never exported. A blended line's share of its peak is
+    not decided here but where every efficiency point is made,
+    caleneff_export.share_blended_areas, so the automatic run and the
+    hand-assigned dialog cannot disagree about it.
 
     The counts say what happened to every other line: `outside` the
     spectrum's range, `invisible` with no found peak where the
@@ -776,37 +776,13 @@ class RefitOutcome:
     in the calibration dialog.
     """
 
-    __slots__ = ("results", "pairs", "shares", "outside", "invisible", "alongside",
+    __slots__ = ("results", "pairs", "outside", "invisible", "alongside",
                  "blended", "skipped", "failed", "runaway", "excluded")
 
     def __init__(self):
-        self.results, self.pairs, self.shares = [], [], []
+        self.results, self.pairs = [], []
         self.outside = self.invisible = self.alongside = self.blended = 0
         self.skipped = self.failed = self.runaway = self.excluded = 0
-
-    def efficiency_points(self):
-        """(channel, channel_err, area, area_err, energy) per fitted line:
-        what the calibration plot fits the efficiency to and the CalEnEff
-        export writes.
-
-        The area is the line's share of its peak, and its uncertainty is
-        the fit's own, widened where the peak fit is poor (see
-        caleneff_export.efficiency_area_error) and combined with what
-        splitting a blend adds. The committed fit keeps the whole area
-        and the fit's own error -- Fit Results reports the peak, this
-        reports the line.
-        """
-        from caleneff_export import efficiency_area_error
-
-        points = []
-        for result, (_channel, energy), (share, extra) in zip(
-                self.results, self.pairs, self.shares):
-            peak = result.peaks[0]
-            area = peak.area * share
-            relative = efficiency_area_error(peak.area_err, result.reduced_chi2) / peak.area
-            points.append((peak.position, peak.position_err or 0.0, area,
-                           area * math.hypot(relative, extra), energy))
-        return points
 
     def summary(self, source_name):
         parts = [f"{_plural(len(self.results), 'line')} of {source_name} refitted for CalEnEff"]
@@ -855,11 +831,9 @@ def refit_source_lines(x, counts, lines, calibration,
 
     - A weaker line close enough to land on the SAME found peak is part
       of that peak, unresolved, and its counts are in the fitted area.
-      The area is shared in proportion to the lines' intensities -- what
-      a merged doublet in the .sou does -- and the partner's intensity
-      uncertainty joins the area's. On real Ra-226 spectra the Bi-214
-      line at 273.79 keV sits under 274.80 keV this way, a third as
-      strong, and adds 38% of the line's own counts.
+      It is counted here as blended; the area is shared by intensity when
+      the efficiency points are made, by caleneff_export.share_blended_areas
+      -- the one place that does it for the hand-assigned route as well.
     - A listed line with no found peak of its own but inside this line's
       fit window is added to the fit as a second peak, its position held
       where the calibration puts it and its width tied to the line's.
@@ -915,8 +889,7 @@ def refit_source_lines(x, counts, lines, calibration,
     for k in sorted(claims):
         candidates = claims[k]
         line = max(candidates, key=lambda l: l.intensity)
-        sharing = [other for other in candidates if other is not line]
-        outcome.blended += len(sharing)
+        outcome.blended += len(candidates) - 1
         if line.energy in unticked:
             outcome.excluded += 1
             continue
@@ -948,15 +921,7 @@ def refit_source_lines(x, counts, lines, calibration,
             except (FitError, ValueError, RuntimeError):
                 outcome.failed += 1
                 continue
-        # The partners' own share of the peak, and what their intensity
-        # uncertainty adds to the line's area: N_line = N * I / (I + S),
-        # so dN_line / N_line gains dS / (I + S) in quadrature.
-        rest = sum(other.intensity for other in sharing)
-        total = line.intensity + rest
-        share = line.intensity / total if total > 0.0 else 1.0
-        extra = (math.sqrt(sum(other.intensity_err ** 2 for other in sharing)) / total
-                 if total > 0.0 else 0.0)
-        fitted.append((photopeaks[k], result, line, (share, extra)))
+        fitted.append((photopeaks[k], result, line))
     outcome.alongside = len(beside_a_fit)
     outcome.invisible = len(unclaimed) - outcome.alongside
 
@@ -968,12 +933,10 @@ def refit_source_lines(x, counts, lines, calibration,
     # spectrum came out 5.03 channels where the fits say 2.83. Nothing
     # wrong had reached an export, but this is the more consequential of
     # the two paths and had the weaker gate.
-    kept, runaway, _duplicate = _settle([(seed, result) for seed, result, _l, _s in fitted])
+    kept, runaway, _duplicate = _settle([(seed, result) for seed, result, _l in fitted])
     outcome.runaway += runaway
-    by_id = {id(result): (line, share) for _seed, result, line, share in fitted}
+    by_id = {id(result): line for _seed, result, line in fitted}
     for result in kept:
-        line, share = by_id[id(result)]
         outcome.results.append(result)
-        outcome.pairs.append((result.peaks[0].position, line.energy))
-        outcome.shares.append(share)
+        outcome.pairs.append((result.peaks[0].position, by_id[id(result)].energy))
     return outcome

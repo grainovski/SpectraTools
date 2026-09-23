@@ -1798,7 +1798,7 @@ def test_the_model_comparison_claim_holds_on_the_real_eu152_spectrum():
     import numpy as np
 
     import auto_calibrate
-    from caleneff_export import build_rows
+    from caleneff_export import build_rows, committed_peaks, share_blended_areas
     from calibration import Calibration
     from efficiency import fit_efficiency
     from peak_fit import channel_indices
@@ -1817,7 +1817,10 @@ def test_the_model_comparison_claim_holds_on_the_real_eu152_spectrum():
     cal = Calibration(kind="linear", a=outcome.match.offset, b=outcome.match.gain)
     refit = auto_calibrate.refit_source_lines(x, counts, lines, cal,
                                               excluded=outcome.suspect_energies)
-    rows, _skipped = build_rows(refit.efficiency_points(), lines)
+    peaks, energies = committed_peaks(
+        refit.results,
+        {id(r.peaks[0]): e for r, (_c, e) in zip(refit.results, refit.pairs)})
+    rows, _skipped = build_rows(share_blended_areas(peaks, energies, lines, cal), lines)
     fit = fit_efficiency(*(np.array([getattr(r, name) for r in rows]) for name in
                            ("energy", "area", "area_err", "intensity_pct",
                             "intensity_pct_err")))
@@ -1852,3 +1855,28 @@ def test_the_neighbour_handling_is_documented_in_the_words_the_status_bar_uses()
     status = outcome.summary("x.sou")
     for words in ("fitted beside a stronger neighbour", "blended"):
         assert words in status and words in howto, words
+
+
+def test_the_split_of_a_shared_peak_is_documented_for_both_routes():
+    """The rule now covers peaks assigned by hand as well; the HowTo must
+    say so in the section a hand user reads, and the Knowledge Database
+    must state the rule as the code applies it -- one fitted width, the
+    nearest peak, a line no peak has been given."""
+    from caleneff_export import SHARED_PEAK_FWHM
+    from help_content import build_howto_html, build_knowledge_database_html
+
+    howto = _flat(build_howto_html())
+    manual = howto[howto.find("<h3>11. Calibrating from fitted peaks</h3>"):
+                   howto.find("<h3>12. Automatic calibration</h3>")]
+    assert "exactly as after an automatic calibration" in manual
+    assert "reopening that dialog afterwards shows the same points" in howto
+    kb = _flat(build_knowledge_database_html())
+    for piece in ("A peak that holds two lines is split between them",
+                  "within a peak's own fitted width of its centroid",
+                  "nearer to it than to any other peak",
+                  "that no peak has been given",
+                  "reopening Calibrate from Fitted Peaks after an automatic run "
+                  "writes the same numbers"):
+        assert piece in kb, "the Knowledge Database no longer says %r" % piece
+    # "its own fitted width" is one FWHM -- the constant the code uses.
+    assert SHARED_PEAK_FWHM == 1.0

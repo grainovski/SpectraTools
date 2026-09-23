@@ -1481,8 +1481,17 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # Each line's share of its peak, with the uncertainty an efficiency
         # point carries -- not simply peaks[0]'s area and error, which
         # would hand a blended neighbour's counts to the line and claim the
-        # precision of a fit that describes its peak badly.
-        points = refit.efficiency_points()
+        # precision of a fit that describes its peak badly. Every peak on
+        # the spectrum goes in, named or not, exactly as Calibrate from
+        # Fitted Peaks passes them, so reopening that dialog shows these
+        # same points.
+        from caleneff_export import committed_peaks, share_blended_areas
+
+        peaks, energies = committed_peaks(
+            active.fits,
+            {id(result.peaks[0]): energy
+             for result, (_channel, energy) in zip(refit.results, refit.pairs)})
+        points = share_blended_areas(peaks, energies, dialog.source_lines, calibration)
         self._show_calibration_plot(active, calibration, points, dialog.source_lines, ())
         self.fit_controller._show_status_message(refit.summary(dialog.source_name()), 10000)
 

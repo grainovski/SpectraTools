@@ -1,5 +1,7 @@
 """X3: assign known energies to fitted peaks, then calibrate from them."""
 
+import math
+
 import numpy as np
 import pytest
 
@@ -244,3 +246,48 @@ def test_fitted_peak_choices_widen_the_area_error_of_a_poor_fit(qapp, tmp_path):
     assert choices[1][5] == pytest.approx(own[1]), "a good fit's error was narrowed"
     # The fit itself -- what Fit Results shows -- is untouched.
     assert (poor.peaks[0].area_err, good.peaks[0].area_err) == own
+
+
+# ---------------------------------------------------------------------------
+# 6.1.1: a peak that holds two lines of the loaded source gives the line it
+# is named for only that line's share -- by hand exactly as automatically.
+# ---------------------------------------------------------------------------
+
+
+def _blend_dialog(tmp_path, load_source=True):
+    """Three peaks, energy == channel; the middle one also holds a line at
+    201 keV that nobody assigns, 0.2 of the peak's width away."""
+    sou = tmp_path / "blend.sou"
+    sou.write_text(
+        "".join(f"{e:12.4f}  0.0100  {i:8.1f}  {di:6.1f}\n" for e, i, di in (
+            (100.0, 1000.0, 10.0), (200.0, 1000.0, 10.0),
+            (201.0, 300.0, 30.0), (300.0, 1000.0, 10.0))),
+        encoding="utf-8")
+    peaks = [("a", 100.0, 0.05, 5.0, 1000.0, 30.0),
+             ("b", 200.0, 0.05, 5.0, 1300.0, 40.0),
+             ("c", 300.0, 0.05, 5.0, 1000.0, 30.0)]
+    dialog = EnergyAssignDialog(None, peaks)
+    if load_source:
+        dialog.load_source(str(sou))
+    for row, energy in enumerate(("100", "200", "300")):
+        dialog.table.item(row, EnergyAssignDialog.ENERGY_COLUMN).setText(energy)
+    return dialog
+
+
+def test_a_peak_holding_an_unassigned_line_gives_only_its_share(qapp, tmp_path):
+    points = _blend_dialog(tmp_path).export_points()
+    assert [p[4] for p in points] == [100.0, 200.0, 300.0]
+    share = 1000.0 / 1300.0
+    assert points[1][2] == pytest.approx(1300.0 * share)
+    assert points[1][3] == pytest.approx(
+        math.hypot(40.0 * share, 1300.0 * share * 30.0 / 1300.0))
+    # Peaks holding one line are untouched.
+    assert (points[0][2], points[0][3]) == (1000.0, 30.0)
+    assert (points[2][2], points[2][3]) == (1000.0, 30.0)
+
+
+def test_without_a_source_the_peak_is_passed_through_whole(qapp, tmp_path):
+    """CONTROL: the same peaks and energies with no source loaded -- the old
+    behaviour, and the number the test above must differ from."""
+    points = _blend_dialog(tmp_path, load_source=False).export_points()
+    assert points[1][2] == 1300.0
