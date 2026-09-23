@@ -487,7 +487,9 @@ only after the calibration has been applied. Unticking a point redraws
 it too. Clearing the assignments takes it down again. <b>Finish and save for CalEnEff...</b> writes a
 seven-column file for the efficiency-calibration program: channel and
 its error, net area and its error, energy, and relative intensity with
-its error.</p>
+its error. The area's error is the fit's own, widened where the fit
+describes its peak poorly -- see "The CalEnEff export" in the Knowledge
+Database.</p>
 <p><b>Click a point to find out which one it is.</b> Clicking a point on
 the curve or on the residual strip rings it on both, names it under the
 plot -- channel, energy, and its residual against the current fit --
@@ -542,13 +544,28 @@ the input CalEnEff needs. A point you unticked is left out of this pass
 as well: unticking it in an automatic run means its area does not sit on
 the efficiency curve, and an area is exactly what the refit measures.
 An unticked line still claims its own peak, so a weaker line blended
-into it does not inherit the peak's whole area. The calibration plot then opens on the refitted points,
-and <b>Finish and save for CalEnEff...</b> writes them. Lines the
-calibration places outside the spectrum, lines with nothing above the
-noise where they should be, and lines blended into a stronger neighbour
+into it does not inherit the peak's whole area. The calibration plot
+then opens on the refitted points, and <b>Finish and save for
+CalEnEff...</b> writes them. Lines the calibration places outside the
+spectrum and lines with nothing above the noise where they should be
 are counted in the status bar rather than fitted: an area fitted where
-there is no peak would sit on the efficiency curve as if it were one.</li>
+there is no peak would sit on the efficiency curve as if it were
+one.</li>
 </ol>
+<p><b>A line's point counts that line, not its neighbours.</b> Two lines
+of the source close enough to make a single peak share it: the stronger
+line is fitted, the weaker is counted in the status bar as blended, and
+the peak's area is split between them in proportion to their
+intensities, so the stronger line's point carries only its own share --
+also when the weaker one is unticked. Fit Results still shows the whole
+peak. A line with no visible peak of its own that falls inside another
+line's fit window is fitted there as a second peak, held where the
+calibration puts it and as wide as the line beside it, so that its
+counts are not taken for the other line's; it is not exported itself,
+and the status bar counts it as fitted beside a stronger neighbour. A
+neighbour the source file does not list -- a line from the room around
+the detector, or one missing from the file -- cannot be recognised this
+way; see "When B is too high" in the Knowledge Database.</p>
 <p>The identification is either confident or refused; it never guesses.
 When no confident assignment exists -- the spectrum is not this nuclide,
 too few of its lines were found, or two different calibrations explain
@@ -1393,6 +1410,20 @@ relative intensity in percent, and its error.</p>
 file. <b>N is the net area</b>, background subtracted, because CalEnEff
 computes efficiency as N divided by I: a gross area would fold the
 background into the efficiency curve.</p>
+<p><b>The area's error is widened where the fit is poor.</b> A fit's own
+area error is counting statistics only. That is right when the peak shape
+describes the peak, and optimistic when it does not -- which, on a peak of
+hundreds of thousands of counts, it seldom does. So wherever a peak's fit
+has &chi;&sup2;/&nu; above 1, the error written here is the fit's error
+times &radic;(&chi;&sup2;/&nu;); at or below 1 it is left as it is, never
+narrowed. It is the rule the Birge ratio applies to the efficiency band,
+one level down, and the efficiency window fits with exactly these errors,
+so this program and CalEnEff see the same data. Fit Results, the fit logs
+and the reports keep the fit's own error. After an automatic calibration,
+a line that shares its peak with a weaker line of the source is written
+with its share of the area, as "12. Automatic calibration" in the HowTo
+describes, and the weaker line's intensity uncertainty joins the area's
+error.</p>
 <p>Source files carry intensities on no common scale, so the strongest
 line in the loaded source is normalised to <b>100</b> and every other
 line scaled by the same factor. Because efficiency is a ratio to I, a
@@ -1645,21 +1676,44 @@ the cause is better than scaling it. The <b>residual strip</b> under the
 efficiency plot shows which kind of problem you have:</p>
 
 <ul>
-<li><b>One point far off, the rest well behaved.</b> Suspect that line: an
-unresolved doublet or multiplet inflating its area, a peak assigned to the
-wrong energy, or a line whose tabulated intensity is poorly known. If it
-cannot be fixed, untick it in the calibration window -- a line left out of
-the energy calibration is left out of the efficiency fit as well -- and
-refit.</li>
+<li><b>One point far off, the rest well behaved.</b> Suspect that line: a
+neighbour inflating its area, a peak assigned to the wrong energy, or a
+line whose tabulated intensity is poorly known. A neighbour the source file
+lists is already kept out of the area by an automatic calibration (see "12.
+Automatic calibration" in the HowTo); one it does not list is not. The usual
+culprit is the room: potassium-40's 1460.8 keV line, in the background of
+almost every laboratory, lies 3.2 keV from Eu-152's 1457.6 keV and added 19%
+to that line's area in one measurement. Subtract a spectrum of the room
+taken without the source (<b>Operations &gt; Subtract Spectra...</b>, with
+the factor set to the source measurement's live time divided by the
+background's). If it cannot be fixed, untick it in the calibration window
+-- a line left out of the energy calibration is left out of the efficiency
+fit as well -- and refit.</li>
+<li><b>The same lines off by the same amounts in every measurement.</b>
+That is true-coincidence summing, not noise. A source whose decay emits
+several gamma rays at once -- Ra-226, Eu-152, Co-60, Ba-133 -- measured close
+to the detector often has two of them absorbed together. Counts then leave
+the lines emitted in cascade with others and turn up in the line whose
+energy is their sum: in Ra-226, the 1729.6 keV line (1120.3 + 609.3 keV)
+comes out high and the 665.4 keV line, emitted in cascade with 609.3 keV,
+low, each by tens of percent close to the detector. The deviations change
+sign from line to line, so no curve can follow them -- switching models
+barely changes B -- and widening the band by B does not cover them
+either: on one Ra-226 measurement the band claimed a few percent where
+summing had bent the shape of the curve by more than ten. Measure the
+source further from the detector, where summing falls away, or use sources
+that emit one line per decay. The energy calibration is not affected --
+summing moves counts, not peak positions.</li>
 <li><b>A smooth trend across the energy range.</b> The model cannot follow
-the shape of your curve; try the other one. Or an effect neither model has
-a term for is bending the points, such as true-coincidence summing, which
-distorts the peak areas of a cascading source like Ra-226, Eu-152 or Co-60
-measured close to the detector.</li>
-<li><b>Scatter everywhere with no pattern.</b> The stated errors are
-simply too small. A peak area's error is counting statistics only; it says
-nothing about how well the peak's shape and background were modelled, and
-that part of the uncertainty is missing from every point.</li>
+the shape of your curve; try the other one. KRF struggles most where the
+efficiency turns over at low energy: on an Eu-152 spectrum starting at
+121.8 keV, Radware's B came out about a third lower than KRF's.</li>
+<li><b>Scatter everywhere with no pattern.</b> The stated errors are too
+small. Each point's area error already allows for how badly its own peak
+was fitted -- it is widened by &radic;(&chi;&sup2;/&nu;) of the peak fit
+wherever that exceeds 1, see "The CalEnEff export" -- so what remains is
+an error no fit can see, such as a tabulated intensity that is further off
+than the source file says.</li>
 </ul>
 
 <h4>When B is too low</h4>

@@ -1731,3 +1731,124 @@ def test_the_files_section_no_longer_claims_two_parts_per_million():
     assert "2 parts in a million" not in kb
     assert "one part in 100,000" in kb
     assert REFINE_TOL == 1e-5, "the Help states 1 in 100,000; keep them equal"
+
+
+# --- 6.1.1: why B runs high on real spectra, and what now handles it --------
+
+
+def test_the_birge_section_gives_coincidence_summing_its_own_pattern():
+    """Summing makes some lines high and others low, line by line. The
+    section used to file it under "a smooth trend", which is the one
+    thing it is not: measured on two Ra-226 spectra, no smooth curve of
+    any flexibility did better than the models."""
+    section, _ = _birge_section()
+    flat = _flat(section)
+    for piece in ("The same lines off by the same amounts in every measurement",
+                  "true-coincidence summing", "further from the detector",
+                  "does not cover them", "summing moves counts, not peak positions"):
+        assert piece in flat, "the Birge section no longer says %r" % piece
+    trend = flat[flat.find("A smooth trend"):]
+    trend = trend[:trend.find("</li>")]
+    assert trend and "summing" not in trend, "summing is filed as a smooth trend again"
+
+
+def test_the_summing_example_is_a_real_cascade_of_the_shipped_source():
+    """1729.6 = 1120.3 + 609.3 keV, and 665.4 keV is emitted in cascade
+    with 609.3 keV (it feeds the 609.3 keV level, ENSDF). The example must
+    name lines ra226.sou lists, whose energies add up."""
+    from sou_io import load_sou
+    from synthetic_calibration import source_file
+
+    section, _ = _birge_section()
+    assert "1729.6 keV line (1120.3 + 609.3 keV)" in _flat(section)
+    energies = [line.energy for line in load_sou(source_file("ra226.sou"))]
+
+    def listed(value):
+        near = [e for e in energies if abs(e - value) < 0.06]
+        assert len(near) == 1, "%s keV is not a line of ra226.sou" % value
+        return near[0]
+
+    total = listed(1120.3) + listed(609.3)
+    assert abs(total - listed(1729.6)) < 0.05
+    listed(665.4)
+
+
+def test_the_room_line_example_and_its_remedy_are_real(qapp):
+    """K-40 at 1460.8 keV beside Eu-152's 1457.6 keV, and the remedy by
+    its real menu label."""
+    from main_window import MainWindow
+    from sou_io import load_sou
+    from synthetic_calibration import source_file
+
+    flat = _flat(_birge_section()[0])
+    assert "1460.8 keV" in flat and "3.2 keV from Eu-152's 1457.6 keV" in flat
+    eu = [line.energy for line in load_sou(source_file("eu152.sou"))
+          if abs(line.energy - 1457.6) < 0.06]
+    assert len(eu) == 1 and round(1460.82 - eu[0], 1) == 3.2
+    assert "Operations &gt; Subtract Spectra..." in flat
+    window = MainWindow()
+    labels = [action.text() for action in window.operations_menu.actions()]
+    assert "Subtract Spectra..." in labels
+
+
+def test_the_model_comparison_claim_holds_on_the_real_eu152_spectrum():
+    """"Radware's B came out about a third lower than KRF's" -- measured
+    here on the same spectrum, through the path an automatic calibration
+    takes, so the sentence goes stale loudly rather than quietly."""
+    import numpy as np
+
+    import auto_calibrate
+    from caleneff_export import build_rows
+    from calibration import Calibration
+    from efficiency import fit_efficiency
+    from peak_fit import channel_indices
+    from sou_io import load_sou
+    from spe_io import load_spe
+    from synthetic_calibration import source_file
+
+    assert "about a third lower than KRF's" in _flat(_birge_section()[0])
+    fixture = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "fixtures", "eu152_real.spe")
+    counts = np.asarray(load_spe(fixture), dtype=float)
+    lines = load_sou(source_file("eu152.sou"))
+    x = channel_indices(len(counts))
+    outcome = auto_calibrate.calibrate(x, counts, lines)
+    assert min(line.energy for line in lines) == 121.7817
+    cal = Calibration(kind="linear", a=outcome.match.offset, b=outcome.match.gain)
+    refit = auto_calibrate.refit_source_lines(x, counts, lines, cal,
+                                              excluded=outcome.suspect_energies)
+    rows, _skipped = build_rows(refit.efficiency_points(), lines)
+    fit = fit_efficiency(*(np.array([getattr(r, name) for r in rows]) for name in
+                           ("energy", "area", "area_err", "intensity_pct",
+                            "intensity_pct_err")))
+    assert 0.55 < fit.rw_birge / fit.krf_birge < 0.80, (fit.krf_birge, fit.rw_birge)
+
+
+def test_the_widened_area_error_is_documented_as_the_code_does_it():
+    from caleneff_export import efficiency_area_error
+    from help_content import build_knowledge_database_html
+
+    kb = _flat(build_knowledge_database_html())
+    for piece in ("The area's error is widened where the fit is poor",
+                  "times &radic;(&chi;&sup2;/&nu;)", "never narrowed",
+                  "Fit Results, the fit logs and the reports keep the fit's own error"):
+        assert piece in kb, "the Knowledge Database no longer says %r" % piece
+    # ... and the code does what those words say.
+    assert efficiency_area_error(1.0, 4.0) == 2.0
+    assert efficiency_area_error(1.0, 0.25) == 1.0
+
+
+def test_the_neighbour_handling_is_documented_in_the_words_the_status_bar_uses():
+    """The HowTo tells the user what the status bar will say; the two must
+    not drift apart."""
+    from auto_calibrate import RefitOutcome
+    from help_content import build_howto_html
+
+    howto = _flat(build_howto_html())
+    assert "A line's point counts that line, not its neighbours" in howto
+    assert "in proportion to their intensities" in howto
+    outcome = RefitOutcome()
+    outcome.alongside = outcome.blended = 1
+    status = outcome.summary("x.sou")
+    for words in ("fitted beside a stronger neighbour", "blended"):
+        assert words in status and words in howto, words
