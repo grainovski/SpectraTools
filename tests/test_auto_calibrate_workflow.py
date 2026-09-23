@@ -470,3 +470,30 @@ def test_a_hand_fit_made_before_the_run_is_logged_once_and_kept(qapp, tmp_path, 
     _auto, _assign = _run_and_accept(window, monkeypatch, source)
     assert active.fits[0] is hand
     assert len(_log_records(active)) == len(active.fits)
+
+
+def test_the_plot_is_given_the_efficiency_points_not_the_raw_fits(
+        qapp, tmp_path, monkeypatch):
+    """6.1.1: through the menu, the calibration plot -- which fits the
+    efficiency and writes the CalEnEff export -- receives each line's
+    efficiency point: the area error widened by sqrt(chi2/ndf) wherever
+    the peak fit is poor. A computation-layer test alone would not show
+    that the window is wired to it."""
+    from caleneff_export import efficiency_area_error
+
+    source = _write_sou(tmp_path, EIGHT_LINES, "eight.sou")
+    window, active = _window(tmp_path, source)
+    _run_and_accept(window, monkeypatch, source)
+    refit = active.fits
+    points = window._calibration_plot._points
+    assert len(points) == len(refit)
+
+    widened = 0
+    for (channel, _dc, area, area_err, _e), fit in zip(points, refit):
+        peak = fit.peaks[0]
+        assert channel == peak.position and area == peak.area
+        assert area_err == pytest.approx(efficiency_area_error(peak.area_err, fit.reduced_chi2))
+        widened += area_err > peak.area_err * (1.0 + 1e-9)
+    # Not vacuous: at least one of these fits is worse than its counting
+    # statistics, so the check above compared two different numbers.
+    assert widened >= 1

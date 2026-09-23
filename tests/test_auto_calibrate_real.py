@@ -135,7 +135,16 @@ def test_refit_covers_the_visible_source_lines(eu152):
         channel_indices(len(counts)), counts, lines, cal)
 
     assert len(refit.results) >= 32
-    assert all(len(result.peaks) == 1 for result in refit.results)
+    # The line is always peaks[0]. Anything after it is a listed line with
+    # no found peak of its own, fitted beside it and pinned exactly where
+    # the calibration puts that line -- one per `alongside`, and never
+    # anything else.
+    extra = [peak for result in refit.results for peak in result.peaks[1:]]
+    assert len(extra) == refit.alongside
+    pinned = [cal.invert(line.energy) for line in lines]
+    for peak in extra:
+        assert min(abs(peak.position - c) for c in pinned) < 1e-9
+        assert peak.position_err == 0.0
     energies = [e for _c, e in refit.pairs]
     assert any(abs(e - 121.7817) < 1e-3 for e in energies)
     # every fitted line is a line of the source, each at most once
@@ -147,7 +156,7 @@ def test_refit_covers_the_visible_source_lines(eu152):
         assert channel == result.peaks[0].position
         assert abs(cal.invert(energy) - channel) < 4.0
     # every line of the source is accounted for exactly once
-    accounted = (refit.outside + refit.invisible + refit.blended
+    accounted = (refit.outside + refit.invisible + refit.alongside + refit.blended
                  + refit.skipped + refit.failed + refit.runaway + len(refit.results))
     assert accounted == len(lines)
     # This spectrum has an unresolved pair (674.64 / 678.62 keV, six
@@ -189,8 +198,8 @@ def _refit(counts, lines, excluded=()):
 
 
 def _accounted(refit, lines):
-    return (refit.outside + refit.invisible + refit.blended + refit.skipped
-            + refit.failed + refit.runaway + refit.excluded
+    return (refit.outside + refit.invisible + refit.alongside + refit.blended
+            + refit.skipped + refit.failed + refit.runaway + refit.excluded
             + len(refit.results)) == len(lines)
 
 
@@ -286,7 +295,8 @@ def test_the_refit_still_accounts_for_every_line(eu152):
     cal = C.Calibration(kind="linear", a=0.0, b=0.6249)
     refit = auto_calibrate.refit_source_lines(
         channel_indices(len(counts)), counts, lines, cal)
-    total = (refit.outside + refit.invisible + refit.blended + refit.skipped
-             + refit.failed + refit.runaway + refit.excluded + len(refit.results))
+    total = (refit.outside + refit.invisible + refit.alongside + refit.blended
+             + refit.skipped + refit.failed + refit.runaway + refit.excluded
+             + len(refit.results))
     assert total == len(lines)
     assert refit.runaway >= 1, "the 674.64/678.62 stray is still supposed to be caught"

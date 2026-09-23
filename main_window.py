@@ -1278,17 +1278,26 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
 
         FWHM rides along so a restored assignment can be matched back to
         the peak it came from after a refit nudges the centroid (see
-        energy_assignments.restore). Area is peak.area/area_err -- the
-        NET, background-subtracted value, not full_area -- because the
+        energy_assignments.restore). Area is peak.area -- the NET,
+        background-subtracted value, not full_area -- because the
         calibration plot hands these to CalEnEff, which divides counts by
         intensity to get efficiency; a gross area would fold the
         background into that curve.
+
+        The area's uncertainty is the one an efficiency point carries,
+        not quite the fit's own: widened by sqrt(chi2/ndf) where the fit
+        describes its peak worse than counting statistics allow (see
+        caleneff_export.efficiency_area_error). Nothing here uses it but
+        the calibration plot and the CalEnEff export; Fit Results keeps
+        showing the fit's own.
 
         Always in CHANNELS, even when a calibration is already active: the
         user is assigning energies in order to determine the calibration,
         so offering them positions that a previous calibration already
         converted would be circular.
         """
+        from caleneff_export import efficiency_area_error
+
         active = active_spectrum(self.spectra)
         if active is None:
             return []
@@ -1302,7 +1311,9 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             for peak_index, peak in enumerate(getattr(result, "peaks", []) or [], start=1):
                 choices.append(
                     (f"Fit {fit_index}, peak {peak_index}", peak.position,
-                     peak.position_err, peak.fwhm, peak.area, peak.area_err)
+                     peak.position_err, peak.fwhm, peak.area,
+                     efficiency_area_error(peak.area_err,
+                                           getattr(result, "reduced_chi2", None)))
                 )
         return choices
 
@@ -1467,11 +1478,11 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             # the user's decision outlives the fits it was made about.
             excluded=unticked,
         )
-        points = [
-            (result.peaks[0].position, result.peaks[0].position_err or 0.0,
-             result.peaks[0].area, result.peaks[0].area_err, energy)
-            for result, (_channel, energy) in zip(refit.results, refit.pairs)
-        ]
+        # Each line's share of its peak, with the uncertainty an efficiency
+        # point carries -- not simply peaks[0]'s area and error, which
+        # would hand a blended neighbour's counts to the line and claim the
+        # precision of a fit that describes its peak badly.
+        points = refit.efficiency_points()
         self._show_calibration_plot(active, calibration, points, dialog.source_lines, ())
         self.fit_controller._show_status_message(refit.summary(dialog.source_name()), 10000)
 

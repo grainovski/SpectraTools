@@ -225,3 +225,22 @@ def test_two_tuple_choices_are_still_accepted(qapp):
     dialog._on_accept()
     assert dialog.result_calibration is not None
     assert dialog.result_calibration.b == pytest.approx(0.5)
+
+
+# ---------------------------------------------------------------------------
+# 6.1.1: the area uncertainty offered for the efficiency is widened where
+# the peak fit is poor -- and only there, never in the fit itself.
+# ---------------------------------------------------------------------------
+
+
+def test_fitted_peak_choices_widen_the_area_error_of_a_poor_fit(qapp, tmp_path):
+    main_window, active = _window_with_two_fits(tmp_path)
+    poor, good = active.fits
+    poor.reduced_chi2, good.reduced_chi2 = 4.0, 0.5
+    own = (poor.peaks[0].area_err, good.peaks[0].area_err)
+
+    choices = main_window.fitted_peak_choices()
+    assert choices[0][5] == pytest.approx(2.0 * own[0])
+    assert choices[1][5] == pytest.approx(own[1]), "a good fit's error was narrowed"
+    # The fit itself -- what Fit Results shows -- is untouched.
+    assert (poor.peaks[0].area_err, good.peaks[0].area_err) == own

@@ -190,3 +190,21 @@ def test_an_ordinary_row_still_writes(tmp_path):
     write_caleneff(str(path), rows)
     assert "nan" not in path.read_text()
     assert len(path.read_text().strip().splitlines()) == 1
+
+
+# --- 6.1.1: the area uncertainty an efficiency point carries ---------------
+
+
+@pytest.mark.parametrize("chi2, factor", [
+    (4.0, 2.0),          # a poor fit: widened by sqrt(chi2/ndf)
+    (100.0, 10.0),
+    (1.0, 1.0),          # exactly as good as counting statistics
+    (0.25, 1.0),         # better than counting statistics: never narrowed
+    (None, 1.0),         # no degrees of freedom, no evidence either way
+    (float("nan"), 1.0),
+    (float("inf"), 1.0),
+])
+def test_the_area_error_is_widened_by_a_poor_fit_and_never_narrowed(chi2, factor):
+    from caleneff_export import efficiency_area_error
+
+    assert efficiency_area_error(12.5, chi2) == pytest.approx(12.5 * factor)

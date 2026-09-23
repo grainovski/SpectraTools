@@ -11,6 +11,11 @@ line the peak was assigned to.
 
 N is the NET area. CalEnEff computes eff = N / I_pct, so a gross area
 would fold the background into the efficiency curve.
+
+delta_N is the fit's area uncertainty widened by efficiency_area_error
+wherever the peak fit is poor, since 6.1.1 -- the same number the
+efficiency window fits with, so CalEnEff and this program see one data
+set.
 """
 
 import math
@@ -33,6 +38,40 @@ _ENERGY_MATCH_TOLERANCE = 1e-6
 
 class ExportError(Exception):
     """Raised when the file cannot be produced or would be unusable."""
+
+
+def efficiency_area_error(area_err, reduced_chi2):
+    """The uncertainty a peak's area carries onto the efficiency curve:
+    the fit's own `area_err`, times sqrt(chi2/ndf) of the fit when that
+    exceeds 1 -- inflate-only, exactly as the Birge ratio treats the
+    efficiency fit itself (efficiency.EfficiencyMC._band).
+
+    The fit's error is counting statistics alone -- its covariance is not
+    scaled, as TV's is not (vsCurFit.c CurFinish takes the errors straight
+    from the inverted curvature matrix) -- which is right when the shape
+    describes the peak and optimistic when it does not. On real spectra
+    it mostly does not: median chi2/ndf 2.5-2.9 over the Ra-226 lines and
+    8-10 over the Eu-152 ones, up to ~470 on the strongest peaks, where a
+    million counts show every departure of a Gaussian from the real
+    shape. And a peak with an unmodelled neighbour in its window fits
+    badly for that very reason. Left as they were, those areas claimed a
+    precision their own fits deny, and the efficiency fit's Birge ratio
+    came out 4.6-6.5 on those spectra.
+
+    Only the efficiency points and the CalEnEff export see this. The
+    peak's reported area_err -- Fit Results, the fit logs, the reports
+    -- stays the fit's own.
+
+    A missing or non-finite chi2/ndf (a fit with no degrees of freedom)
+    leaves the error as it was: there is no evidence either way.
+    """
+    area_err = float(area_err)
+    if reduced_chi2 is None:
+        return area_err
+    reduced_chi2 = float(reduced_chi2)
+    if not math.isfinite(reduced_chi2) or reduced_chi2 <= 1.0:
+        return area_err
+    return area_err * math.sqrt(reduced_chi2)
 
 
 @dataclass(frozen=True)

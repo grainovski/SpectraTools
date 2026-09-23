@@ -756,30 +756,65 @@ class RefitOutcome:
     is known.
 
     `results` are one FitResult per line fitted; `pairs` the matching
-    [(fitted channel, energy)]. The counts say what happened to every
-    other line: `outside` the spectrum's range, `invisible` with no found
-    peak where the calibration puts it, `blended` into a stronger line
-    that the same found peak already accounts for, `skipped` for want of
-    a clear background, `failed` to converge, `runaway` when the fit
-    converged on something other than the peak it was seeded on -- too
-    wide, displaced, or with no positive area -- which is dropped rather
-    than exported as a measurement of that line, and `excluded` when the
-    user unticked it in the calibration dialog.
+    [(fitted channel, energy)]; `shares` the matching (share, extra):
+    the fraction of the fitted area that belongs to the line, and the
+    relative uncertainty that split adds -- (1.0, 0.0) unless weaker
+    lines blended into the same peak (see refit_source_lines). The line
+    is always `result.peaks[0]`; any further peak in a result is a
+    listed line fitted beside it (`alongside`), never exported.
+
+    The counts say what happened to every other line: `outside` the
+    spectrum's range, `invisible` with no found peak where the
+    calibration puts it, `alongside` with no found peak of its own but
+    inside a stronger line's fit window, so fitted there as a second
+    peak, `blended` into a stronger line that the same found peak
+    already accounts for, `skipped` for want of a clear background,
+    `failed` to converge, `runaway` when the fit converged on something
+    other than the peak it was seeded on -- too wide, displaced, or with
+    no positive area -- which is dropped rather than exported as a
+    measurement of that line, and `excluded` when the user unticked it
+    in the calibration dialog.
     """
 
-    __slots__ = ("results", "pairs", "outside", "invisible", "blended",
-                 "skipped", "failed", "runaway", "excluded")
+    __slots__ = ("results", "pairs", "shares", "outside", "invisible", "alongside",
+                 "blended", "skipped", "failed", "runaway", "excluded")
 
     def __init__(self):
-        self.results, self.pairs = [], []
-        self.outside = self.invisible = self.blended = 0
+        self.results, self.pairs, self.shares = [], [], []
+        self.outside = self.invisible = self.alongside = self.blended = 0
         self.skipped = self.failed = self.runaway = self.excluded = 0
+
+    def efficiency_points(self):
+        """(channel, channel_err, area, area_err, energy) per fitted line:
+        what the calibration plot fits the efficiency to and the CalEnEff
+        export writes.
+
+        The area is the line's share of its peak, and its uncertainty is
+        the fit's own, widened where the peak fit is poor (see
+        caleneff_export.efficiency_area_error) and combined with what
+        splitting a blend adds. The committed fit keeps the whole area
+        and the fit's own error -- Fit Results reports the peak, this
+        reports the line.
+        """
+        from caleneff_export import efficiency_area_error
+
+        points = []
+        for result, (_channel, energy), (share, extra) in zip(
+                self.results, self.pairs, self.shares):
+            peak = result.peaks[0]
+            area = peak.area * share
+            relative = efficiency_area_error(peak.area_err, result.reduced_chi2) / peak.area
+            points.append((peak.position, peak.position_err or 0.0, area,
+                           area * math.hypot(relative, extra), energy))
+        return points
 
     def summary(self, source_name):
         parts = [f"{_plural(len(self.results), 'line')} of {source_name} refitted for CalEnEff"]
         for count, what in ((self.outside, "outside the spectrum"),
                             (self.invisible, "with no visible peak"),
-                            (self.blended, "blended into a stronger neighbour"),
+                            (self.alongside, "fitted beside a stronger neighbour"),
+                            (self.blended, "blended into a stronger neighbour, "
+                                           "the area shared by intensity"),
                             (self.skipped, "without a clear background"),
                             (self.failed, "that would not fit"),
                             (self.runaway, "whose fit ran onto a neighbour or the background"),
@@ -811,16 +846,38 @@ def refit_source_lines(x, counts, lines, calibration,
     markers, seeded at the found centroid rather than the predicted one.
     Lines the calibration puts outside the spectrum, lines with nothing
     above the noise where they should be, and lines that land on a peak
-    already claimed by a stronger line are counted, not fitted -- an area
-    fitted where there is no peak is a number, not a measurement, and it
-    would sit on the efficiency curve as if it were one.
+    already claimed by a stronger line are counted, not exported -- an
+    area fitted where there is no peak is a number, not a measurement,
+    and it would sit on the efficiency curve as if it were one.
+
+    Not exported is not the same as not there, though, and two kinds of
+    neighbour used to hand their counts to the line being fitted:
+
+    - A weaker line close enough to land on the SAME found peak is part
+      of that peak, unresolved, and its counts are in the fitted area.
+      The area is shared in proportion to the lines' intensities -- what
+      a merged doublet in the .sou does -- and the partner's intensity
+      uncertainty joins the area's. On real Ra-226 spectra the Bi-214
+      line at 273.79 keV sits under 274.80 keV this way, a third as
+      strong, and adds 38% of the line's own counts.
+    - A listed line with no found peak of its own but inside this line's
+      fit window is added to the fit as a second peak, its position held
+      where the calibration puts it and its width tied to the line's.
+      It is modelled only so that its counts are not counted as the
+      line's; it is not exported. On a real Eu-152 spectrum the 566.44
+      keV line put 18% on top of 563.99 keV this way, and on a real
+      Ra-226 one the Bi-214 line at 386.77 keV put 80% on top of 388.89
+      keV. Should that fit not converge, the single-peak fit stands,
+      which is what this did before.
 
     `excluded` are the energies the user unticked in the calibration
     dialog. They are not fitted and not exported: the reason a point is
     unticked in an automatic run is that its area does not sit on the
     efficiency curve the others trace, which is exactly the number
     CalEnEff would be fed. An unticked line still claims its peak, so a
-    weaker line blended into it does not inherit the peak's whole area.
+    weaker line blended into it does not inherit the peak's whole area,
+    and an unticked line blended into a stronger one still takes its
+    share.
     """
     from peak_fit import FitError, fit_peaks
 
@@ -838,6 +895,7 @@ def refit_source_lines(x, counts, lines, calibration,
     widths = expected_widths(centres, [p.fwhm for p in photopeaks])
 
     claims = {}
+    unclaimed = []
     for line in lines:
         try:
             channel = float(calibration.invert(line.energy))
@@ -849,15 +907,16 @@ def refit_source_lines(x, counts, lines, calibration,
             continue
         k = int(np.argmin(np.abs(centres - channel)))
         if abs(centres[k] - channel) > REFIT_SEARCH_FWHM * widths[k]:
-            outcome.invisible += 1
+            unclaimed.append((line, channel))
             continue
         claims.setdefault(k, []).append(line)
 
-    fitted = []
+    fitted, beside_a_fit = [], set()
     for k in sorted(claims):
         candidates = claims[k]
         line = max(candidates, key=lambda l: l.intensity)
-        outcome.blended += len(candidates) - 1
+        sharing = [other for other in candidates if other is not line]
+        outcome.blended += len(sharing)
         if line.energy in unticked:
             outcome.excluded += 1
             continue
@@ -866,13 +925,40 @@ def refit_source_lines(x, counts, lines, calibration,
             outcome.skipped += 1
             continue
         bg_left, bg_right, fit_region, positions = region
-        try:
-            result = fit_peaks(x, counts, bg_left, bg_right, fit_region, positions,
-                               variance=variance)
-        except (FitError, ValueError, RuntimeError):
-            outcome.failed += 1
-            continue
-        fitted.append((photopeaks[k], result, line))
+        beside = [(i, other, channel) for i, (other, channel) in enumerate(unclaimed)
+                  if fit_region[0] <= channel <= fit_region[1]]
+        result = None
+        if beside:
+            first = len(positions)
+            try:
+                result = fit_peaks(
+                    x, counts, bg_left, bg_right, fit_region,
+                    list(positions) + [channel for _i, _o, channel in beside],
+                    variance=variance,
+                    fixed_params={f"pos_{first + j}": channel
+                                  for j, (_i, _o, channel) in enumerate(beside)},
+                )
+                beside_a_fit.update(i for i, _o, _c in beside)
+            except (FitError, ValueError, RuntimeError):
+                result = None
+        if result is None:
+            try:
+                result = fit_peaks(x, counts, bg_left, bg_right, fit_region, positions,
+                                   variance=variance)
+            except (FitError, ValueError, RuntimeError):
+                outcome.failed += 1
+                continue
+        # The partners' own share of the peak, and what their intensity
+        # uncertainty adds to the line's area: N_line = N * I / (I + S),
+        # so dN_line / N_line gains dS / (I + S) in quadrature.
+        rest = sum(other.intensity for other in sharing)
+        total = line.intensity + rest
+        share = line.intensity / total if total > 0.0 else 1.0
+        extra = (math.sqrt(sum(other.intensity_err ** 2 for other in sharing)) / total
+                 if total > 0.0 else 0.0)
+        fitted.append((photopeaks[k], result, line, (share, extra)))
+    outcome.alongside = len(beside_a_fit)
+    outcome.invisible = len(unclaimed) - outcome.alongside
 
     # The same judgement the identification pass applies before it trusts
     # a fit, applied here before a fit is EXPORTED -- and against the same
@@ -882,10 +968,12 @@ def refit_source_lines(x, counts, lines, calibration,
     # spectrum came out 5.03 channels where the fits say 2.83. Nothing
     # wrong had reached an export, but this is the more consequential of
     # the two paths and had the weaker gate.
-    kept, runaway, _duplicate = _settle([(seed, result) for seed, result, _l in fitted])
+    kept, runaway, _duplicate = _settle([(seed, result) for seed, result, _l, _s in fitted])
     outcome.runaway += runaway
-    by_id = {id(result): line for _seed, result, line in fitted}
+    by_id = {id(result): (line, share) for _seed, result, line, share in fitted}
     for result in kept:
+        line, share = by_id[id(result)]
         outcome.results.append(result)
-        outcome.pairs.append((result.peaks[0].position, by_id[id(result)].energy))
+        outcome.pairs.append((result.peaks[0].position, line.energy))
+        outcome.shares.append(share)
     return outcome
