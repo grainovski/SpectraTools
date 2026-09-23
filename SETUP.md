@@ -22,7 +22,7 @@ cd SpectraTools
 ```
 
 That brings the application, the tests, the packaging scripts, the docs, and
-all 27 tags (`v1.0.0` … `v5.2.1`). The repository is the source of truth for
+all 41 tags (`v1.0.0` … `v6.1.1`). The repository is the source of truth for
 everything under version control.
 
 **`master` is not always the released state.** Work is sometimes committed

@@ -4,6 +4,92 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [6.1.1] - 2026-09-23
+
+An efficiency calibration made from a real spectrum reports different numbers
+from 6.1.0: different points, different uncertainties, a lower Birge ratio and
+a differently shaped band. If you are comparing against a 6.1.0 result, read
+this section first.
+
+### Changed — numbers that move
+
+- **An efficiency point's area uncertainty now includes how badly its peak
+  was fitted.** A fitted area's error is counting statistics only, which is
+  right when the peak shape describes the peak and optimistic when it does
+  not — and on real spectra it seldom does: the peak fits of the Ra-226 and
+  Eu-152 spectra this was measured on run at a median χ²/ν of 2.5–10, and up
+  to about 470 on the strongest peaks. Wherever a peak's fit has χ²/ν above 1,
+  the error its efficiency point carries is now the fit's error times
+  √(χ²/ν); at or below 1 it is left alone, never narrowed. This is what the
+  efficiency window fits with and what the CalEnEff export writes. Fit
+  Results, the fit logs and the reports keep the fit's own error.
+- **A line's point no longer counts its neighbours.** When two lines of the
+  source sit inside one fitted peak, the line the peak is named for now gets
+  only its share of the area, in proportion to intensity — after an automatic
+  calibration and in Calibrate from Fitted Peaks alike. A listed line with no
+  visible peak of its own inside another line's fit window is now fitted
+  there as a second peak instead of being counted as the other line's. On
+  real spectra: Eu-152's 563.99 keV point is 17% lower (566.44 keV was inside
+  its peak), 1085.84 keV 3.4% and 1112.08 keV 1.7% lower, 964.06 keV 1% lower;
+  Ra-226's 274.80 keV is 27% lower (Bi-214's 273.79 keV was inside it).
+- **The Birge ratio of real efficiency fits falls accordingly**, KRF /
+  Radware: 6.21 / 4.56 → 2.32 / 1.53 on an Eu-152 spectrum, 6.30 / 5.87 →
+  4.14 / 4.09 and 6.48 / 5.95 → 3.92 / 3.83 on two Ra-226 spectra. What
+  remains on Ra-226 is true-coincidence summing, which no smooth curve can
+  follow; the Help now says how to recognise it and what to do about it.
+- **The band changes shape.** It is widened by a smaller Birge ratio than
+  before, but each point now carries its own fit's quality: on the Ra-226
+  spectra it came out up to about twice as wide below 1 MeV and about the
+  same above.
+- **`ra226.sou` lists two more Bi-214 lines**, 273.79 and 386.77 keV (ENSDF),
+  each of which sits inside a neighbouring line's peak on real spectra.
+
+### Added
+
+- **Saved efficiency and energy calibrations can be read back in.**
+  **Operations > Load Efficiency...** opens a saved `_bins` or `_peaks` file:
+  what it holds, a KRF / Radware choice, **Use its energy calibration**, and
+  the same Apply / Apply to all as the fitted efficiency window. The
+  Calibration dialog's **Load from file...** accepts a saved efficiency too,
+  and sets linear or quadratic from it as well as the coefficients. The curve
+  applied is read from the saved per-bin table, not from the saved
+  parameters, because the program applies the Monte Carlo mean and for
+  Radware the single best fit can sit 10% away from it.
+- **The Knowledge Database explains the Birge ratio**: what it is, how far
+  from 1 is too far for your number of degrees of freedom (a table of 95%
+  ranges), what the program does with it, and what to do when it is too high
+  or too low — with its references, R. T. Birge, *Phys. Rev.* 40, 207 (1932)
+  and the Particle Data Group's scale-factor convention (*J. Phys. G* 37,
+  075021 (2010), Sec. 5.2.2), cited as plain text.
+
+### Changed
+
+- **The KFR efficiency model is now called KRF** everywhere — the efficiency
+  window, the Help, saved files and the names of corrected spectra. CalEnEff,
+  which the model is ported from, calls the same model KFR. Files saved by
+  6.1.0 and earlier say KFR and still read.
+- **"When B is too high" in the Help** gives true-coincidence summing an entry
+  of its own — it was filed under "a smooth trend", which is the one thing it
+  is not — and adds room-background lines such as potassium-40's 1460.8 keV,
+  with Subtract Spectra as the remedy, and the choice of model at low energy.
+
+### Fixed
+
+- **A per-bin efficiency file saved with the Radware model could be badly
+  wrong just below the lowest calibration line** — by up to 527% on a
+  reference data set — because the curve was interpolated straight across the
+  drop its Monte Carlo mean can have there. Every channel is now within about
+  1e-5 of the exact curve. Re-save `_bins` files written by 6.1.0 or earlier
+  if you used Radware.
+- The Help called a Birge ratio of 0.64 "a hint that the errors are too
+  generous". At four degrees of freedom it is well within the ordinary range.
+
+### Internal
+
+- The three copies of the migration skills are checked for drift by the
+  suite rather than by memory.
+- Suite: 1855 tests.
+
 ## [6.1.0] - 2026-09-22
 
 Three things that were reported before are reported differently now. If you
