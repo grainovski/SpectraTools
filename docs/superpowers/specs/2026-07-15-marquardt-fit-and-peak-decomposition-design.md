@@ -113,7 +113,11 @@ formulas exactly (`_CUR_RATIO = 1e-12`, `_CUR_LAMBDA_START = 1e-3`,
 10`, `_CUR_MAX_ITERATIONS = 50`). On acceptance,
 `lambda = max(0.001 * (old_measure - new_measure), _CUR_MIN_LAMBDA)`; on
 rejection, `lambda = min(lambda * 10, ...)`, with the half-step-backward
-last resort when `lambda` exceeds `_CUR_MAX_LAMBDA`, then stop.
+last resort when `lambda` exceeds `_CUR_MAX_LAMBDA`. If that half step
+improves chi-square the fit accepts it and keeps iterating (TV's "case
+ii", `vsCurFit.c:136-137`); only a half step that does not improve stops
+the fit. (Until 2026-10-13 this port stopped in both cases -- a known
+deviation from the 2026-07-17 parity audit, now closed.)
 
 **Per-parameter step damping**, applied to the raw Newton step before
 evaluating a trial point, dispatched by parameter *name* (reusing the

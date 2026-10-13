@@ -973,6 +973,45 @@ def test_marquardt_fit_clamps_tail_fraction_and_beta_to_bounds():
     assert popt[4] >= TAIL_BETA_MIN
 
 
+def test_marquardt_keeps_iterating_after_a_successful_half_step_back(monkeypatch):
+    """vsCurFit.c:128-140: once lambda passes CUR_MAXLAMBDA, CurFit tries
+    a reversed half step. If that improves the measure ("Aha case ii")
+    the fit carries on iterating; only a half step that does NOT improve
+    ends the fit. This port used to stop in both cases.
+
+    Rigged so the branch is reached deterministically: the first
+    Jacobian has its sign flipped, so every forward step of the first
+    iteration goes uphill until lambda runs away, and every step is held
+    to at least one unit so the half step back is not lost in rounding.
+    Chi-square is 3**2 at the start, 2**2 after the half step back, and
+    0 at the true minimum, which only further iterations can reach."""
+    import peak_fit as pf
+
+    real_jacobian = pf._numeric_jacobian
+    calls = {"n": 0}
+
+    def first_jacobian_flipped(model, x, p):
+        calls["n"] += 1
+        J = real_jacobian(model, x, p)
+        return -J if calls["n"] == 1 else J
+
+    def at_least_one_unit(p, delta, damping, fit_region_bounds):
+        return np.where(np.abs(delta) < 1.0, np.sign(delta), delta)
+
+    monkeypatch.setattr(pf, "_numeric_jacobian", first_jacobian_flipped)
+    monkeypatch.setattr(pf, "_apply_step_damping", at_least_one_unit)
+
+    def model(x, p):
+        return np.full_like(x, p[0])
+
+    x = np.zeros(1)
+    y = np.zeros(1)
+    y_err = np.ones(1)
+    popt, _pcov = _marquardt_fit(model, x, y, y_err, [3.0], [_ParamDamping("amp")])
+
+    assert popt[0] == pytest.approx(0.0, abs=1e-9)
+
+
 def test_marquardt_does_not_recompute_jacobian_for_rejected_trials():
     """Task 7 (Important 2) regression guard for the audit's measured
     12.4x evaluation blowup on multi-peak fits: the full numeric

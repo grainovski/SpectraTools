@@ -1798,9 +1798,18 @@ def _marquardt_fit(model, x, y, y_err, p0, damping, fit_region_bounds=None):
                     p_try2 = _clamp_trial(p + back_delta, damping)
                     try_measure2, try_r2 = measure_only(p_try2)
                     if try_measure2 < measure:
+                        # TV's "Aha case ii" (vsCurFit.c:136-137): the
+                        # minimum was skipped, and the half step found
+                        # better ground. Accept it and carry on
+                        # iterating -- the ratio test below decides
+                        # whether to stop, exactly as after any other
+                        # accepted step. Lambda is left where it is,
+                        # as TV leaves it.
                         p, measure, r, J = p_try2, try_measure2, try_r2, jac_only(p_try2)
+                    else:
+                        # Case i: the minimum is already reached.
+                        give_up = True
                     accepted = True
-                    give_up = True
 
         iterations += 1
         if give_up or measure <= 0:
