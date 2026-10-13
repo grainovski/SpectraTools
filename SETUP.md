@@ -22,7 +22,7 @@ cd SpectraTools
 ```
 
 That brings the application, the tests, the packaging scripts, the docs, and
-all 42 tags (`v1.0.0` … `v6.2.0`). The repository is the source of truth for
+all 43 tags (`v1.0.0` … `v6.2.1`). The repository is the source of truth for
 everything under version control.
 
 **`master` is not always the released state.** Work is sometimes committed
@@ -88,7 +88,7 @@ Verify:
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expect **1941 collected, 0 failed** (as of the post-6.2.0 Marquardt fix). A smaller
+Expect **1941 collected, 0 failed** (as of 6.2.1). A smaller
 number that still passes is the failure to watch for: a missing optional
 dependency makes pytest skip whole files rather than error, so read the
 count, not the colour.

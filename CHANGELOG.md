@@ -4,6 +4,22 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [6.2.1] - 2026-10-13
+
+Almost every fit comes out exactly as in 6.2.0. One rare case can now give a
+better fit: when the fit gets stuck and recovers by stepping back. The full
+test suite ran unchanged apart from the new test for this.
+
+### Fixed
+
+- **A Gaussian fit no longer stops early after recovering from a stall.**
+  When the fitter cannot find a step that lowers chi-square, it tries a last
+  half step back. If that half step helps, the fit now keeps going until it
+  converges, as TV does (`vsCurFit.c`). Before, it stopped right there and
+  could return a fit short of the true minimum. If the half step does not
+  help, the fit stops as before. Ordinary fits converge long before reaching
+  this point, so their results are unchanged.
+
 ## [6.2.0] - 2026-10-13
 
 Nothing measured with 6.1.1 changes: every spectrum, fit, calibration and
