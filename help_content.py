@@ -138,6 +138,15 @@ current zoom: the X axis keeps its width, and the Y axis rescales as you
 go to fit whatever is now on screen, so a small peak is not left
 flattened by a tall one that has scrolled out of view. The view stops at
 the ends of the data.</p>
+<p>Moving the mouse over a plot shows where it is in the window's status
+bar: the channel and the counts there -- for every visible spectrum in the
+main window, and for the projection on screen in a matrix panel -- plus
+the energy in keV when a calibration is active. Opening another spectrum,
+or adding one (a gate from a matrix panel, Add/Subtract, an efficiency
+correction), keeps the X range you are looking at; only the
+first spectrum opens at full scale, and <kbd>Ctrl+0</kbd> returns to full
+scale at any time. Rebin is the exception: it renumbers the channels, so
+it shows the full spectrum again.</p>
 <p>Marking always takes precedence over panning. While you hold a marking
 key -- <kbd>B</kbd>, <kbd>R</kbd> or <kbd>P</kbd> -- the left button
 places marks and does not pan, so a slightly unsteady hand cannot nudge
@@ -619,9 +628,45 @@ current view, and <kbd>Ctrl+0</kbd> resets to the full spectrum.</p>
 
 <h3>15. Matrix analysis</h3>
 <p><b>File &gt; Open Matrix...</b> (<kbd>Ctrl+Shift+O</kbd>) opens a
-2D coincidence matrix (<b>.mtx</b>) in its own window. Only the raw
-histogram is read -- there's no way to save a matrix back out.
-Decoding a full-size matrix takes several seconds, so a
+2D coincidence matrix in its own window: a TV matrix (<b>.mtx</b>), or a
+gamma-gamma matrix exported by CAEN <b>CoMPASS</b> as <b>.json</b>. Only
+the raw histogram is read -- there's no way to save a matrix back out.</p>
+<p>A CoMPASS <b>.json</b> matrix also stores a calibration and axis
+limits, but they don't describe the matrix's own bins: for a Co-60
+export they put the 1173 and 1332 keV lines near 388 and 445 keV, and
+one calibration can't serve two detectors with different gains anyway.
+So, exactly as for a ROOT matrix, that calibration is ignored -- the
+panel works in channels, and you calibrate its projections as usual.
+CoMPASS writes each row of its data array as one X bin; the reader
+accounts for that, so X and Y are the same axes CoMPASS labels. The
+<b>.root</b> file CoMPASS saves for the same run holds the same matrix
+and opens through <b>File &gt; Open ROOT File...</b>.</p>
+<p><b>Symmetrize...</b> in the matrix panel builds a symmetric matrix,
+S = M + M<sup>T</sup>, in a new window; the matrix you started from stays
+as it is. Folding lets a gate catch an event through either of its gamma
+rays, which roughly doubles the counts in a cut. A matrix from two
+detectors has a different gain on each axis, so Y is first put on X's
+scale: enter the approximate channels of two lines that appear on both
+projections (for Co-60, 1173 and 1332 keV), and each is refined to the
+nearby peak centroid. Folding without this would put every line in two
+places -- on a Co-60 matrix it widened the peaks by about three quarters.
+For a single-array matrix whose axes already share one scale, choose that
+option instead and no matching is done. When Y is rebinned onto X's scale,
+each count goes whole to one of the channels it overlaps, so the matrix
+keeps whole-number counts and gives the same result every time; any counts
+that would land outside the matrix are left out, and you are told how
+many.</p>
+<p>Cells on the diagonal are counted twice -- once with each gamma ray as
+the gate -- because that keeps a <b>self-coincidence</b> peak (two gamma
+rays of the same energy in one cascade) at its true intensity. Counting
+them once cost a simulated self-coincidence peak about 11% of its area and
+flattened its top. The doubled diagonal is allowed for in the error bars of
+every cut, so those come out right too. In the symmetrized window the X
+and Y projections are identical, so the projection choice is fixed.
+Symmetrize refuses a matrix that is not square, one holding negative counts
+(a background-subtracted or difference matrix), and one that is already
+symmetric, and says which.</p>
+<p>Decoding a full-size <b>.mtx</b> matrix takes several seconds, so a
 <b>Reading matrix...</b> progress window appears while it works; the
 application stays responsive throughout, and the panel opens by itself
 when the read finishes. Loading is fastest from a local disk -- reading

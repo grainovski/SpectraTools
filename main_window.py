@@ -56,6 +56,7 @@ import fit_persist
 from histogram_io import ParseError, load_histogram, save_histogram
 from matrix_panel import MatrixPanel
 import matrix_cache
+from json_matrix_io import load_json_matrix
 from mtx_io import load_mtx
 from lzs_io import load_lzs
 from n42_io import load_n42
@@ -283,6 +284,19 @@ class _MatrixLoadWorker(QThread):
         self._path = path
 
     def run(self):
+        # A CoMPASS JSON matrix reads in well under a second, so it skips
+        # the cache below entirely: the cache exists for the .mtx decode,
+        # and caching a fast read would only add a copy to keep in step
+        # with the file. Still read here rather than on the GUI thread --
+        # one code path, and a much larger export stays responsive.
+        if os.path.splitext(self._path)[1].lower() == ".json":
+            try:
+                matrix = load_json_matrix(self._path)
+            except ParseError as exc:
+                self.failed.emit(str(exc))
+                return
+            self.loaded.emit(matrix)
+            return
         # A cache hit skips the decode entirely, which is the whole cost
         # of opening a matrix -- about 4.9 s for the reference file. Read
         # on the worker thread, not before starting it, so a slow or
@@ -989,6 +1003,9 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # caller knows it. Every spectrum reaching this method is DERIVED,
         # so none of them is Poisson in its own counts; passing it through
         # is what lets a fit weight them correctly.
+        # Read before the new spectrum joins the list: keep the X range the
+        # user is looking at, unless nothing is on screen yet.
+        keep_view = self._has_visible_spectrum()
         existing_paths = {s.path for s in self.spectra}
         if path in existing_paths:
             suffix = 2
@@ -1010,7 +1027,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # above just deactivated the one that had it.
         self._append_spectrum_row(spectrum)
         self._sync_active_radios()
-        self._plot_data()
+        self._plot_data(preserve_view=keep_view)
 
     def set_efficiency(self, result):
         """Remember a fitted efficiency so it can be reopened and reapplied.
@@ -1257,7 +1274,9 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
 
     def _open_matrix_dialog(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open Matrix", self.settings.last_folder(), "Matrix files (*.mtx);;All files (*)"
+            self, "Open Matrix", self.settings.last_folder(),
+            "Matrix files (*.mtx *.json);;TV matrix (*.mtx);;"
+            "CoMPASS JSON matrix (*.json);;All files (*)"
         )
         if path:
             matrix, error = self._load_matrix_with_progress(path)
@@ -1764,6 +1783,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         """
         from root_io import RootError, load_spectrum
 
+        keep_view = self._has_visible_spectrum()
         failures = []
         added = []
         pending_calibration = None
@@ -1798,7 +1818,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
                 # rather than adding to it -- same reasoning as _load_files.
                 self._apply_calibration_change(pending_calibration, True)
             else:
-                self._plot_data()
+                self._plot_data(preserve_view=keep_view)
         if failures:
             QMessageBox.warning(
                 self, "Could not open ROOT file", "\n".join(failures)
@@ -1873,8 +1893,9 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         worker.wait()
         return outcome["matrix"], outcome["error"]
 
-    def _open_matrix_panel(self, path, matrix=None):
-        panel = MatrixPanel(self, path, matrix=matrix)
+    def _open_matrix_panel(self, path, matrix=None, symmetric_diagonal=None):
+        panel = MatrixPanel(self, path, matrix=matrix,
+                            symmetric_diagonal=symmetric_diagonal)
         self._matrix_panels.append(panel)
         panel.show()
         return panel
@@ -1918,7 +1939,16 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # it once the list is complete instead.
         return spectrum, None, calibration
 
+    def _has_visible_spectrum(self):
+        """Whether a spectrum is on screen -- i.e. whether there is a view
+        worth keeping when another spectrum arrives. Opening a file or
+        adding a gate used to snap back to full scale every time; now the
+        X range stays and only the first spectrum (or the first after
+        everything was hidden) opens at full scale."""
+        return any(s.visible for s in self.spectra)
+
     def _load_files(self, paths):
+        keep_view = self._has_visible_spectrum()
         failures = []
         loaded_any = False
         # First embedded calibration wins, matching the previous
@@ -1957,7 +1987,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
                 # below rather than adding to it.
                 self._apply_calibration_change(pending_calibration, True)
             else:
-                self._plot_data()
+                self._plot_data(preserve_view=keep_view)
 
         if failures:
             QMessageBox.warning(self, "Some files could not be loaded", "\n".join(failures))

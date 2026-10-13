@@ -155,17 +155,42 @@ def compute_projection(matrix, axis):
         return matrix.sum(axis=1)
 
 
-def _cut_with_variance(matrix, axis, cut_regions, bg_regions):
+def _diagonal_extra(diagonal_twice, merged, size):
+    """Extra variance owed by a symmetrized matrix's doubled diagonal.
+
+    In S = M + M.T a diagonal cell holds the same D events twice, so its
+    variance is 4*D while "variance = counts" credits it only 2*D. A cut
+    includes cell (j, j) exactly when line j is gated, so those channels
+    are owed 2*D[j] more. Indices along the gated axis and along the
+    output axis coincide here because only a square, symmetric matrix
+    carries a `diagonal_twice` at all.
+    """
+    if diagonal_twice is None:
+        return 0.0
+    d = np.asarray(diagonal_twice, dtype=float)
+    if d.shape != (size,):
+        raise ValueError(f"diagonal_twice must have {size} entries, got {d.shape}")
+    extra = np.zeros(size, dtype=float)
+    for lo_idx, hi_idx in merged:
+        extra[lo_idx : hi_idx + 1] += 2.0 * d[lo_idx : hi_idx + 1]
+    return extra
+
+
+def _cut_with_variance(matrix, axis, cut_regions, bg_regions, diagonal_twice=None):
     """Shared worker for compute_cut/compute_cut_with_variance."""
     _check_axis(axis)
-    pos, n_cut = _sum_and_lines(matrix, axis, merge_regions(matrix, axis, as_region_list(cut_regions)))
-    bg, n_bg = _sum_and_lines(matrix, axis, merge_regions(matrix, axis, as_region_list(bg_regions)))
+    cut_merged = merge_regions(matrix, axis, as_region_list(cut_regions))
+    bg_merged = merge_regions(matrix, axis, as_region_list(bg_regions))
+    pos, n_cut = _sum_and_lines(matrix, axis, cut_merged)
+    bg, n_bg = _sum_and_lines(matrix, axis, bg_merged)
+    size = _complementary_size(matrix, axis)
+    extra_cut = _diagonal_extra(diagonal_twice, cut_merged, size)
 
     if n_bg == 0:
         # No background at all, or every background region fell outside
         # the matrix -- either way there is nothing to subtract, which is
         # a normal result and not an error.
-        return pos, np.maximum(pos, 0.0)
+        return pos, np.maximum(pos, 0.0) + extra_cut
 
     factor = n_cut / n_bg
     net = pos - factor * bg
@@ -178,6 +203,10 @@ def _cut_with_variance(matrix, axis, cut_regions, bg_regions):
     # not hold. Zero is the honest floor there rather than a negative
     # variance or a NaN from its square root.
     variance = np.maximum(pos, 0.0) + factor ** 2 * np.maximum(bg, 0.0)
+    # A symmetrized matrix's doubled diagonal, in the gate and (scaled like
+    # the rest of the background) in the background regions.
+    variance = variance + extra_cut + factor ** 2 * _diagonal_extra(
+        diagonal_twice, bg_merged, size)
     return net, variance
 
 
@@ -231,7 +260,7 @@ def compute_cut(matrix, axis, cut_region, bg_regions):
     return net
 
 
-def compute_cut_with_variance(matrix, axis, cut_region, bg_regions):
+def compute_cut_with_variance(matrix, axis, cut_region, bg_regions, diagonal_twice=None):
     """compute_cut's result plus its per-channel variance, as
     (net, variance).
 
@@ -250,5 +279,10 @@ def compute_cut_with_variance(matrix, axis, cut_region, bg_regions):
 
     Provided as a separate entry point so compute_cut's return type
     stays a bare array for the callers that do not need this.
+
+    `diagonal_twice` is for a matrix built by matrix_symmetrize as
+    S = M + M.T: the D = diag(M) it returned. Those diagonal cells hold
+    the same events twice, and passing D gives them their true variance
+    (see _diagonal_extra). It never changes the net counts.
     """
-    return _cut_with_variance(matrix, axis, cut_region, bg_regions)
+    return _cut_with_variance(matrix, axis, cut_region, bg_regions, diagonal_twice)

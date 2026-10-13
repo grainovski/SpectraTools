@@ -1,15 +1,18 @@
 import os
+import time
 
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import QEvent, QObject, Qt, QThread, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
+    QProgressDialog,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -17,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from fit_mode import FitModeController, is_bare_key_event
 from matrix_cut import compute_projection
+from matrix_symmetrize import SymmetrizeError, check_symmetrizable, symmetrize
 from mtx_io import load_mtx
 from peak_fit import channel_indices
 from calibration_view import (
@@ -189,6 +193,41 @@ class MatrixCutController(QObject):
             self.panel.canvas.draw()
 
 
+class _SymmetrizeWorker(QThread):
+    """Folds a matrix off the GUI thread. A gain-matched 8192x8192 fold
+    took 8.6 s, which on the GUI thread is a window that cannot repaint --
+    the same reason matrix loading moved to main_window._MatrixLoadWorker.
+
+    Signals are deliberately not called `finished`: QThread already has
+    one, and a custom signal of that name silently shadows it.
+    """
+
+    progressed = Signal(int, int)
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, matrix, a, b, parent=None):
+        super().__init__(parent)
+        self._matrix, self._a, self._b = matrix, a, b
+
+    def run(self):
+        # Looked up at call time, so a test can substitute the module's
+        # `symmetrize`. Nothing may escape run(): an exception here would
+        # end the thread with no way to tell the user.
+        try:
+            result = symmetrize(self._matrix, self._a, self._b,
+                                progress=self.progressed.emit)
+        except SymmetrizeError as exc:
+            self.failed.emit(str(exc))
+            return
+        except MemoryError:
+            self.failed.emit(
+                "Not enough memory to symmetrize this matrix: it needs about "
+                "three copies of it at once.")
+            return
+        self.succeeded.emit(result)
+
+
 class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
     """A separate top-level window for TV-style matrix gate/cut
     analysis. Loads a matrix and computes both its X and Y
@@ -200,10 +239,16 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
     window. Coexists with MainWindow -- activating one disables, but
     does not close, the other (wired in Task 6)."""
 
-    def __init__(self, main_window, path, matrix=None):
+    def __init__(self, main_window, path, matrix=None, symmetric_diagonal=None):
         super().__init__()
         self.main_window = main_window
         self.path = path
+        # Set only on a matrix built by Symmetrize...: D = diag(M') of the
+        # S = M' + M'.T it holds. Its diagonal cells hold the same events
+        # twice, and every cut passes D on so their variance comes out
+        # right -- see matrix_cut._diagonal_extra.
+        self.symmetric_diagonal = (
+            None if symmetric_diagonal is None else np.asarray(symmetric_diagonal))
         # `matrix` lets a caller hand in an already-decoded matrix
         # instead of paying for the decode here, on the GUI thread.
         # main_window's Open Matrix flow does exactly that, loading in a
@@ -226,7 +271,8 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
         # is clicked again while an earlier heatmap window is still open.
         self._heatmap_windows = []
 
-        self.setWindowTitle(f"Matrix -- {os.path.basename(path)}")
+        suffix = " (symmetrized)" if self.symmetric_diagonal is not None else ""
+        self.setWindowTitle(f"Matrix -- {os.path.basename(path)}{suffix}")
         self.resize(800, 500)
 
         self.figure = Figure()
@@ -273,7 +319,7 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
         self._pan_last_px = None
         self.canvas.mpl_connect("button_press_event", self._on_pan_press)
         self.canvas.mpl_connect("button_release_event", self._on_pan_release)
-        self.canvas.mpl_connect("motion_notify_event", self._pan_to)
+        self.canvas.mpl_connect("motion_notify_event", self._on_mouse_move)
 
         self.axis_selector = QComboBox()
         self.axis_selector.addItem("X projection", "x")
@@ -295,6 +341,21 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
         self.calibrate_button.setShortcut("Ctrl+L")
         self.calibrate_button.clicked.connect(self._open_calibration_dialog)
 
+        self.symmetrize_button = QPushButton("Symmetrize...")
+        self.symmetrize_button.setToolTip(
+            "Build a symmetric matrix S = M + Mᵀ in a new window, with Y "
+            "first put on X's scale")
+        self.symmetrize_button.clicked.connect(self._open_symmetrize_dialog)
+
+        if self.symmetric_diagonal is not None:
+            # X and Y are identical by construction, so offering both would
+            # only invite the question of which one to use.
+            self.axis_selector.setEnabled(False)
+            self.axis_selector.setToolTip(
+                "Symmetrized: the X and Y projections are identical")
+            self.symmetrize_button.setEnabled(False)
+            self.symmetrize_button.setToolTip("This matrix is already symmetrized")
+
         top_bar = QHBoxLayout()
         top_bar.addWidget(QLabel("Working on:"))
         top_bar.addWidget(self.axis_selector)
@@ -303,6 +364,7 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
         top_bar.addWidget(self.calibrate_button)
         top_bar.addWidget(self.activate_cut_button)
         top_bar.addWidget(self.heatmap_button)
+        top_bar.addWidget(self.symmetrize_button)
 
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -545,6 +607,35 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
         self._pan_last_px = None
         self.nav_toolbar.push_current()
 
+    def _on_mouse_move(self, event):
+        """Pan during a drag; otherwise show the cursor position in the
+        status bar the way the main window does -- channel, energy when a
+        calibration is active, and the counts of the projection shown.
+        This handler used to be _pan_to alone, so the projection view had
+        no readout at all."""
+        if self._pan_last_px is not None:
+            self._pan_to(event)
+            return
+        # A fit or integration message is showing; let it run its time,
+        # exactly as main_window._on_mouse_move does.
+        if time.monotonic() < self.fit_controller._status_message_until:
+            return
+        if event.inaxes != self.axes or event.xdata is None or not self.spectra:
+            self.statusBar().clearMessage()
+            return
+        channel = int(round(self.display_to_channel(event.xdata)))
+        if self._calibration_active:
+            parts = [f"Channel: {channel}  Energy: {event.xdata:.2f} keV"]
+        else:
+            parts = [f"Channel: {channel}"]
+        data = self.spectra[0].data
+        label = self.axis_selector.currentText()
+        if 0 <= channel < len(data):
+            parts.append(f"{label}: {data[channel]}")
+        else:
+            parts.append(f"{label}: -")
+        self.statusBar().showMessage("  |  ".join(parts))
+
     def _pan_to(self, event):
         """See main_window._pan_to for why this works from the pixel
         delta between motion events rather than from the data coordinate
@@ -694,7 +785,8 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
         # the real uncertainty rather than sqrt(counts) -- see
         # compute_cut_with_variance for why the two differ.
         result, variance = compute_cut_with_variance(
-            self.matrix, self.working_axis, state.cut_regions, state.bg_regions
+            self.matrix, self.working_axis, state.cut_regions, state.bg_regions,
+            diagonal_twice=self.symmetric_diagonal,
         )
         # Path-shaped, not a free-form label -- same rationale and same
         # fix shape as _rebuild_spectra's own path construction above.
@@ -737,6 +829,81 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
             f"{round(span_lo)}_{round(span_hi)}{suffix}{ext}"
         )
         self.main_window._add_combined_spectrum(path, result, variance=variance)
+
+    def _open_symmetrize_dialog(self):
+        """Symmetrize...: refuse with the reason, or ask how Y is put on X's
+        scale and build the symmetric matrix in a new panel."""
+        try:
+            check_symmetrizable(self.matrix)
+        except SymmetrizeError as exc:
+            QMessageBox.information(self, "Cannot symmetrize", str(exc))
+            return
+        from symmetrize_dialog import SymmetrizeDialog
+
+        dialog = SymmetrizeDialog(
+            self, self.projections["x"], self.projections["y"])
+        if not dialog.exec() or dialog.mapping is None:
+            return
+        result, error = self._run_symmetrize(*dialog.mapping)
+        if error is not None:
+            QMessageBox.warning(self, "Could not symmetrize", error)
+            return
+        self._open_symmetrized(*result)
+
+    def _run_symmetrize(self, a, b):
+        """Fold in a worker thread behind a progress dialog.
+
+        Returns ((S, D, lost), None) or (None, error message). The same
+        shape as main_window._load_matrix_with_progress, and safe for the
+        same reason: the worker's signals reach this thread queued, so the
+        dialog cannot be closed before its exec() has started.
+        """
+        dialog = QProgressDialog("Symmetrizing...", None, 0, 100, self)
+        dialog.setWindowTitle("Symmetrize Matrix")
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.setValue(0)
+
+        outcome = {"result": None, "error": None}
+        worker = _SymmetrizeWorker(self.matrix, a, b, self)
+
+        def on_progress(done, total):
+            if total:
+                dialog.setValue(int(done * 100 / total))
+
+        worker.progressed.connect(on_progress)
+        worker.succeeded.connect(lambda r: outcome.__setitem__("result", r))
+        worker.failed.connect(lambda msg: outcome.__setitem__("error", msg))
+        worker.finished.connect(dialog.close)
+        worker.start()
+        dialog.exec()
+        worker.wait()
+        return outcome["result"], outcome["error"]
+
+    def _symmetrize_with(self, a, b):
+        """Fold this matrix into S = M' + M'.T (Y mapped by x = a + b*y),
+        synchronously, and open it in a new panel. The seam tests use: no
+        thread, no modal loop. Returns the new panel."""
+        return self._open_symmetrized(*symmetrize(self.matrix, a, b))
+
+    def _open_symmetrized(self, matrix, diagonal, lost):
+        """Open the folded matrix in a new panel; report dropped counts."""
+        # The real extension stays last, for the same reason as the cut
+        # and projection paths: fit_export.auto_log_path splits on the last
+        # dot of the basename.
+        root, ext = os.path.splitext(self.path)
+        panel = self.main_window._open_matrix_panel(
+            f"{root}_sym{ext}", matrix=matrix, symmetric_diagonal=diagonal)
+        if lost:
+            total = int(self.matrix.sum())
+            QMessageBox.information(
+                panel, "Symmetrized",
+                f"{lost} counts ({100.0 * lost / total:.2f}% of {total}) fell "
+                f"outside the matrix once Y was put on X's scale, and were "
+                f"left out.")
+        return panel
 
     def _open_heatmap(self):
         from matrix_heatmap import MatrixHeatmapWindow

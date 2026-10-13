@@ -1880,3 +1880,50 @@ def test_the_split_of_a_shared_peak_is_documented_for_both_routes():
         assert piece in kb, "the Knowledge Database no longer says %r" % piece
     # "its own fitted width" is one FWHM -- the constant the code uses.
     assert SHARED_PEAK_FWHM == 1.0
+
+
+def _matrix_section(html):
+    """Only the HowTo's matrix-analysis section, so a claim cannot be
+    satisfied by the same words appearing on some unrelated part of the
+    page."""
+    start = html.index("Matrix analysis</h3>")
+    end = html.index("<h3>", start)
+    return _flat(html[start:end])
+
+
+def test_howto_documents_coMPASS_json_matrices():
+    section = _matrix_section(build_howto_html())
+    assert ".json" in section
+    assert "CoMPASS" in section
+    lowered = section.lower()
+    # The two facts a user cannot discover from the file itself.
+    assert "calibration" in lowered and "ignored" in lowered, (
+        "the Help must say the file's own calibration is not used")
+    assert "each row" in lowered and "one x bin" in lowered, (
+        "the Help must say how the JSON rows map to X/Y")
+
+
+def test_howto_documents_symmetrize():
+    section = _matrix_section(build_howto_html())
+    lowered = section.lower()
+    assert "Symmetrize..." in section
+    assert "new window" in lowered, "the original must be said to stay as it is"
+    # Why matching is needed, and how it is done.
+    assert "two lines" in lowered and "scale" in lowered
+    # The diagonal convention and why: self-coincidences.
+    assert "self-coincidence" in lowered
+    assert "twice" in lowered
+    # What is refused.
+    for refused in ("already symmetric", "negative", "square"):
+        assert refused in lowered, refused
+
+
+def test_howto_documents_cursor_readout_and_kept_view():
+    html = build_howto_html()
+    start = html.index("<h3>Plot toolbar</h3>")
+    section = _flat(html[start:html.index("<h3>", start + 5)]).lower()
+    # The readout, in both kinds of window, with its calibrated form.
+    assert "status bar" in section and "channel" in section and "counts" in section
+    assert "matrix panel" in section and "kev" in section
+    # Opening keeps the view; Ctrl+0 is the way back to full scale.
+    assert "keeps the" in section and "first spectrum" in section

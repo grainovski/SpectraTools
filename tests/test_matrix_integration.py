@@ -251,3 +251,108 @@ def test_closing_a_matrix_panel_releases_its_matrix(qapp):
         f"{still_held / 1e6:,.0f} MB of matrix data still held by closed panels"
     )
     assert main_window._matrix_panels == []
+
+
+# --- CoMPASS JSON matrices -------------------------------------------------
+
+_JSON_FIXTURE = os.path.join(FIXTURES, "compass", "co60_EvsE.json")
+
+
+def test_open_matrix_dialog_offers_json_matrices(qapp, monkeypatch):
+    main_window = MainWindow()
+    seen = {}
+
+    def fake_dialog(parent, caption, folder, filters, *a, **k):
+        seen["filters"] = filters
+        return ("", "")
+
+    monkeypatch.setattr("main_window.QFileDialog.getOpenFileName", fake_dialog)
+    main_window._open_matrix_dialog()
+
+    first = seen["filters"].split(";;")[0]
+    assert "*.mtx" in first and "*.json" in first, seen["filters"]
+
+
+@pytest.mark.parametrize("name", ["co60_EvsE.json", "CO60_EVSE.JSON"])
+def test_a_json_matrix_is_read_by_the_json_reader_not_load_mtx(
+        qapp, monkeypatch, tmp_path, name):
+    """Routed by extension, case-insensitively. The .mtx decoder must never
+    see a JSON file -- it would report 'bad magic' for a perfectly good
+    matrix."""
+    import shutil
+
+    import numpy as np
+
+    from json_matrix_io import load_json_matrix
+
+    path = str(tmp_path / name)
+    shutil.copyfile(_JSON_FIXTURE, path)
+
+    main_window = MainWindow()
+    monkeypatch.setattr(
+        "main_window.QFileDialog.getOpenFileName", lambda *a, **k: (path, ""))
+
+    def must_not_run(*a, **k):
+        raise AssertionError("load_mtx was called for a JSON matrix")
+
+    monkeypatch.setattr("main_window.load_mtx", must_not_run)
+    panels = []
+    monkeypatch.setattr(main_window, "_open_matrix_panel",
+                        lambda p, matrix=None: panels.append((p, matrix)))
+
+    main_window._open_matrix_dialog()
+
+    assert panels, "no panel was opened"
+    assert panels[0][0] == path
+    assert np.array_equal(panels[0][1], load_json_matrix(_JSON_FIXTURE))
+
+
+def test_a_json_matrix_bypasses_the_mtx_decode_cache(qapp, monkeypatch):
+    """The cache exists because decoding .mtx takes seconds. A JSON matrix
+    reads in well under a second, and caching it would only add a stale
+    copy to keep in step with the file."""
+    import matrix_cache
+
+    main_window = MainWindow()
+    monkeypatch.setattr(
+        "main_window.QFileDialog.getOpenFileName",
+        lambda *a, **k: (_JSON_FIXTURE, ""))
+    calls = []
+    monkeypatch.setattr(matrix_cache, "load", lambda p: calls.append(("load", p)))
+    monkeypatch.setattr(matrix_cache, "store",
+                        lambda p, m: calls.append(("store", p)))
+    monkeypatch.setattr(main_window, "_open_matrix_panel",
+                        lambda p, matrix=None: None)
+    # Stubbed so a regression FAILS instead of hanging: if a JSON ever
+    # reaches load_mtx again, its "bad magic" error opens a modal warning
+    # that nobody can click in a headless run.
+    warnings = []
+    monkeypatch.setattr(
+        "main_window.QMessageBox.warning",
+        lambda parent, title, text, *a, **k: warnings.append(text))
+
+    main_window._open_matrix_dialog()
+
+    assert calls == [], calls
+    assert warnings == [], warnings
+
+
+def test_a_bad_json_matrix_is_reported_not_raised(qapp, monkeypatch, tmp_path):
+    bad = tmp_path / "spectrum.json"
+    bad.write_text('{"data": [1, 2, 3]}')
+
+    main_window = MainWindow()
+    monkeypatch.setattr(
+        "main_window.QFileDialog.getOpenFileName", lambda *a, **k: (str(bad), ""))
+    warnings = []
+    monkeypatch.setattr(
+        "main_window.QMessageBox.warning",
+        lambda parent, title, text, *a, **k: warnings.append((title, text)))
+    opened = []
+    monkeypatch.setattr(main_window, "_open_matrix_panel",
+                        lambda p, matrix=None: opened.append(p))
+
+    main_window._open_matrix_dialog()
+
+    assert warnings and "1-D" in warnings[0][1], warnings
+    assert not opened

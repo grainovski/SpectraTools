@@ -4,6 +4,73 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [6.2.0] - 2026-10-13
+
+Nothing measured with 6.1.1 changes: every spectrum, fit, calibration and
+efficiency number comes out the same. This version adds two matrix features —
+reading gamma-gamma matrices exported by CAEN CoMPASS, and symmetrizing a
+matrix — and two fixes to how the plots behave.
+
+### Added
+
+- **CoMPASS JSON matrices.** File › Open Matrix now opens a gamma-gamma
+  matrix exported by CAEN CoMPASS as `.json`, alongside `.mtx`. CoMPASS
+  writes each row of its data array as one X bin; the reader turns that into
+  the app's own layout. This was checked cell for cell against the ROOT file
+  CoMPASS saved for the same run, which labels its axes: all 1,048,576 cells
+  agree, and read the other way round 228,998 counts would have moved. All
+  1024 bins per axis are kept, including the last row and column, which match
+  ROOT's overflow bin.
+- **The calibration stored in a CoMPASS JSON matrix is ignored**, as ROOT
+  matrix calibrations already were. It does not describe the matrix's bins:
+  on a Co-60 run it put the 1173 and 1332 keV lines near 388 and 445 keV, and
+  one calibration cannot serve two detectors with different gains. Calibrate
+  the projections in the app as usual.
+- **Symmetrize…** in the matrix panel builds a symmetric matrix,
+  S = M + Mᵀ, in a new window and leaves the original as it is. A gate then
+  catches an event through either of its gamma rays: on the Co-60 run, a
+  gate on 1332 keV gives 11,494 ± 111 counts of 1173 keV against
+  5,724 ± 79 before.
+  - A matrix from two detectors has a different gain on each axis, so Y is
+    first put on X's scale, from two lines typed approximately on both
+    projections and refined to the nearby peak centroids. Folding without
+    this widened the Co-60 peaks by about three quarters. A single-array
+    matrix whose axes already share one scale can skip the matching.
+  - The diagonal is counted twice — once with each gamma ray as the gate —
+    which keeps a self-coincidence peak at its true intensity; counting it
+    once cost a simulated self-coincidence peak about 11% of its area and
+    flattened its top. The error bars of every cut allow for the doubled
+    diagonal.
+  - When Y is rebinned, each count goes whole to one of the channels it
+    overlaps, so the matrix keeps whole-number counts and gives the same
+    result every time.
+  - Refused, with the reason, for a matrix that is not square, holds negative
+    counts, or is already symmetric.
+  - Runs in the background behind a progress bar; a full 8192 × 8192 matrix
+    takes several seconds.
+- **The matrix panel shows the cursor position** in its status bar, as the
+  main window does: the channel and the counts of the projection on screen,
+  plus the energy in keV when a calibration is active.
+
+### Changed
+
+- **Opening another spectrum, or adding one, keeps the X range you are
+  looking at** instead of jumping back to the full spectrum. That covers
+  File › Open, Recent Files, ROOT spectra, a gate from a matrix panel,
+  Add/Subtract and an efficiency correction. The first spectrum still opens
+  at full scale, Ctrl+0 still shows the full spectrum, and Rebin still does
+  too, because it renumbers the channels.
+
+### Internal
+
+- `matrix_cut.compute_cut_with_variance` takes `diagonal_twice`, the
+  diagonal of the folded matrix, to give a symmetrized matrix's diagonal its
+  true variance. It changes no counts.
+- The CoMPASS JSON and ROOT files from one real Co-60 run are test fixtures
+  (`tests/fixtures/compass/`), so the orientation check reruns with the
+  suite.
+- Test suite: 1940 collected.
+
 ## [6.1.1] - 2026-09-23
 
 An efficiency calibration made from a real spectrum reports different numbers
