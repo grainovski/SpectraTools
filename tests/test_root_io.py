@@ -98,26 +98,41 @@ def test_listing_a_file_that_is_not_root_fails_with_the_path(tmp_path):
 # --- 1D ----------------------------------------------------------------
 
 
-def test_load_spectrum_returns_counts_and_no_calibration_for_channels(simple_file):
-    data, calibration = root_io.load_spectrum(simple_file, "spec")
+def test_load_spectrum_returns_counts_and_no_axis_for_channels(simple_file):
+    data, axis = root_io.load_spectrum(simple_file, "spec")
     assert data.dtype == np.int64
     assert data.shape == (64,)
     assert data.sum() == 95
     assert list(data[30:35]) == [4, 20, 50, 18, 3]
-    # A plain channel axis is not a calibration; reporting one would put an
-    # identity transform in front of the user for no reason.
-    assert calibration is None
+    # One bin per channel is the identity axis, reported as None so the
+    # ordinary spectrum carries nothing.
+    assert axis is None
 
 
-def test_load_spectrum_derives_a_calibration_from_a_real_axis(simple_file):
-    _, calibration = root_io.load_spectrum(simple_file, "kev")
-    assert calibration is not None
-    assert calibration.kind == "linear"
-    # Bin i spans [100 + 0.5i, 100 + 0.5(i+1)], so its CENTRE is at
-    # 100.25 + 0.5i -- the half-bin offset is the part that is easy to
-    # drop, and dropping it shifts every energy by half a channel.
-    assert calibration.b == pytest.approx(0.5)
-    assert calibration.a == pytest.approx(100.25)
+def test_load_spectrum_keeps_a_real_axis_as_the_channel_axis(simple_file):
+    """A ROOT axis is the spectrum's CHANNEL axis -- the coordinates ROOT
+    and HDTV draw it against -- not an energy calibration."""
+    _, axis = root_io.load_spectrum(simple_file, "kev")
+    assert axis is not None
+    assert not hasattr(axis, "kind"), "must not come back as a Calibration"
+    # Bin i spans [100 + 0.5i, 100 + 0.5(i+1)]: centre 100.25 + 0.5i, and
+    # this app's channel is ROOT's coordinate minus a half (bin [i, i+1]
+    # of a 1:1 axis is channel i), so 99.75 + 0.5i.
+    assert axis.width == pytest.approx(0.5)
+    assert axis.offset == pytest.approx(99.75)
+
+
+def test_a_compass_1k_axis_spans_the_full_16k_adc_range(tmp_path):
+    """The case that motivated channel axes: CoMPASS writes its E-E
+    matrix with 1023 bins over 0-16383. Bin 0 must sit near channel 7.5
+    and the last bin near 16375 -- the ADC values those bins collected."""
+    path = tmp_path / "compass.root"
+    _write(path, {"h": _th1(np.ones(1023), low=0.0, high=16383.0)})
+    _, axis = root_io.load_spectrum(path, "h")
+    width = 16383.0 / 1023
+    assert axis.width == pytest.approx(width)
+    assert axis.to_channel(0) == pytest.approx(width / 2 - 0.5)
+    assert axis.to_channel(1022) == pytest.approx(16383.0 - width / 2 - 0.5)
 
 
 def test_under_and_overflow_bins_are_excluded(tmp_path):
@@ -144,19 +159,20 @@ def test_loading_a_missing_object_names_it(simple_file):
 # --- 2D ----------------------------------------------------------------
 
 
-def test_load_matrix_returns_the_array_and_both_axis_calibrations(tmp_path):
+def test_load_matrix_returns_the_array_and_both_channel_axes(tmp_path):
     path = tmp_path / "m.root"
     values = np.arange(6 * 8, dtype=float).reshape(6, 8)  # [y][x]: 6 rows, 8 cols
     _write(path, {"m": _th2(values, x_range=(0.0, 16.0), y_range=(0.0, 6.0))})
 
-    matrix, x_cal, y_cal = root_io.load_matrix(path, "m")
+    matrix, x_axis, y_axis = root_io.load_matrix(path, "m")
     assert matrix.dtype == np.int64
     assert matrix.shape == (6, 8)
     assert matrix.sum() == int(values.sum())
-    # x has 8 bins over 16 units -> width 2; y has 6 bins over 6 -> width 1
-    # starting at 0, i.e. centres at 0.5, which is a plain channel axis.
-    assert x_cal is not None and x_cal.b == pytest.approx(2.0)
-    assert y_cal is None
+    # x has 8 bins over 16 units -> width 2, bin 0 at channel 0.5; y has
+    # 6 bins over 6 starting at 0, which is a plain channel axis.
+    assert x_axis is not None and x_axis.width == pytest.approx(2.0)
+    assert x_axis.offset == pytest.approx(0.5)
+    assert y_axis is None
 
 
 def test_a_non_square_matrix_is_not_transposed(tmp_path):

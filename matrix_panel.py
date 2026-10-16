@@ -28,6 +28,7 @@ from calibration_view import (
     wheel_zoom_factor,
     zoomed_limits,
 )
+from channel_axis import to_channel
 from goto_view import GoToMixin
 from spectrum import (
     LoadedSpectrum, next_color, pan_button_is_active, panned_xlim,
@@ -239,10 +240,16 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
     window. Coexists with MainWindow -- activating one disables, but
     does not close, the other (wired in Task 6)."""
 
-    def __init__(self, main_window, path, matrix=None, symmetric_diagonal=None):
+    def __init__(self, main_window, path, matrix=None, symmetric_diagonal=None, axes=None):
         super().__init__()
         self.main_window = main_window
         self.path = path
+        # The ChannelAxis of X and of Y (None = one bin per channel). Set
+        # for a ROOT matrix, whose bins can each span many ADC channels --
+        # see channel_axis. Everything that shows a channel number, and
+        # every projection and cut handed on, goes through these.
+        x_axis, y_axis = axes if axes is not None else (None, None)
+        self.channel_axes = {"x": x_axis, "y": y_axis}
         # Set only on a matrix built by Symmetrize...: D = diag(M') of the
         # S = M' + M'.T it holds. Its diagonal cells hold the same events
         # twice, and every cut passes D on so their variance comes out
@@ -454,6 +461,7 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
         root, ext = os.path.splitext(self.path)
         path = f"{root}_{self.working_axis}_projection{ext}"
         spectrum = LoadedSpectrum(path, data, color=self._projection_color())
+        spectrum.axis = self.channel_axes[self.working_axis]
         spectrum.active = True
         self.spectra = [spectrum]
 
@@ -623,11 +631,13 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
         if event.inaxes != self.axes or event.xdata is None or not self.spectra:
             self.statusBar().clearMessage()
             return
+        # The bin under the cursor, and the detector channel shown for it.
         channel = int(round(self.display_to_channel(event.xdata)))
+        raw = int(round(float(self.display_to_raw(event.xdata))))
         if self._calibration_active:
-            parts = [f"Channel: {channel}  Energy: {event.xdata:.2f} keV"]
+            parts = [f"Channel: {raw}  Energy: {event.xdata:.2f} keV"]
         else:
-            parts = [f"Channel: {channel}"]
+            parts = [f"Channel: {raw}"]
         data = self.spectra[0].data
         label = self.axis_selector.currentText()
         if 0 <= channel < len(data):
@@ -821,14 +831,20 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
         # min/max over ALL gate bounds, not first-marked/last-marked: the
         # list is in marking order, so gates[0]/gates[-1] named the same
         # logical cut differently depending on which gate was clicked
-        # first, scattering its auto-log across two files.
-        span_lo = min(lo for lo, _hi in gates)
-        span_hi = max(hi for _lo, hi in gates)
+        # first, scattering its auto-log across two files. In detector
+        # channels, the numbers the user marked against.
+        gate_axis = self.channel_axes[self.working_axis]
+        span_lo = to_channel(gate_axis, min(lo for lo, _hi in gates))
+        span_hi = to_channel(gate_axis, max(hi for _lo, hi in gates))
         path = (
             f"{root}_{self.working_axis}_cut_"
             f"{round(span_lo)}_{round(span_hi)}{suffix}{ext}"
         )
-        self.main_window._add_combined_spectrum(path, result, variance=variance)
+        # The cut lies along the OTHER axis (gating on X gives a spectrum
+        # of Y), so it carries that axis's channel scale.
+        other = "y" if self.working_axis == "x" else "x"
+        self.main_window._add_combined_spectrum(
+            path, result, variance=variance, axis=self.channel_axes[other])
 
     def _open_symmetrize_dialog(self):
         """Symmetrize...: refuse with the reason, or ask how Y is put on X's
@@ -841,7 +857,8 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
         from symmetrize_dialog import SymmetrizeDialog
 
         dialog = SymmetrizeDialog(
-            self, self.projections["x"], self.projections["y"])
+            self, self.projections["x"], self.projections["y"],
+            axes=(self.channel_axes["x"], self.channel_axes["y"]))
         if not dialog.exec() or dialog.mapping is None:
             return
         result, error = self._run_symmetrize(*dialog.mapping)
@@ -894,8 +911,11 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
         # and projection paths: fit_export.auto_log_path splits on the last
         # dot of the basename.
         root, ext = os.path.splitext(self.path)
+        # Y was put on X's scale, so both axes of S are X's.
+        x_axis = self.channel_axes["x"]
         panel = self.main_window._open_matrix_panel(
-            f"{root}_sym{ext}", matrix=matrix, symmetric_diagonal=diagonal)
+            f"{root}_sym{ext}", matrix=matrix, symmetric_diagonal=diagonal,
+            axes=(x_axis, x_axis))
         if lost:
             total = int(self.matrix.sum())
             QMessageBox.information(
@@ -908,7 +928,8 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
     def _open_heatmap(self):
         from matrix_heatmap import MatrixHeatmapWindow
 
-        window = MatrixHeatmapWindow(self.matrix, self.path, self.main_window._theme, self)
+        window = MatrixHeatmapWindow(self.matrix, self.path, self.main_window._theme, self,
+                                     axes=(self.channel_axes["x"], self.channel_axes["y"]))
         self._heatmap_windows.append(window)
         window.show()
 

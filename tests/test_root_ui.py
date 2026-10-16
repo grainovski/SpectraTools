@@ -121,18 +121,19 @@ def test_loading_the_same_object_twice_is_ignored(qapp, root_file):
     assert len(main_window.spectra) == 1
 
 
-def test_an_embedded_axis_calibration_is_applied_once(qapp, root_file):
-    """Same rule as the N42 reader: the first calibration found wins, and
-    it is applied after every spectrum is in the list rather than
-    mid-load."""
+def test_a_root_axis_becomes_the_spectrum_channel_axis_not_a_calibration(qapp, root_file):
+    """The axis is drawn as ROOT and HDTV draw it -- 100-140 here -- and
+    is not turned into an energy calibration, which used to label it keV
+    and compete with the user's own calibration."""
     main_window = MainWindow()
-    assert main_window._calibration_active is False
-
     main_window._load_root_spectra(str(root_file), ["Energy/kev;1"])
-    assert main_window._calibration_active is True
-    assert main_window._calibration.kind == "linear"
-    assert main_window._calibration.b == pytest.approx(0.5)
-    assert main_window._calibration.a == pytest.approx(100.25)
+    assert main_window._calibration_active is False
+    assert main_window._calibration is None
+    spectrum = main_window.spectra[0]
+    assert spectrum.axis.width == pytest.approx(0.5)
+    line = main_window.axes.get_lines()[0]
+    assert line.get_xdata()[0] == pytest.approx(99.75)
+    assert line.get_xdata()[-1] == pytest.approx(99.75 + 0.5 * 79)
 
 
 def test_a_plain_channel_axis_does_not_activate_a_calibration(qapp, root_file):

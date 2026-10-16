@@ -63,6 +63,11 @@ class LoadedSpectrum:
         # discard the user's identifications; see energy_assignments.py.
         # Session-lived: never written to disk, never saved with fits.
         self.energy_assignments = None
+        # Where each bin sits on the detector's channel scale -- a
+        # channel_axis.ChannelAxis, or None for one bin per channel, which
+        # is every spectrum except a coarsely binned ROOT histogram and
+        # what is cut or projected from one. See channel_axis.
+        self.axis = None
 
 
 def active_spectrum(spectra):

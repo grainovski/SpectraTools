@@ -25,25 +25,59 @@ Requires of its host: `_calibration`, `_calibration_active`, and an
 from PySide6.QtWidgets import QDialog
 
 from calibration_dialog import CalibrationDialog
+from channel_axis import axis_of, to_channel, to_index
+from spectrum import active_spectrum
 
 
 class CalibrationViewMixin:
-    """Channel/display conversion and the calibration dialog."""
+    """Channel/display conversion and the calibration dialog.
+
+    Three coordinates are in play. A BIN is an index into a spectrum's
+    data, which is what the fit engine and every stored mark and result
+    use. A CHANNEL is where that bin sits on the detector's own scale --
+    the same number for a 1:1 spectrum, but ~16 ADC channels per bin on a
+    CoMPASS 1k matrix (see channel_axis). The DISPLAY coordinate is what
+    the x axis shows: the channel, or its energy when a calibration is
+    active, the calibration always being a function of the channel.
+
+    For historical reasons the pair below is named channel_to_display /
+    display_to_channel but takes and returns BINS of the active spectrum
+    -- every marking, fitting and Go To path already works in those, and
+    all of them stay correct by having the axis folded in here. For an
+    ordinary spectrum bin and channel coincide and nothing changes.
+    """
+
+    def _active_axis(self):
+        """The ChannelAxis of the spectrum marks and fits refer to: the
+        active one, or None (identity) when there is none."""
+        return axis_of(active_spectrum(getattr(self, "spectra", [])))
 
     def channel_to_display(self, channel):
-        """Converts a channel number (or numpy array of channel numbers)
-        to whatever's on the x-axis right now: the same value if no
-        calibration is active, or its calibrated keV equivalent if one
-        is. Every place that draws an x-coordinate routes through this."""
+        """Converts a bin of the active spectrum (or a numpy array of
+        them) to whatever's on the x-axis right now. Every place that
+        draws an x-coordinate for the active spectrum routes through
+        this; see spectrum_to_display for any other spectrum."""
+        return self.raw_to_display(to_channel(self._active_axis(), channel))
+
+    def display_to_channel(self, display_x):
+        """Inverse of channel_to_display -- converts an x-axis
+        coordinate back to a bin of the active spectrum. Every place that
+        reads a click/hover x-coordinate routes through this."""
+        return to_index(self._active_axis(), self.display_to_raw(display_x))
+
+    def spectrum_to_display(self, spectrum, bins):
+        """channel_to_display for a given spectrum rather than the active
+        one -- what drawing an overlaid spectrum needs."""
+        return self.raw_to_display(to_channel(axis_of(spectrum), bins))
+
+    def raw_to_display(self, channel):
+        """A detector CHANNEL -> the display coordinate."""
         if not self._calibration_active or self._calibration is None:
             return channel
         return self._calibration.apply(channel)
 
-    def display_to_channel(self, display_x):
-        """Inverse of channel_to_display -- converts an x-axis
-        coordinate (channel or keV, whichever is currently displayed)
-        back to a channel number. Every place that reads a click/hover
-        x-coordinate routes through this."""
+    def display_to_raw(self, display_x):
+        """The display coordinate -> a detector CHANNEL."""
         if not self._calibration_active or self._calibration is None:
             return display_x
         return self._calibration.invert(display_x)

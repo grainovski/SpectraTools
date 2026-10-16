@@ -708,8 +708,12 @@ def test_knowledge_database_documents_root_file_support():
     assert "ROOT files" in text
     assert "directory tree" in text
     assert "asks twice" in text
-    # Calibration comes from the axis when the file has one.
-    assert "carries real coordinates" in text
+    # 6.3.0: the axis is the histogram's channel scale, shown the HDTV way,
+    # and never switched on as an energy calibration.
+    assert "as ROOT and HDTV" in text
+    assert "never switched on as an" in text
+    assert "Bins and channels" in text
+    assert "channel = offset + width" in text
     # The refusals, and that reading is one-way.
     assert "fractional" in text
     assert "non-uniform bin widths" in text

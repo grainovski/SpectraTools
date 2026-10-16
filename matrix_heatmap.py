@@ -29,6 +29,15 @@ def _downsample_for_display(matrix, max_dim=_MAX_DISPLAY_DIM):
     return trimmed.reshape(rows // factor, factor, cols // factor, factor).sum(axis=(1, 3))
 
 
+def _edge_span(axis, bins):
+    """(first, last) bin edge along one axis, in detector channels.
+    The identity axis keeps the [0, bins] span this window has always
+    used."""
+    if axis is None:
+        return (0, bins)
+    return (axis.to_channel(-0.5), axis.to_channel(bins - 0.5))
+
+
 class MatrixHeatmapWindow(QMainWindow):
     """A separate, non-modal, view-only visualization of a loaded
     matrix -- opened on demand from the matrix panel. No markers, no
@@ -37,7 +46,7 @@ class MatrixHeatmapWindow(QMainWindow):
     absent from its entire source tree during design); this is a
     genuine enhancement, not a port."""
 
-    def __init__(self, matrix, path, theme, panel):
+    def __init__(self, matrix, path, theme, panel, axes=None):
         super().__init__()
         self.panel = panel
         self.setWindowTitle(f"Heatmap -- {os.path.basename(path)}")
@@ -75,9 +84,15 @@ class MatrixHeatmapWindow(QMainWindow):
         # user reading "channel 500" off an 8192-channel matrix's heatmap
         # was actually looking at channel 4000. The image is still the
         # downsampled overview; only the tick labels change meaning.
+        #
+        # A matrix with a channel axis (a ROOT matrix -- see channel_axis)
+        # spans the detector channels its bin edges cover instead, so a
+        # CoMPASS 1023-bin matrix reads 0-16383 here as it does in ROOT.
+        x_axis, y_axis = axes if axes is not None else (None, None)
         self.image = self.axes.imshow(
             display_matrix, norm=norm, origin="lower", aspect="auto",
-            extent=(0, matrix.shape[1], 0, matrix.shape[0]),
+            extent=(*_edge_span(x_axis, matrix.shape[1]),
+                    *_edge_span(y_axis, matrix.shape[0])),
         )
         self.colorbar = self.figure.colorbar(self.image, ax=self.axes)
         self.axes.set_xlabel("X channel")

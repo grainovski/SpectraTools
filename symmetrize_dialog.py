@@ -10,14 +10,19 @@ from PySide6.QtWidgets import (
     QGridLayout, QLabel, QRadioButton, QVBoxLayout,
 )
 
+from channel_axis import to_channel, to_index
 from matrix_symmetrize import SymmetrizeError, map_from_lines, refine_centroid
 
 
 class SymmetrizeDialog(QDialog):
-    def __init__(self, parent, projection_x, projection_y):
+    def __init__(self, parent, projection_x, projection_y, axes=None):
         super().__init__(parent)
         self.setWindowTitle("Symmetrize Matrix")
         self._px, self._py = projection_x, projection_y
+        # Positions are typed in detector CHANNELS -- what the projections
+        # show (see channel_axis) -- and turned into bins for the fold,
+        # which works on the matrix's own bins.
+        self._x_axis, self._y_axis = axes if axes is not None else (None, None)
         #: (a, b) of x = a + b*y once the inputs are valid, else None.
         self.mapping = None
 
@@ -47,11 +52,13 @@ class SymmetrizeDialog(QDialog):
         self.x_boxes, self.y_boxes = [], []
         for row in (1, 2):
             grid.addWidget(QLabel(f"Line {row}"), row, 0)
-            for col, (proj, boxes) in enumerate(
-                    ((self._px, self.x_boxes), (self._py, self.y_boxes)), start=1):
+            for col, (proj, boxes, axis) in enumerate(
+                    ((self._px, self.x_boxes, self._x_axis),
+                     (self._py, self.y_boxes, self._y_axis)), start=1):
                 box = QDoubleSpinBox()
                 box.setDecimals(1)
-                box.setRange(0.0, float(len(proj) - 1))
+                box.setRange(max(0.0, float(to_channel(axis, 0.0))),
+                             float(to_channel(axis, len(proj) - 1.0)))
                 box.valueChanged.connect(self._recompute)
                 grid.addWidget(box, row, col)
                 boxes.append(box)
@@ -79,8 +86,9 @@ class SymmetrizeDialog(QDialog):
         self._recompute()
 
     def _lines(self):
-        xs = [b.value() for b in self.x_boxes]
-        ys = [b.value() for b in self.y_boxes]
+        """(xs, ys) of the two lines in BINS of each projection."""
+        xs = [to_index(self._x_axis, b.value()) for b in self.x_boxes]
+        ys = [to_index(self._y_axis, b.value()) for b in self.y_boxes]
         if self.refine_check.isChecked():
             xs = [refine_centroid(self._px, v) for v in xs]
             ys = [refine_centroid(self._py, v) for v in ys]
@@ -109,9 +117,14 @@ class SymmetrizeDialog(QDialog):
                 self.summary.setText(str(exc))
             else:
                 self.mapping = (a, b)
+                # Shown in channels, as typed; the mapping applied is the
+                # same line expressed in bins.
+                xc = [float(to_channel(self._x_axis, v)) for v in xs]
+                yc = [float(to_channel(self._y_axis, v)) for v in ys]
+                a_ch, b_ch = map_from_lines(xc, yc)
                 self.summary.setText(
-                    f"Line 1: Y {ys[0]:.2f} → X {xs[0]:.2f}     "
-                    f"Line 2: Y {ys[1]:.2f} → X {xs[1]:.2f}\n"
-                    f"Y is put on X's scale by  x = {a:.3f} + {b:.5f} · y")
+                    f"Line 1: Y {yc[0]:.2f} → X {xc[0]:.2f}     "
+                    f"Line 2: Y {yc[1]:.2f} → X {xc[1]:.2f}\n"
+                    f"Y is put on X's scale by  x = {a_ch:.3f} + {b_ch:.5f} · y")
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(
             self.mapping is not None)

@@ -1,7 +1,7 @@
 """Read-only reader for ROOT files (https://root.cern/).
 
 Extracts 1D histograms as spectra and 2D histograms as matrices, plus the
-linear calibration their axes imply. Nothing is written, matching every
+channel axis their bin edges imply (see channel_axis). Nothing is written, matching every
 other reader here (n42_io, spe_io, spk_io, mtx_io).
 
 Built on `uproot`, which is pure Python over numpy, rather than PyROOT.
@@ -20,7 +20,7 @@ is about 35 MB.
 
 import numpy as np
 
-from calibration import Calibration
+from channel_axis import from_bin_edges
 from int64_cast import checked_round_to_int64
 
 
@@ -82,39 +82,25 @@ def list_objects(path):
     return sorted(found)
 
 
-def _axis_calibration(axis):
-    """The linear calibration an axis implies, or None for a plain channel
-    axis.
+def _channel_axis(axis):
+    """The ChannelAxis an axis implies, or None for one bin per channel.
 
-    A ROOT axis carries real coordinates, so a histogram binned in keV
-    already describes its own calibration: bin i spans [edges[i],
-    edges[i+1]], so its centre is at edges[0] + width*(i + 1/2). That maps
-    exactly onto this app's linear calibration, E = a + b*channel, with
-    b = width and a = edges[0] + width/2.
+    A ROOT axis carries real coordinates, and ROOT's browser and HDTV both
+    draw a histogram against them: a CoMPASS energy-energy matrix written
+    with 1023 bins over 0-16383 reads 0-16383 there, about 16 ADC channels
+    per bin, not 0-1022. Keeping the axis is what lets this app show the
+    same thing, and put a peak of a 1k matrix cut at the channel it has in
+    the 16k spectrum of the same detector.
 
-    Returns None when the axis is already plain channels (offset 0.5,
-    width 1), which is what an uncalibrated ROOT spectrum looks like --
-    reporting that as a calibration would clutter the UI with an identity
-    transform. Non-uniform binning is refused rather than approximated:
-    this app's calibration model is a polynomial in channel number and
-    cannot represent arbitrary bin edges.
+    This used to turn the axis into an energy CALIBRATION instead, which
+    labelled an ADC axis as keV and competed with the user's own
+    calibration. A ROOT axis says where a bin sits, not what energy it
+    holds. Non-uniform binning is refused rather than approximated.
     """
-    edges = np.asarray(axis.edges(), dtype=float)
-    if edges.size < 2:
-        return None
-    widths = np.diff(edges)
-    width = float(widths[0])
-    if not np.allclose(widths, width, rtol=1e-9, atol=0.0):
-        raise RootError(
-            "ROOT histogram has non-uniform bin widths, which cannot be expressed "
-            "as a channel calibration"
-        )
-    if width <= 0 or not np.isfinite(width):
-        raise RootError(f"ROOT histogram has an unusable bin width ({width})")
-    offset = float(edges[0]) + width / 2.0
-    if np.isclose(offset, 0.5) and np.isclose(width, 1.0):
-        return None
-    return Calibration(kind="linear", a=offset, b=width)
+    try:
+        return from_bin_edges(axis.edges())
+    except ValueError as exc:
+        raise RootError(f"ROOT histogram axis cannot be used: {exc}") from exc
 
 
 def _open_object(path, object_path, want):
@@ -170,15 +156,13 @@ def _extract(obj, want, path, object_path):
         # ascontiguousarray because the cut code slices rows, and a bare
         # .T leaves a column-major view where every row slice would stride.
         matrix = np.ascontiguousarray(_as_counts(values, object_path, path).T)
-        x_cal = _axis_calibration(obj.axis(0))
-        y_cal = _axis_calibration(obj.axis(1))
-        return matrix, x_cal, y_cal
+        return matrix, _channel_axis(obj.axis(0)), _channel_axis(obj.axis(1))
 
     if values.ndim != 1:
         raise RootError(
             f"{object_path!r} reports 1 dimension but holds {values.ndim}: {path}"
         )
-    return _as_counts(values, object_path, path), _axis_calibration(obj.axis(0))
+    return _as_counts(values, object_path, path), _channel_axis(obj.axis(0))
 
 
 def _as_counts(values, object_path, path):
@@ -211,14 +195,14 @@ def _as_counts(values, object_path, path):
 
 
 def load_spectrum(path, object_path):
-    """Reads one 1D histogram, returning (data, calibration) exactly as
-    load_n42 does -- calibration is None when the axis is plain channels."""
+    """Reads one 1D histogram, returning (data, channel_axis) --
+    channel_axis is None when the axis is plain channels."""
     return _open_object(path, object_path, "spectrum")
 
 
 def load_matrix(path, object_path):
-    """Reads one 2D histogram, returning (matrix, x_calibration,
-    y_calibration).
+    """Reads one 2D histogram, returning (matrix, x_axis, y_axis), each
+    axis a ChannelAxis or None for plain channels.
 
     Note the deliberate asymmetry with list_objects(): a matrix must be
     named explicitly. HDTV refuses shell-glob expansion for matrices for

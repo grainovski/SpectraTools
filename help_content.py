@@ -227,10 +227,13 @@ objects. Picking the file opens a second dialog listing every 1D and 2D
 histogram in it; select one or more 1D histograms to load them as
 spectra, or a single 2D histogram to open it as a matrix. The two
 cannot be mixed in one go, since a matrix opens its own window while
-spectra join the list. If the histogram's axis is calibrated, that
-calibration is read and applied automatically, the same way an N42
-file's is. See the Knowledge Database page for which histograms are
-refused and why.</p>
+spectra join the list. Each histogram is shown against its own axis,
+as ROOT and HDTV show it: a CoMPASS matrix stored as 1023 bins over
+ADC 0-16383 reads 0-16383, not 0-1022, and so does every cut you make
+from it. The axis is not treated as an energy calibration -- you
+calibrate as usual. See "Bins and channels" on the Knowledge Database
+page for how this works, and for which histograms are refused and
+why.</p>
 <p><b>File &gt; Reload Spectrum</b> (<kbd>F5</kbd>) re-reads the active
 spectrum's file from disk while keeping its calibration, fits and
 marks -- useful for watching a measurement that is still counting. If
@@ -635,12 +638,25 @@ the raw histogram is read -- there's no way to save a matrix back out.</p>
 limits, but they don't describe the matrix's own bins: for a Co-60
 export they put the 1173 and 1332 keV lines near 388 and 445 keV, and
 one calibration can't serve two detectors with different gains anyway.
-So, exactly as for a ROOT matrix, that calibration is ignored -- the
-panel works in channels, and you calibrate its projections as usual.
+So that calibration is ignored, and you calibrate its projections as
+usual. Its axis limits are the range CoMPASS was showing on screen, not
+the width of its bins, and the file records the bin width nowhere, so a
+<b>.json</b> matrix is shown bin by bin: one bin is one channel.
 CoMPASS writes each row of its data array as one X bin; the reader
 accounts for that, so X and Y are the same axes CoMPASS labels. The
 <b>.root</b> file CoMPASS saves for the same run holds the same matrix
-and opens through <b>File &gt; Open ROOT File...</b>.</p>
+and opens through <b>File &gt; Open ROOT File...</b> -- prefer it, since
+it does record the bin width.</p>
+<p><b>A ROOT matrix is shown in detector channels, the way ROOT and HDTV
+show it.</b> CoMPASS stores its energy-energy matrix as 1023 bins over the
+same ADC range, 0-16383, as its 16k energy spectra -- about 16 ADC
+channels per bin. The projection, the heatmap, the cursor readout, the
+cut and background marks, Go To and the Symmetrize... positions all use
+those ADC channels, and a cut you activate carries them into the main
+window. So a line at ADC 2755 in the 16k spectrum is at 2755 in the cut
+as well, the two overlay peak on peak, and one energy calibration serves
+both. A <b>.mtx</b> matrix has one bin per channel, so nothing changes
+for it. See "Bins and channels" on the Knowledge Database page.</p>
 <p><b>Symmetrize...</b> in the matrix panel builds a symmetric matrix,
 S = M + M<sup>T</sup>, in a new window; the matrix you started from stays
 as it is. Folding lets a gate catch an event through either of its gamma
@@ -1198,16 +1214,16 @@ join the list.</p>
 <p>Only 1D and 2D histograms are listed. Trees, graphs and
 instrument-specific objects are left out rather than offered and then
 refused.</p>
-<p><b>Calibration comes free when the file has one.</b> A ROOT axis
-carries real coordinates, so a histogram binned in keV already describes
-its own calibration -- it is read and applied automatically, exactly as
-an N42 file's is. A histogram binned in plain channels reports no
-calibration, since an identity transform would be noise.</p>
+<p><b>Each histogram is shown against its own axis, as ROOT and HDTV
+show it</b> -- a CoMPASS 1023-bin matrix reads 0-16383 ADC channels, not
+0-1022 -- and the axis is a channel scale, never switched on as an
+energy calibration. "Bins and channels" below explains the rule and what
+follows from it.</p>
 <p>Two things are refused rather than guessed at, because guessing would
 produce numbers that look fine and are wrong: a histogram whose contents
 are fractional (one that has been scaled or weighted, so its bins are no
-longer counts), and one with non-uniform bin widths, which no polynomial
-channel calibration can express.</p>
+longer counts), and one with non-uniform bin widths, which no linear
+channel axis can express.</p>
 <p>Reading is one-way. Nothing is written back to a ROOT file.</p>
 
 <h2>Calibrating from fitted peaks</h2>
@@ -2027,6 +2043,11 @@ automatically -- FWHM (a width, not a position) scales by the
 calibration's local derivative evaluated at the peak's own position,
 since a width has no location on the calibration curve of its own.
 Uncertainties propagate through the same derivative.</p>
+<p>The calibration is a function of the detector <i>channel</i>, not of
+a histogram's bin number (see "Bins and channels" below). That is why
+one calibration serves a 16k spectrum and a coarsely binned matrix cut
+of the same detector, and why rebinning a matrix cut leaves the
+calibration alone.</p>
 
 <h2>2D matrices, projections, and cuts</h2>
 <figure>
@@ -2078,6 +2099,55 @@ background, and net" above). Zero background regions means no
 subtraction happens at all, and the result can legitimately go negative
 where the scaled background outweighs the gated counts -- expected, not
 an error.</p>
+
+<h2>Bins and channels</h2>
+<p>A <b>channel</b> is a value on the detector's own scale -- the ADC
+number the digitizer gives a pulse, 0-16383 in the CoMPASS files this
+was built against. A <b>bin</b> is one cell of a histogram: a counter that
+collects every event falling in some range of channels. In most
+spectra the two coincide -- the 16k CoMPASS energy spectra keep one bin
+per channel, so bin 2755 holds exactly the pulses at ADC 2755. A
+CoMPASS energy-energy matrix does not: it spans the same 0-16383 range
+with 1023 bins, so each bin collects about 16 channels.</p>
+<p>A ROOT file records where each bin lies on the channel scale, and
+SpectraTools follows the convention ROOT's browser and HDTV use: a
+histogram is shown against that scale, not against its bin numbers.
+Every spectrum and every matrix axis carries the rule</p>
+<p style="text-align:center"><i>channel = offset + width &middot; bin</i></p>
+<p>read from the histogram's bin edges -- for the CoMPASS matrix about
+7.5 + 16.015 &middot; bin. Everything you read or type goes through it:
+the plot axis, the cursor readout, cut, background and fit marks, Go To,
+fitted positions and widths, the Fit Results and Fit Parameters panels,
+reports and the fit log, Calibrate from Fitted Peaks, the automatic
+calibration and the efficiency correction. A cut keeps the channel scale
+of the axis it lies along, so it overlays the 16k spectrum of the same
+detector peak on peak.</p>
+<p>What stays in bins is the counting. A fit or integration runs on the
+histogram's real bins, because those are what was measured; only its
+results are converted. Areas and their uncertainties are therefore
+unchanged. A peak in a coarse histogram is sampled only once every ~16
+channels, though, so its position is less precise than in the 16k
+spectrum and its FWHM comes out a little wider -- on a Co-60 run the
+1332 keV line fitted at 2754.2 &plusmn; 0.9 in a 1k cut against
+2755.0 &plusmn; 0.4 in the 16k spectrum.</p>
+<p>One detail is a half channel. SpectraTools has always read bin
+[<i>n</i>, <i>n</i>+1] of a ROOT spectrum binned one per channel as
+channel <i>n</i>, so a ROOT coordinate <i>x</i> is channel
+<i>x</i> - 0.5. The same rule for a 16-channel bin puts it at its centre
+less a half, which is where the whole ADC values it collected average
+to, so coarse and fine histograms line up to within a fraction of a
+channel. The heatmap shows the matrix from -0.5 to 16382.5 for the same
+reason.</p>
+<p>Consequences worth knowing. Spectra binned differently -- a 1k cut and a
+16k spectrum -- cannot be added or subtracted, because their bins do not
+line up. <b>Rebin</b> on a coarse spectrum widens its bins on the same
+channel scale and leaves the calibration alone. <b>Save Spectrum</b>
+writes counts only, so a saved cut reopens one bin per channel. A ROOT
+axis is a channel scale, not an energy calibration, so it is never
+switched on as one; a histogram already binned in keV shows keV numbers as
+its channels (a linear calibration a = 0.5, b = 1 labels it in keV
+exactly). A TV <b>.mtx</b> or CoMPASS <b>.json</b> matrix records no
+bin width, so it is shown one bin per channel.</p>
 
 <h2>Gating on more than one peak</h2>
 <p>You can mark more than one cut region. Every marked gate is summed

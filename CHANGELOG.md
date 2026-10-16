@@ -4,6 +4,43 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [6.3.0] - unreleased
+
+ROOT histograms are now shown against their own axes, the way ROOT's
+browser and HDTV show them. Nothing changes for a spectrum with one bin per
+channel -- every .spe, .spk, .n42, .lzs, .txt, .mtx and CoMPASS .json file
+reads, fits and calibrates exactly as in 6.2.1.
+
+### Changed
+
+- **A coarse ROOT matrix reads 0-16383, not 0-1022.** CoMPASS writes its
+  energy-energy matrix with 1023 bins over the same 0-16383 ADC range as its
+  16k spectra, about 16 ADC channels per bin. The matrix panel, heatmap,
+  cursor readout, cut marks, Go To and Symmetrize now use those ADC
+  channels, and every projection or cut sent to the main window keeps them:
+  a peak at ADC 4700 in the 16k spectrum is at 4700 in a 1k cut too, and the
+  two overlay peak on peak. Fit positions and widths, the Fit Results and
+  Fit Parameters panels, reports, the fit log, Calibrate from Fitted Peaks,
+  the automatic calibration and efficiency correction all report ADC
+  channels, so one energy calibration serves the 16k spectrum and the 1k
+  cut. The fit itself still runs on the histogram's own bins, so areas and
+  their errors are unchanged.
+- **A ROOT axis is no longer turned into an energy calibration.** A 1D ROOT
+  histogram binned on a non-unit axis used to switch on a calibration taken
+  from its axis, labelled keV. Its axis is now its channel scale instead,
+  and the energy calibration stays yours.
+- Rebinning a spectrum that has such an axis widens its bins on the same
+  scale and leaves the calibration alone. Spectra binned differently -- a 1k
+  cut and a 16k spectrum -- can no longer be added or subtracted, since
+  their bins do not line up. Normalize reads every visible spectrum over
+  the same ADC channels, and marks in progress stay on the same channels
+  when you switch the active spectrum between differently binned ones.
+- A CoMPASS `.json` matrix is still shown one bin per channel: its axis
+  limits are the range CoMPASS had on screen, and it records the bin width
+  nowhere. Open the `.root` file of the same run to get ADC channels.
+- Help: How To and Knowledge Database describe the new behaviour, with a
+  new "Bins and channels" section.
+
 ## [6.2.1] - 2026-10-13
 
 Almost every fit comes out exactly as in 6.2.0. One rare case can now give a

@@ -15,6 +15,9 @@ from PySide6.QtWidgets import (
 
 import fit_export
 from calibration import CalibrationError
+from channel_axis import (
+    as_calibration, axis_of, compose, result_in_channels, to_channel, width_to_channel,
+)
 from peak_fit import (
     FWHM_FACTOR, FitError, IntegrationResult, channel_indices, compute_background, fit_peaks,
     fit_result_values_by_name, hypermet_left_tail, hypermet_step, integrate_region,
@@ -276,7 +279,7 @@ def _parameter_label(name, calibrated=False):
 # travel together, and naming them at the call site is what keeps the
 # split readable.
 _FitDrawContext = namedtuple(
-    "_FitDrawContext", "axes label_transform fit_color bg_line_color to_display"
+    "_FitDrawContext", "axes label_transform fit_color bg_line_color to_display axis"
 )
 
 
@@ -292,6 +295,37 @@ def _err_text(err, spec=".2f"):
     if not math.isfinite(err):
         return "n/a"
     return format(err, spec)
+
+
+def _active_axis(main_window):
+    """The active spectrum's ChannelAxis. getattr so a bare test double
+    standing in for the window is treated as one bin per channel."""
+    fn = getattr(main_window, "_active_axis", None)
+    return fn() if fn is not None else None
+
+
+def _energy_calibration_in_bins(main_window):
+    """The active energy calibration as a function of the active
+    spectrum's BIN (composed with its channel axis), or None."""
+    if not main_window._calibration_active or main_window._calibration is None:
+        return None
+    return compose(main_window._calibration, _active_axis(main_window))
+
+
+def _display_units_calibration(main_window):
+    """Bin -> the unit on display: keV when calibrated, otherwise the
+    detector channel (None when that is the bin itself)."""
+    energy = _energy_calibration_in_bins(main_window)
+    if energy is not None:
+        return energy
+    return as_calibration(_active_axis(main_window))
+
+
+def _bins_to_channels(main_window, value, err, is_width):
+    """A bin-space value and its error as detector channels."""
+    axis = _active_axis(main_window)
+    shown = width_to_channel(axis, value) if is_width else to_channel(axis, value)
+    return shown, width_to_channel(axis, err)
 
 
 def _to_energy(main_window, channel_value, channel_err, is_width, reference_position=None):
@@ -314,9 +348,9 @@ def _to_energy(main_window, channel_value, channel_err, is_width, reference_posi
     uncertainties. Previously duplicated verbatim in both formatters,
     so any correction would have had to be made twice.
     """
-    if not main_window._calibration_active or main_window._calibration is None:
+    cal = _energy_calibration_in_bins(main_window)
+    if cal is None:
         return None
-    cal = main_window._calibration
     if is_width:
         slope = abs(cal.derivative(reference_position))
         value = slope * channel_value
@@ -342,10 +376,12 @@ def _dual_unit_value(main_window, channel_value, channel_err, is_width, referenc
     peak-width uncertainties are small relative to the calibration's
     curvature scale."""
     converted = _to_energy(main_window, channel_value, channel_err, is_width, reference_position)
+    # The arguments are BINS; what is shown as "ch" is the detector channel.
+    shown, shown_err = _bins_to_channels(main_window, channel_value, channel_err, is_width)
     if converted is None:
-        return f"{channel_value:.2f} ± {_err_text(channel_err)}"
+        return f"{shown:.2f} ± {_err_text(shown_err)}"
     energy, energy_err = converted
-    return (f"{channel_value:.2f} ± {_err_text(channel_err)} ch "
+    return (f"{shown:.2f} ± {_err_text(shown_err)} ch "
             f"({energy:.2f} ± {_err_text(energy_err)} keV)")
 
 
@@ -364,7 +400,8 @@ def _unit_switched_value(main_window, channel_value, channel_err, is_width, refe
     own value."""
     converted = _to_energy(main_window, channel_value, channel_err, is_width, reference_position)
     if converted is None:
-        return compact_capped(channel_value, channel_err)
+        return compact_capped(
+            *_bins_to_channels(main_window, channel_value, channel_err, is_width))
     value, err = converted
     return compact_capped(value, err)
 
@@ -478,10 +515,20 @@ def _display_value(main_window, name, value, values_by_name):
     _panel_reference_position). Amplitude and the tail parameters have
     no energy-axis equivalent and are returned unconverted regardless
     of calibration state."""
+    if name == "tail_beta":
+        # A length along x, never converted to keV (it never was), but
+        # shown in detector channels like every other channel quantity.
+        return width_to_channel(_active_axis(main_window), value)
+    if name == "bg_c1":
+        # Counts per bin per BIN -> per detector channel.
+        axis = _active_axis(main_window)
+        return value if axis is None else value / axis.width
     fwhm_value = value * FWHM_FACTOR if _is_sigma_name(name) else value
-    if not main_window._calibration_active or main_window._calibration is None:
+    # keV when calibrated, detector channels otherwise -- either way a
+    # function of the bin; None only when bins ARE the numbers shown.
+    cal = _display_units_calibration(main_window)
+    if cal is None:
         return fwhm_value
-    cal = main_window._calibration
     if name.startswith("pos_"):
         return cal.apply(fwhm_value)
     if _is_sigma_name(name):
@@ -503,9 +550,14 @@ def _panel_value_to_internal(main_window, name, value, values_by_name):
     its own FWHM in keV in the same batch before re-fitting uses the
     pre-edit position as the reference; a narrow, accepted
     simplification, not a general live-recompute)."""
+    if name == "tail_beta":
+        axis = _active_axis(main_window)
+        return value if axis is None else value / axis.width
+    if name == "bg_c1":
+        return width_to_channel(_active_axis(main_window), value)
     fwhm_value = value
-    if main_window._calibration_active and main_window._calibration is not None:
-        cal = main_window._calibration
+    cal = _display_units_calibration(main_window)
+    if cal is not None:
         if name.startswith("pos_"):
             fwhm_value = cal.invert(value)
         elif _is_sigma_name(name):
@@ -842,7 +894,16 @@ class FitModeController(QObject):
             label_transform=axes.get_xaxis_transform(),
             fit_color=fit_color,
             bg_line_color=bg_line_color,
-            to_display=self.main_window.channel_to_display,
+            # The fits are THIS spectrum's, in its bins, so they go
+            # through its own channel axis -- not the active spectrum's,
+            # which may be binned differently. getattr fallback for test
+            # doubles that only implement channel_to_display.
+            to_display=(
+                (lambda bins: self.main_window.spectrum_to_display(spectrum, bins))
+                if hasattr(self.main_window, "spectrum_to_display")
+                else self.main_window.channel_to_display
+            ),
+            axis=axis_of(spectrum),
         )
 
     def _draw_result_regions(self, result, context):
@@ -881,9 +942,11 @@ class FitModeController(QObject):
                 [result.background_density, result.background_density],
                 color=bg_line_color, linestyle="--", linewidth=1,
             )
+            # Centroid and FWHM in CHANNELS of the detector scale, like
+            # every other channel number shown -- the result holds bins.
             axes.annotate(
-                f"centroid={result.net_centroid:.1f}\n"
-                f"FWHM={result.net_fwhm:.1f}\n"
+                f"centroid={to_channel(context.axis, result.net_centroid):.1f}\n"
+                f"FWHM={width_to_channel(context.axis, result.net_fwhm):.1f}\n"
                 f"full={result.gross_area:.0f}\nnet={result.net_area:.0f}",
                 xy=(to_display(result.net_centroid), 0.95),
                 xycoords=label_transform,
@@ -892,8 +955,8 @@ class FitModeController(QObject):
             )
         else:
             axes.annotate(
-                f"centroid={result.gross_centroid:.1f}\n"
-                f"FWHM={result.gross_fwhm:.1f}\n"
+                f"centroid={to_channel(context.axis, result.gross_centroid):.1f}\n"
+                f"FWHM={width_to_channel(context.axis, result.gross_fwhm):.1f}\n"
                 f"area={result.gross_area:.0f}",
                 xy=(to_display(result.gross_centroid), 0.95),
                 xycoords=label_transform,
@@ -1294,10 +1357,13 @@ class FitModeController(QObject):
                     f"(background, not counted in the volume)"
                 )
             if result.tail_fraction is not None:
+                # beta is a length along x, so in channels like a width.
+                axis = _active_axis(self.main_window)
                 shared_tooltip_lines.append(
                     f"left tail: r={result.tail_fraction:.2f}"
                     f"±{_err_text(result.tail_fraction_err)}, "
-                    f"β={result.tail_beta:.1f}±{_err_text(result.tail_beta_err, '.1f')} "
+                    f"β={width_to_channel(axis, result.tail_beta):.1f}"
+                    f"±{_err_text(width_to_channel(axis, result.tail_beta_err), '.1f')} "
                     f"(volume includes tail)"
                 )
 
@@ -1386,7 +1452,11 @@ class FitModeController(QObject):
         )
         if not path:
             return
-        results = [(i + 1, active.fits[i]) for i in fit_indices]
+        # Reports print what they are given, so the results go out in
+        # detector channels (not bins) with the calibration as a function
+        # of the channel -- see channel_axis.result_in_channels.
+        results = [(i + 1, result_in_channels(active.fits[i], axis_of(active)))
+                   for i in fit_indices]
         calibration = self.main_window._calibration if self.main_window._calibration_active else None
         try:
             _export_writer_for(path, chosen_filter)(
@@ -1461,7 +1531,8 @@ class FitModeController(QObject):
         calibration = (self.main_window._calibration
                        if self.main_window._calibration_active else None)
         try:
-            fit_export.append_auto_log(active.path, result, calibration)
+            fit_export.append_auto_log(
+                active.path, result_in_channels(result, axis_of(active)), calibration)
         except OSError as exc:
             self._show_status_message(f"Could not write fit log: {exc}", 5000)
 

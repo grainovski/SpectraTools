@@ -34,6 +34,9 @@ from PySide6.QtWidgets import (
 )
 
 from calibration import turning_point
+from channel_axis import (
+    axis_of, compose, rebinned, same_axis, to_channel, to_index, width_to_channel,
+)
 from calibration_plot_dialog import CalibrationPlotDialog
 from dialog_utils import close_previous
 from calibration_view import (
@@ -75,6 +78,28 @@ from theme import qt_stylesheet, refresh_builtin_toolbar_icons, style_axes, styl
 
 ZOOM_FACTOR = 1.5
 _ICON_SIZE = 24
+
+def _pairs_in_channels(pairs, axis):
+    """((bin, energy), ...) -> ((channel, energy), ...): stored
+    assignments are matched against fitted_peak_choices, which are in
+    channels."""
+    return tuple((to_channel(axis, ch), energy) for ch, energy in pairs)
+
+
+def _peaks_in_channels(peaks, axis):
+    """caleneff_export.committed_peaks tuples, bins -> channels."""
+    return [
+        (to_channel(axis, pos), width_to_channel(axis, err),
+         width_to_channel(axis, fwhm), area, area_err)
+        for pos, err, fwhm, area, area_err in peaks
+    ]
+
+
+_AXIS_MISMATCH = (
+    "The two spectra are binned differently on the detector's channel scale "
+    "(for example a 1k matrix cut and a 16k spectrum), so their bins do not "
+    "line up and cannot be combined bin by bin."
+)
 
 
 def _magnifier_icon(sign, dark=False):
@@ -848,7 +873,14 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # then refused the spectrum outright, leaving a rebinned cut
         # impossible to fit for the rest of the session.
         spectrum.variance = rebinned_variance(spectrum.variance, factor)
-        if self._calibration is not None:
+        if axis_of(spectrum) is not None:
+            # A spectrum that already carries a channel axis keeps its
+            # bins on the detector's scale by widening the axis, the way
+            # ROOT and HDTV rebin: the calibration is a function of the
+            # channel, which rebinning does not move, so it must NOT be
+            # rescaled -- that would break it for every other spectrum.
+            spectrum.axis = rebinned(spectrum.axis, factor)
+        elif self._calibration is not None:
             # Calibration is a single MainWindow-level object shared by
             # every loaded spectrum (see __init__), but rebinning changes
             # only THIS spectrum's channel count -- rescaling it here keeps
@@ -899,7 +931,24 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             )
             return
 
-        values = [reference_value(s.data, channel=channel, region=region) for s in visible]
+        # The marks are in BINS of the active spectrum; each spectrum is
+        # read over the same detector CHANNELS in its own bins. A single
+        # channel compares counts per channel, since a 16-channel bin
+        # holds about 16 times what a 1-channel bin does.
+        mark_axis = axis_of(active_spectrum(self.spectra))
+
+        def own_bins(spectrum, b):
+            return to_index(axis_of(spectrum), to_channel(mark_axis, b))
+
+        values = []
+        for s in visible:
+            if region is not None:
+                values.append(reference_value(
+                    s.data, region=(own_bins(s, region[0]), own_bins(s, region[1]))))
+            else:
+                value = reference_value(s.data, channel=own_bins(s, channel))
+                width = width_to_channel(axis_of(s), 1.0)
+                values.append(value if width == 1.0 else value / width)
         if all(v == 0 for v in values):
             self.fit_controller._show_status_message(
                 "Nothing to normalize -- every visible spectrum reads zero at the marked channel/region.",
@@ -943,6 +992,9 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             self._apply_add(dialog.result_spectrum_a, dialog.result_spectrum_b, dialog.result_factor)
 
     def _apply_add(self, spectrum_a, spectrum_b, factor):
+        if not same_axis(axis_of(spectrum_a), axis_of(spectrum_b)):
+            QMessageBox.warning(self, "Add Spectra", _AXIS_MISMATCH)
+            return
         try:
             data = add(spectrum_a.data, spectrum_b.data, factor)
         except ValueError as exc:
@@ -962,7 +1014,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self._add_combined_spectrum(path, data, variance=combined_variance(
             spectrum_a.data, spectrum_b.data, factor,
             spectrum_a.variance, spectrum_b.variance,
-        ))
+        ), axis=axis_of(spectrum_a))
 
     def _open_subtract_dialog(self):
         if len(self.spectra) < 2:
@@ -973,6 +1025,9 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             self._apply_subtract(dialog.result_spectrum_a, dialog.result_spectrum_b, dialog.result_factor)
 
     def _apply_subtract(self, spectrum_a, spectrum_b, factor):
+        if not same_axis(axis_of(spectrum_a), axis_of(spectrum_b)):
+            QMessageBox.warning(self, "Subtract Spectra", _AXIS_MISMATCH)
+            return
         try:
             data = subtract(spectrum_a.data, spectrum_b.data, factor)
         except ValueError as exc:
@@ -990,9 +1045,10 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             spectrum_a.data, spectrum_b.data, factor,
             spectrum_a.variance, spectrum_b.variance,
         )
-        self._add_combined_spectrum(path, data, variance=path_variance)
+        self._add_combined_spectrum(path, data, variance=path_variance,
+                                    axis=axis_of(spectrum_a))
 
-    def _add_combined_spectrum(self, path, data, variance=None):
+    def _add_combined_spectrum(self, path, data, variance=None, axis=None):
         # Shared by _apply_add/_apply_subtract and by the matrix panel's
         # Activate Cut -- inserting a newly computed spectrum into the
         # loaded list and refreshing every UI surface that depends on it
@@ -1016,6 +1072,9 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self._next_color_index += 1
         spectrum = LoadedSpectrum(path, data, next_color(color_index, self._theme), variance=variance)
         spectrum.color_index = color_index
+        # A matrix cut or projection, or an operation on a spectrum that
+        # has one, keeps its bins on the detector's channel scale.
+        spectrum.axis = axis
         for s in self.spectra:
             s.active = False
         spectrum.active = True
@@ -1054,7 +1113,9 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self._efficiency_dialog = EfficiencyDialog(
             None, self._efficiency, errors, theme=self._theme,
             main_window=self,
-            channels=(len(active_spectrum(self.spectra).data)
+            # Detector channels, since the calibration is a function of
+            # them: a 1k matrix cut still covers 16k of them.
+            channels=(int(round(self._last_channel(active_spectrum(self.spectra)))) + 1
                       if active_spectrum(self.spectra) is not None else 4096),
         )
         self._efficiency_dialog.setAttribute(
@@ -1130,11 +1191,13 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         """
         from efficiency_apply import apply_efficiency as _apply
 
-        out = _apply(spectrum.data, self._calibration, result,
-                     variance=getattr(spectrum, "variance", None))
+        # The calibration is a function of the CHANNEL; the correction
+        # needs an energy per BIN of this spectrum.
+        out = _apply(spectrum.data, compose(self._calibration, axis_of(spectrum)),
+                     result, variance=getattr(spectrum, "variance", None))
         self._add_combined_spectrum(
             self.efficiency_label(spectrum, result), out.counts,
-            variance=out.variance)
+            variance=out.variance, axis=axis_of(spectrum))
         # Flagged rather than recognised by name: Apply to all skips these,
         # and a name is something the user can change.
         self.spectra[-1].efficiency_corrected = True
@@ -1320,6 +1383,10 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         active = active_spectrum(self.spectra)
         if active is None:
             return []
+        # In detector CHANNELS, not bins: the calibration this feeds is a
+        # function of the channel, so one made on a 1k matrix cut must be
+        # the same calibration as one made on the 16k spectrum.
+        axis = axis_of(active)
         choices = []
         for fit_index, result in enumerate(active.fits, start=1):
             # active.fits holds integration results alongside fits, and an
@@ -1329,8 +1396,10 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             # the Fit Results panel shows.
             for peak_index, peak in enumerate(getattr(result, "peaks", []) or [], start=1):
                 choices.append(
-                    (f"Fit {fit_index}, peak {peak_index}", peak.position,
-                     peak.position_err, peak.fwhm, peak.area,
+                    (f"Fit {fit_index}, peak {peak_index}",
+                     to_channel(axis, peak.position),
+                     width_to_channel(axis, peak.position_err),
+                     width_to_channel(axis, peak.fwhm), peak.area,
                      efficiency_area_error(peak.area_err,
                                            getattr(result, "reduced_chi2", None)))
                 )
@@ -1375,7 +1444,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             assignments=assignments,
             # Enables the live preview, which needs the channel range to
             # draw over and a name to offer its export under.
-            max_channel=(len(active.data) - 1) if active is not None else None,
+            max_channel=(self._last_channel(active) if active is not None else None),
             export_default_path=(
                 self._caleneff_default_path(active) if active is not None else None
             ),
@@ -1444,7 +1513,8 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # test doubts open UNTICKED: assigned and visible, hollow on the
         # plot, but out of the fit until the user says otherwise.
         active.energy_assignments = EnergyAssignments(
-            source_path=dialog.source_path(), pairs=tuple(outcome.pairs),
+            source_path=dialog.source_path(),
+            pairs=_pairs_in_channels(outcome.pairs, axis_of(active)),
             excluded=outcome.suspect_energies,
         )
         calibration = self._assign_energies(
@@ -1478,9 +1548,12 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
 
         remembered = active.energy_assignments
         unticked = tuple(remembered.excluded) if remembered is not None else ()
+        axis = axis_of(active)
+        # The refit works in this spectrum's bins, so it is handed the
+        # calibration as a function of the bin.
         refit = auto_calibrate.refit_source_lines(
             channel_indices(len(active.data)), active.data, dialog.source_lines,
-            calibration, sensitivity=dialog.sensitivity.value(),
+            compose(calibration, axis), sensitivity=dialog.sensitivity.value(),
             variance=getattr(active, "variance", None), excluded=unticked,
         )
         superseded = {id(result) for result in outcome.results}
@@ -1492,7 +1565,8 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self.fit_controller.update_results_list()
         self._plot_data(preserve_view=True)
         active.energy_assignments = EnergyAssignments(
-            source_path=dialog.source_path(), pairs=tuple(refit.pairs),
+            source_path=dialog.source_path(),
+            pairs=_pairs_in_channels(refit.pairs, axis),
             # Kept though none of these lines is now on the spectrum:
             # the user's decision outlives the fits it was made about.
             excluded=unticked,
@@ -1510,7 +1584,8 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             active.fits,
             {id(result.peaks[0]): energy
              for result, (_channel, energy) in zip(refit.results, refit.pairs)})
-        points = share_blended_areas(peaks, energies, dialog.source_lines, calibration)
+        points = share_blended_areas(
+            _peaks_in_channels(peaks, axis), energies, dialog.source_lines, calibration)
         self._show_calibration_plot(active, calibration, points, dialog.source_lines, ())
         self.fit_controller._show_status_message(refit.summary(dialog.source_name()), 10000)
 
@@ -1561,7 +1636,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # Parentless for the same reason as the efficiency window above.
         self._calibration_plot = CalibrationPlotDialog(
             None, calibration, points, source_lines,
-            len(spectrum.data) - 1, default_path, excluded=excluded,
+            self._last_channel(spectrum), default_path, excluded=excluded,
             main_window=self,
         )
         self._calibration_plot.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -1706,7 +1781,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
                     )
                 except StopIteration:
                     raise RootError(f"{object_path!r} is no longer in the file")
-                data, _calibration = load_spectrum(path, key)
+                data, _axis = load_spectrum(path, key)
             else:
                 spectrum, error, _calibration = self._try_load_spectrum(path)
                 if error:
@@ -1777,22 +1852,21 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
 
         Deliberately mirrors _load_files' sequencing rather than reusing
         it: _load_files is keyed on a file path per spectrum, and here one
-        file yields several. The parts that matter are kept -- the first
-        embedded calibration wins and is applied ONCE after every spectrum
-        is in the list, not per file, which is the v3.1.0 M18 fix.
+        file yields several. A ROOT axis no longer becomes an energy
+        calibration: it is kept per spectrum as its channel axis (see
+        channel_axis), so nothing here touches the shared calibration.
         """
         from root_io import RootError, load_spectrum
 
         keep_view = self._has_visible_spectrum()
         failures = []
         added = []
-        pending_calibration = None
         for object_path in object_paths:
             display = f"{path}::{object_path.split(';')[0]}"
             if any(s.path == display for s in self.spectra):
                 continue
             try:
-                data, calibration = load_spectrum(path, object_path)
+                data, axis = load_spectrum(path, object_path)
             except RootError as exc:
                 failures.append(f"{object_path}: {exc}")
                 continue
@@ -1800,12 +1874,15 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             self._next_color_index += 1
             spectrum = LoadedSpectrum(display, data, next_color(color_index, self._theme))
             spectrum.color_index = color_index
+            # The histogram's own axis, kept as its channel axis -- the way
+            # ROOT and HDTV show it -- rather than turned into an energy
+            # calibration: a ROOT axis says where a bin sits, not what
+            # energy it holds.
+            spectrum.axis = axis
             if not self.spectra:
                 spectrum.active = True
             self.spectra.append(spectrum)
             added.append(spectrum)
-            if calibration is not None and pending_calibration is None:
-                pending_calibration = calibration
 
         if added:
             self.settings.add_recent_file(path)
@@ -1813,12 +1890,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             for spectrum in added:
                 self._append_spectrum_row(spectrum)
             self._sync_active_radios()
-            if pending_calibration is not None and not self._calibration_active:
-                # Redraws by itself, so it replaces the _plot_data() below
-                # rather than adding to it -- same reasoning as _load_files.
-                self._apply_calibration_change(pending_calibration, True)
-            else:
-                self._plot_data(preserve_view=keep_view)
+            self._plot_data(preserve_view=keep_view)
         if failures:
             QMessageBox.warning(
                 self, "Could not open ROOT file", "\n".join(failures)
@@ -1828,16 +1900,17 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         from root_io import RootError, load_matrix
 
         try:
-            matrix, _x_cal, _y_cal = load_matrix(path, object_path)
+            matrix, x_axis, y_axis = load_matrix(path, object_path)
         except RootError as exc:
             QMessageBox.warning(self, "Could not open matrix", str(exc))
             return
         # No progress dialog: a ROOT TH2 is already decoded by uproot into
         # a numpy array in one step, so there is no row-by-row pass to
-        # report on the way .mtx has. The axis calibrations are read but
-        # not yet applied -- the matrix panel works in channels, and
-        # wiring a per-axis calibration into it is its own change.
-        self._open_matrix_panel(f"{path}::{object_path.split(';')[0]}", matrix=matrix)
+        # report on the way .mtx has. Each axis keeps the channel scale the
+        # file gives it, so a CoMPASS 1023-bin matrix reads 0-16383 as it
+        # does in ROOT and HDTV, and its cuts line up with the 16k spectra.
+        self._open_matrix_panel(f"{path}::{object_path.split(';')[0]}", matrix=matrix,
+                                axes=(x_axis, y_axis))
 
     def _load_matrix_with_progress(self, path):
         """Decodes `path` in a worker thread behind a progress dialog.
@@ -1893,9 +1966,9 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         worker.wait()
         return outcome["matrix"], outcome["error"]
 
-    def _open_matrix_panel(self, path, matrix=None, symmetric_diagonal=None):
+    def _open_matrix_panel(self, path, matrix=None, symmetric_diagonal=None, axes=None):
         panel = MatrixPanel(self, path, matrix=matrix,
-                            symmetric_diagonal=symmetric_diagonal)
+                            symmetric_diagonal=symmetric_diagonal, axes=axes)
         self._matrix_panels.append(panel)
         panel.show()
         return panel
@@ -2012,19 +2085,21 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # drop fits that belong on screen.
         view_xlim = None
         if visible:
-            max_channel = max(len(s.data) for s in visible) - 1
             if xlim_override is not None:
                 view_xlim = xlim_override
             elif saved_xlim is not None:
                 view_xlim = saved_xlim
             else:
-                view_xlim = (self.channel_to_display(0), self.channel_to_display(max_channel))
+                view_xlim = self._full_display_limits(visible)
         for spectrum in visible:
             # channel_indices rather than a fresh np.arange: this runs
             # for every visible spectrum on every replot, and the cached
             # read-only axis exists for exactly this.
             channels = channel_indices(len(spectrum.data))
-            x = self.channel_to_display(channels)
+            # Each spectrum on its OWN channel axis: a 1k matrix cut and
+            # the 16k spectrum of the same detector overlay peak on peak,
+            # as they do in ROOT and HDTV.
+            x = self.spectrum_to_display(spectrum, channels)
             self.axes.plot(x, spectrum.data, drawstyle="steps-mid", color=spectrum.color)
             self.fit_controller.draw_committed_fits(spectrum, view_xlim=view_xlim)
         self.draw_goto_marker()
@@ -2094,10 +2169,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # Content follows the cursor: dragging right moves the view left.
         delta = -(event.x - self._pan_last_px) * (xlim[1] - xlim[0]) / width_px
         self._pan_last_px = event.x
-        max_channel = max(len(s.data) for s in visible) - 1
-        new_xlim = panned_xlim(
-            xlim, delta, self.channel_to_display(0), self.channel_to_display(max_channel)
-        )
+        new_xlim = panned_xlim(xlim, delta, *self._full_display_limits(visible))
         if new_xlim == xlim:
             return True
         self.axes.set_xlim(new_xlim)
@@ -2118,14 +2190,19 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         if not visible or event.inaxes != self.axes or event.xdata is None:
             self.statusBar().clearMessage()
             return
-        channel = int(round(self.display_to_channel(event.xdata)))
+        # The detector channel under the cursor, and for each spectrum the
+        # bin of ITS OWN that holds it: overlaid spectra may be binned
+        # differently (a 1k matrix cut over a 16k spectrum).
+        raw = float(self.display_to_raw(event.xdata))
+        channel = int(round(raw))
         if self._calibration_active:
             parts = [f"Channel: {channel}  Energy: {event.xdata:.2f} keV"]
         else:
             parts = [f"Channel: {channel}"]
         for spectrum in visible:
-            if 0 <= channel < len(spectrum.data):
-                parts.append(f"{os.path.basename(spectrum.path)}: {spectrum.data[channel]}")
+            index = int(round(to_index(axis_of(spectrum), raw)))
+            if 0 <= index < len(spectrum.data):
+                parts.append(f"{os.path.basename(spectrum.path)}: {spectrum.data[index]}")
             else:
                 parts.append(f"{os.path.basename(spectrum.path)}: -")
         self.statusBar().showMessage("  |  ".join(parts))
@@ -2303,8 +2380,17 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
     def _on_active_toggled(self, path, checked):
         if not checked:
             return
+        previous = active_spectrum(self.spectra)
         for spectrum in self.spectra:
             spectrum.active = spectrum.path == path
+        # Marks are held in BINS of the active spectrum. Moving to one
+        # binned differently (a 1k matrix cut beside a 16k spectrum) would
+        # leave them at the same bin numbers -- a different place on the
+        # detector -- so they are carried over through the channel scale.
+        current = active_spectrum(self.spectra)
+        if previous is not None and current is not None and not same_axis(
+                axis_of(previous), axis_of(current)):
+            self._remap_marks(axis_of(previous), axis_of(current))
         self._update_fit_mode_availability()
         self._update_operations_availability()
         self.fit_controller.update_results_list()
@@ -2430,7 +2516,10 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         turning = turning_point(calibration)
         if turning is None or not self.spectra:
             return
-        max_channel = max(len(spectrum.data) for spectrum in self.spectra) - 1
+        # The calibration is a function of the detector channel, so the
+        # range that matters is the channels the spectra cover.
+        max_channel = max(self._last_channel(spectrum) for spectrum in self.spectra)
+        max_channel = int(round(max_channel))
         if not (0.0 <= turning <= max_channel):
             return
         QMessageBox.warning(
@@ -2521,9 +2610,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         if not visible:
             return
         xlim = self.axes.get_xlim()
-        max_channel = max(len(s.data) for s in visible) - 1
-        display_lo = self.channel_to_display(0)
-        display_hi = self.channel_to_display(max_channel)
+        display_lo, display_hi = self._full_display_limits(visible)
         display_lo, display_hi = min(display_lo, display_hi), max(display_lo, display_hi)
         # Anchored on `center`, clamped to the data, orientation
         # preserved -- see calibration_view.zoomed_limits, which the
@@ -2546,12 +2633,40 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self.canvas.draw_idle()
         self.nav_toolbar.push_current()
 
+    @staticmethod
+    def _last_channel(spectrum):
+        """The detector channel of the spectrum's last bin."""
+        return to_channel(axis_of(spectrum), len(spectrum.data) - 1)
+
+    def _full_display_limits(self, visible):
+        """(first, last) display coordinate spanning every visible
+        spectrum, each on its own channel axis. In the orientation the
+        calibration gives -- a negative-b calibration makes it descending,
+        exactly as channel_to_display(0)/(max) did before axes existed."""
+        raw_lo = min(to_channel(axis_of(s), 0.0) for s in visible)
+        raw_hi = max(to_channel(axis_of(s), float(len(s.data) - 1)) for s in visible)
+        return (self.raw_to_display(raw_lo), self.raw_to_display(raw_hi))
+
+    def _remap_marks(self, old_axis, new_axis):
+        """Re-express the in-progress fit marks from bins on `old_axis`
+        to bins on `new_axis`, keeping them on the same detector channels."""
+        def move(b):
+            return None if b is None else float(to_index(new_axis, to_channel(old_axis, b)))
+
+        state = self.fit_controller.state
+        state.bg_regions = [(move(lo), move(hi)) for lo, hi in state.bg_regions]
+        state.pending_bg_click = move(state.pending_bg_click)
+        if state.fit_region is not None:
+            state.fit_region = (move(state.fit_region[0]), move(state.fit_region[1]))
+        state.pending_fit_click = move(state.pending_fit_click)
+        state.peak_positions = [move(p) for p in state.peak_positions]
+        self.fit_controller._redraw_progress()
+
     def _show_full_spectrum(self):
         visible = [s for s in self.spectra if s.visible]
         if not visible:
             return
-        max_channel = max(len(s.data) for s in visible) - 1
-        full_xlim = (self.channel_to_display(0), self.channel_to_display(max_channel))
+        full_xlim = self._full_display_limits(visible)
         self.axes.set_xlim(full_xlim)
         self._autoscale_y(full_xlim)
         self.canvas.draw()
@@ -2561,13 +2676,15 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         visible = [s for s in self.spectra if s.visible]
         if not visible:
             return
-        channel_lo = self.display_to_channel(xlim[0])
-        channel_hi = self.display_to_channel(xlim[1])
-        channel_lo, channel_hi = min(channel_lo, channel_hi), max(channel_lo, channel_hi)
-        lo_bound = max(0, int(np.floor(channel_lo)))
-        hi_bound = int(np.ceil(channel_hi)) + 1
+        raw_a = self.display_to_raw(xlim[0])
+        raw_b = self.display_to_raw(xlim[1])
         slices = []
         for spectrum in visible:
+            # Each spectrum's own bins under the view -- see _on_mouse_move.
+            axis = axis_of(spectrum)
+            channel_lo, channel_hi = sorted((to_index(axis, raw_a), to_index(axis, raw_b)))
+            lo_bound = max(0, int(np.floor(channel_lo)))
+            hi_bound = int(np.ceil(channel_hi)) + 1
             lo = min(lo_bound, len(spectrum.data))
             hi = min(hi_bound, len(spectrum.data))
             if lo < hi:

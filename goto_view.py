@@ -20,12 +20,16 @@ import math
 from PySide6.QtWidgets import QDialog
 
 from calibration import CalibrationError
-from spectrum import GOTO_MARKER_COLOR, goto_channel_window
+from channel_axis import axis_of, to_channel
+from spectrum import GOTO_WINDOW_CHANNELS, GOTO_MARKER_COLOR, active_spectrum, goto_channel_window
 
 
 class GoToMixin:
-    #: Channel the last Go To jumped to, or None. A class-level default so
-    #: a subclass that forgets to initialise it still behaves, and so the
+    #: Detector channel the last Go To jumped to, or None -- a channel,
+    #: not a bin of any one spectrum: overlaid spectra may be binned
+    #: differently (see channel_axis), and the mark belongs to the place,
+    #: not to whichever spectrum happened to be active. A class-level
+    #: default so a subclass that forgets to initialise it still behaves, and so the
     #: attribute exists before the first _plot_data call during __init__.
     _goto_marker_channel = None
 
@@ -38,14 +42,15 @@ class GoToMixin:
         the axis direction.
         """
         visible = [s for s in self.spectra if s.visible]
-        if not visible:
+        if not visible or max(len(s.data) for s in visible) < 1:
             return None
-        max_channel = max(len(s.data) for s in visible) - 1
-        if max_channel < 0:
-            return None
-        first = float(self.channel_to_display(0))
-        last = float(self.channel_to_display(max_channel))
-        return min(first, last), max(first, last), max_channel
+        # (first, last) detector channel covered, each spectrum on its own
+        # channel axis -- the third element callers get as "max_channel".
+        raw_lo = min(float(to_channel(axis_of(s), 0.0)) for s in visible)
+        raw_hi = max(float(to_channel(axis_of(s), len(s.data) - 1.0)) for s in visible)
+        first = float(self.raw_to_display(raw_lo))
+        last = float(self.raw_to_display(raw_hi))
+        return min(first, last), max(first, last), (raw_lo, raw_hi)
 
     def open_goto_dialog(self):
         from goto_dialog import GoToDialog
@@ -77,9 +82,9 @@ class GoToMixin:
         bounds = self._goto_display_bounds()
         if bounds is None:
             return
-        _lo, _hi, max_channel = bounds
+        _lo, _hi, (raw_lo, raw_hi) = bounds
         try:
-            channel = float(self.display_to_channel(display_value))
+            channel = float(self.display_to_raw(display_value))
         except CalibrationError as exc:
             # invert() refuses at a quadratic's vertex, where an energy maps
             # to no single channel.
@@ -90,13 +95,18 @@ class GoToMixin:
                 "Go To failed: that value does not map to a channel.", 6000
             )
             return
-        lo_channel, hi_channel = goto_channel_window(channel, max_channel)
+        # GOTO_WINDOW_CHANNELS BINS of the active spectrum wide, so a
+        # coarse 1k cut gets as much context as a 16k spectrum does.
+        axis = axis_of(active_spectrum(self.spectra))
+        width = GOTO_WINDOW_CHANNELS * (axis.width if axis is not None else 1.0)
+        lo_channel, hi_channel = goto_channel_window(
+            channel - raw_lo, raw_hi - raw_lo, width)
         self._goto_marker_channel = channel
         # Direction preserved rather than sorted: a descending axis has to
         # stay descending, exactly as _plot_data's own full-range xlim does.
         self._plot_data(xlim_override=(
-            self.channel_to_display(lo_channel),
-            self.channel_to_display(hi_channel),
+            self.raw_to_display(lo_channel + raw_lo),
+            self.raw_to_display(hi_channel + raw_lo),
         ))
 
     def draw_goto_marker(self):
@@ -111,7 +121,7 @@ class GoToMixin:
         if self._goto_marker_channel is None:
             return
         self.axes.axvline(
-            self.channel_to_display(self._goto_marker_channel),
+            self.raw_to_display(self._goto_marker_channel),
             color=GOTO_MARKER_COLOR, linestyle=":", linewidth=1.2, zorder=1.5,
         )
 
