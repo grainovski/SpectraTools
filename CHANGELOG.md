@@ -4,6 +4,47 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [6.3.1] - 2026-10-17
+
+From the 6.3.0 audit. Every peak position on a coarsely binned ROOT
+histogram moves up by about half a channel: on the CoMPASS Co-60 run the
+1332 keV line in a 1k matrix cut goes from ADC 2754.2 to 2754.7 +- 0.9,
+against 2755.0 +- 0.4 in the 16k spectrum. Spectra with one bin per channel
+are unchanged.
+
+### Fixed
+
+- **Coarse ROOT bins sat half a channel low.** 6.3.0 placed every bin at
+  its centre less half a channel. That is right for one bin per channel,
+  where bin [n, n+1) holds just the integer n, but a CoMPASS matrix bin is
+  16.015 channels wide with edges between integers, so the ADC values it
+  collects average its centre. Over 400 simulated lines, positions on a 1k
+  cut came out 0.53 channels low (mean pull -5.4); they are now within
+  0.03. A bin's channel is now the mean of the whole numbers it holds,
+  which keeps one bin per channel exactly as before and keeps keV-binned
+  axes (narrower than one unit) on the old rule. The heatmap now spans
+  0-16383, as ROOT shows it.
+- **Fits saved on one binning load correctly onto another.** A fit file
+  stores positions in bins and did not say which binning. Fits saved on a
+  1k cut and loaded onto the 16k spectrum landed at the same bin numbers,
+  1/16 of the way along. The file now records the channel axis, and fits
+  loaded onto a differently binned spectrum are re-run there with their
+  marks on the same detector channels. Files from older versions read as
+  one bin per channel, as they always were.
+
+### Documented
+
+- Knowledge Database, "Bins and channels": the two limits coarse bins
+  carry. A single line's position can sit up to half a channel off (0.27
+  RMS), because a 16.015-wide bin holds 16 or 17 integers. And FWHM comes
+  out 3-14% wider, depending on how many bins the peak spans. ROOT and HDTV
+  share both. Use the 16k spectrum for the most precise positions.
+
+### Internal
+
+- Removed five unused imports in the tests, and corrected a docstring in
+  matrix_cut that still said ROOT matrices needed their own mark rounding.
+
 ## [6.3.0] - 2026-10-17
 
 ROOT histograms are now shown against their own axes, the way ROOT's

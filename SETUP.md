@@ -22,7 +22,7 @@ cd SpectraTools
 ```
 
 That brings the application, the tests, the packaging scripts, the docs, and
-all 44 tags (`v1.0.0` … `v6.3.0`). The repository is the source of truth for
+all 45 tags (`v1.0.0` … `v6.3.1`). The repository is the source of truth for
 everything under version control.
 
 **`master` is not always the released state.** Work is sometimes committed
@@ -88,12 +88,12 @@ Verify:
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expect **1961 collected, 0 failed** (as of 6.3.0). A smaller
+Expect **1965 collected, 0 failed** (as of 6.3.1). A smaller
 number that still passes is the failure to watch for: a missing optional
 dependency makes pytest skip whole files rather than error, so read the
 count, not the colour.
 
-Two of the 1961 may report as **skipped** rather than passed, and that is
+Two of the 1965 may report as **skipped** rather than passed, and that is
 normal. The decode-speed guard and its control compare `lc_codec.decode_row`
 against a frozen copy of the pre-optimization decoder in the same process
 and assert a ratio, which cancels machine speed. It cannot cancel machine
@@ -115,8 +115,8 @@ while iterating.
 `tests/test_root_io.py`, `tests/test_root_ui.py` and
 `tests/test_channel_axis.py` open with `pytest.importorskip("uproot")`, so a
 virtualenv predating v4.0.0 — when `uproot` was added to `requirements.txt`
-— silently collects 48 fewer tests and still reports all-passed. If the count
-comes out 48 short (1913 rather than 1961), that is this, and the fix is to re-run the install step above. Note
+— silently collects 52 fewer tests and still reports all-passed. If the count
+comes out 52 short (1913 rather than 1965), that is this, and the fix is to re-run the install step above. Note
 the Windows build needs `uproot` too: `build.ps1` passes
 `--collect-all awkward_cpp`, which fails outright without it.
 
