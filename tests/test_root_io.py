@@ -124,15 +124,29 @@ def test_load_spectrum_keeps_a_real_axis_as_the_channel_axis(simple_file):
 
 def test_a_compass_1k_axis_spans_the_full_16k_adc_range(tmp_path):
     """The case that motivated channel axes: CoMPASS writes its E-E
-    matrix with 1023 bins over 0-16383. Bin 0 must sit near channel 7.5
-    and the last bin near 16375 -- the ADC values those bins collected."""
+    matrix with 1023 bins over 0-16383. A bin's channel is the mean of the
+    integer ADC values it collects; these edges fall between integers, so
+    that is the bin centre on average -- offset 8.006, not the 7.507 that
+    6.3.0's "centre - 1/2" gave, which put every position half a channel
+    low."""
     path = tmp_path / "compass.root"
     _write(path, {"h": _th1(np.ones(1023), low=0.0, high=16383.0)})
     _, axis = root_io.load_spectrum(path, "h")
     width = 16383.0 / 1023
     assert axis.width == pytest.approx(width)
-    assert axis.to_channel(0) == pytest.approx(width / 2 - 0.5)
-    assert axis.to_channel(1022) == pytest.approx(16383.0 - width / 2 - 0.5)
+    assert axis.offset == pytest.approx(8.00587, abs=1e-4)
+    assert axis.to_channel(1022) == pytest.approx(16374.991, abs=1e-3)
+
+
+def test_integer_aligned_axes_keep_the_low_edge_convention(tmp_path):
+    """Bins on integer edges hold whole integers starting at their low
+    edge: 1:1 is still the identity, and 16 channels per bin from 0 puts
+    bin 0 at 7.5, the mean of 0..15."""
+    path = tmp_path / "aligned.root"
+    _write(path, {"one": _th1(np.ones(64)), "sixteen": _th1(np.ones(64), 0.0, 1024.0)})
+    assert root_io.load_spectrum(path, "one")[1] is None
+    axis = root_io.load_spectrum(path, "sixteen")[1]
+    assert (axis.offset, axis.width) == pytest.approx((7.5, 16.0))
 
 
 def test_under_and_overflow_bins_are_excluded(tmp_path):

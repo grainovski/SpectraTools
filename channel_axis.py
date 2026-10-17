@@ -59,14 +59,35 @@ def from_bin_edges(edges):
     """The ChannelAxis a ROOT axis with these bin edges implies, or None
     when it is the ordinary one-bin-per-channel axis.
 
-    ROOT coordinate x is this app's channel x - 1/2. That is not a new
-    convention but the one already in force: a ROOT spectrum binned 1:1
-    over 0-N has bin i spanning [i, i+1], and this app has always read it
-    as channel i (root_io treated it as needing no conversion at all). The
-    same rule applied to a coarse bin puts its channel at the bin centre
-    minus a half, which is also where the integer ADC values it collected
-    average to -- so a peak lands at the same channel in a 16-wide bin as
-    it does in the 1:1 spectrum, not half a channel off.
+    A bin's channel is the mean of the integer ADC values it collects --
+    the digitizer writes integers, and a channel IS one of those integers.
+    Bin [a, b) holds the integers ceil(a) .. ceil(b) - 1, so its mean is
+
+        (ceil(a) + ceil(b) - 1) / 2
+
+    and the axis offset is that mean, less width * bin, averaged over the
+    bins. For a 1:1 axis over 0-N, bin [i, i+1) holds exactly the integer
+    i, so the offset is 0 -- channel i, as this app has always read it.
+    For a CoMPASS energy-energy axis (1023 bins over 0-16383, 16.0147 wide)
+    the edges fall between integers, so each bin's integers average its
+    CENTRE: offset 8.006.
+
+    6.3.0 used "centre - 1/2" for every axis. That is right for the 1:1
+    case it was taken from and half a channel low for the CoMPASS one: a
+    400-fit sweep of integer ADC data put every position on a 1023-bin
+    cut 0.53 channels below the same line in the 16k spectrum (mean pull
+    -5.4). With the integer mean the offset is 0.03 channels.
+
+    What a linear axis cannot carry is the bin-to-bin wobble: a 16.0147
+    bin holds 16 or 17 integers, whose mean sits up to half a channel
+    either side of the line. That leaves a position systematic of about
+    0.27 channels RMS that only shows at high statistics -- documented in
+    the Knowledge Database, and shared by ROOT and HDTV, which use the
+    bin centre.
+
+    Below one channel per bin the integer model means nothing (a bin can
+    hold no integer at all), so such an axis keeps "centre - 1/2", which
+    agrees with the 1:1 case.
 
     Raises ValueError on non-uniform binning, which no linear axis can
     describe.
@@ -80,7 +101,16 @@ def from_bin_edges(edges):
         raise ValueError("non-uniform bin widths cannot be expressed as a channel axis")
     if not (math.isfinite(width) and width > 0.0):
         raise ValueError(f"unusable bin width ({width})")
-    offset = float(edges[0]) + width / 2.0 - 0.5
+    if width >= 1.0:
+        # Tolerance on the ceilings: edges built as low + width * i carry
+        # float error, and an edge meant to be the integer k must not
+        # count as k + epsilon (whose ceiling is k + 1).
+        tol = 1e-6
+        ceilings = np.ceil(edges - tol)
+        means = (ceilings[:-1] + ceilings[1:] - 1.0) / 2.0
+        offset = float(np.mean(means - width * np.arange(means.size)))
+    else:
+        offset = float(edges[0]) + width / 2.0 - 0.5
     if np.isclose(offset, 0.0, rtol=0.0, atol=1e-9) and np.isclose(width, 1.0, rtol=1e-12, atol=0.0):
         return None
     return ChannelAxis(offset, width)
@@ -265,3 +295,37 @@ def result_in_channels(result, axis):
         background_anchors=anchors,
         background_covariance=covariance,
     )
+
+
+def fit_marks_onto_axis(result, from_axis, to_axis):
+    """A FitResult saved on one binning, carried onto another so that its
+    marks and fixed parameters sit on the same detector CHANNELS.
+
+    Bin b on `from_axis` is channel o1 + w1*b, which is bin
+    (o1 - o2)/w2 + (w1/w2)*b on `to_axis` -- the same affine kind of map
+    as an axis itself, so result_in_channels does the positions, widths and
+    regions. What it leaves alone, because a report keeps the same bins,
+    has to change here: anything in counts PER BIN. A bin w2/w1 times as
+    wide holds w2/w1 times the counts, so a fixed amplitude or background
+    level scales by that, and the background slope (per bin, per bin)
+    once more.
+
+    Only the marks of the result are meant to be used -- it is refitted
+    on the new spectrum, never restored, since its fitted values describe
+    the old bins.
+    """
+    def parts(axis):
+        return (0.0, 1.0) if axis is None else (axis.offset, axis.width)
+
+    (o1, w1), (o2, w2) = parts(from_axis), parts(to_axis)
+    scale = w1 / w2
+    moved = result_in_channels(result, ChannelAxis((o1 - o2) / w2, scale))
+    per_bin = 1.0 / scale
+    fixed = {}
+    for name, value in moved.fixed_params.items():
+        # Amplitude and level are counts per bin; the slope is per bin per
+        # bin, and result_in_channels has already done one of its two.
+        if name.startswith("amp_") or name in ("bg_c0", "bg_c1"):
+            value = value * per_bin
+        fixed[name] = value
+    return dataclasses.replace(moved, fixed_params=fixed)

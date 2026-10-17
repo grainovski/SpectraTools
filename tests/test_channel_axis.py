@@ -159,8 +159,9 @@ def test_the_root_matrix_projection_spans_the_full_adc_range(qapp, compass_file)
     assert panel.matrix.shape == (1023, 1023)
     xdata = panel.axes.get_lines()[0].get_xdata()
     assert len(xdata) == 1023
-    assert xdata[0] == pytest.approx(WIDTH / 2 - 0.5)
-    assert xdata[-1] == pytest.approx(16383 - WIDTH / 2 - 0.5)
+    # Mean of the integer ADC values in the bin -- see from_bin_edges.
+    assert xdata[0] == pytest.approx(8.00587, abs=1e-4)
+    assert xdata[-1] == pytest.approx(16374.991, abs=1e-3)
     lo, hi = panel.axes.get_xlim()
     assert hi > 16000, "the axis must read 0-16383 as in ROOT/HDTV, not 0-1022"
 
@@ -192,8 +193,9 @@ def test_the_heatmap_spans_the_adc_range(qapp, compass_file):
     panel._open_heatmap()
     window = panel._heatmap_windows[-1]
     x0, x1, y0, y1 = window.image.get_extent()
-    assert (x0, x1) == pytest.approx((-0.5, 16382.5))
-    assert (y0, y1) == pytest.approx((-0.5, 16382.5))
+    # Bin edges in channels: within a few thousandths of ROOT's 0-16383.
+    assert (x0, x1) == pytest.approx((0.0, 16383.0), abs=0.01)
+    assert (y0, y1) == pytest.approx((0.0, 16383.0), abs=0.01)
     window.close()
 
 
@@ -379,3 +381,82 @@ def test_normalize_reads_every_spectrum_over_the_same_channels(qapp, compass_fil
     cut_sum = reference_value(cut.data, region=region)
     big_sum = reference_value(big.data, region=(lo_c, hi_c))
     assert big_sum == pytest.approx(cut_sum, rel=0.02)
+
+
+def test_coarse_bin_positions_are_unbiased_against_integer_adc_data():
+    """The 6.3.0 regression this guards: integer ADC values histogrammed
+    into CoMPASS's 1023 bins over 0-16383 were fitted 0.53 channels low.
+    Here the mean error over many lines must be near zero. A single line
+    may still be up to ~0.5 channel off -- the bin-to-bin wobble a linear
+    axis cannot carry (see from_bin_edges) -- so only the MEAN is held."""
+    from peak_fit import fit_peaks
+
+    axis = channel_axis.from_bin_edges(np.linspace(0, 16383, 1024))
+    rng = np.random.default_rng(631)
+    errors = []
+    for _ in range(80):
+        mu, sig = rng.uniform(1500, 14000), rng.uniform(15, 40)
+        values = np.rint(rng.normal(mu, sig, 30000))
+        y, _ = np.histogram(values, bins=1023, range=(0, 16383))
+        b = axis.to_index
+        result = fit_peaks(
+            np.arange(1023.0), y.astype(float),
+            (b(mu - 10 * sig), b(mu - 6 * sig)), (b(mu + 6 * sig), b(mu + 10 * sig)),
+            (b(mu - 5 * sig), b(mu + 5 * sig)), [b(mu)])
+        errors.append(axis.to_channel(result.peaks[0].position) - mu)
+    assert abs(np.mean(errors)) < 0.1, f"mean position error {np.mean(errors):+.3f} ch"
+
+
+def test_saved_fits_record_their_channel_axis_and_old_files_read_as_identity(tmp_path):
+    import json
+    import fit_persist
+
+    axis = ChannelAxis(8.0059, WIDTH)
+    peak = PeakResult(position=293.0, position_err=0.1, fwhm=3.0, fwhm_err=0.05,
+                      area=1000.0, area_err=30.0, amplitude=250.0, sigma=1.27)
+    fit = FitResult(left_bg_region=(280, 285), right_bg_region=(300, 305),
+                    fit_region=(288, 298), background_slope=0.0,
+                    background_intercept=10.0, peaks=[peak])
+    path = tmp_path / "cut_fits.json"
+    fit_persist.save(path, [fit], "run.root::EE/cut", axis=axis)
+    _results, _spectrum, loaded = fit_persist.load(path, with_axis=True)
+    assert loaded == axis
+    # A file from before 6.3.1 has no key: one bin per channel.
+    document = json.loads(path.read_text())
+    del document["channel_axis"]
+    path.write_text(json.dumps(document))
+    assert fit_persist.load(path, with_axis=True)[2] is None
+    assert len(fit_persist.load(path)) == 2, "the two-value form is unchanged"
+
+
+def test_fits_saved_on_a_cut_load_onto_the_16k_spectrum_at_the_same_channel(
+        qapp, compass_file, tmp_path, monkeypatch):
+    """A fit stored in a 1k cut's bins used to be applied to the same BIN
+    numbers of the 16k spectrum -- 1/16 of the way along. It must instead
+    be re-run there with its marks on the same ADC channels."""
+    from PySide6.QtWidgets import QFileDialog
+
+    import fit_persist
+
+    main_window = MainWindow()
+    main_window._load_root_spectra(compass_file, ["ENERGY/_F_EnergyCH0;1"])
+    panel = _open_matrix(main_window, compass_file)
+    _cut_on_x(panel, LINE_B - 25, LINE_B + 25)
+    big, cut = main_window.spectra[0], main_window.spectra[-1]
+    cut.path = str(tmp_path / "cut")
+    _fit_single_peak(main_window, LINE_A, half_width=60, bg_gap=100)
+    assert cut.fits
+    target = tmp_path / "cut_fits.json"
+    fit_persist.save(target, cut.fits, cut.path, axis=cut.axis)
+
+    main_window._on_active_toggled(big.path, True)
+    asked = []
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(target), ""))
+    monkeypatch.setattr(QMessageBox, "question",
+                        lambda *a, **k: asked.append(a[2]) or QMessageBox.StandardButton.Ok)
+    main_window._load_fits_dialog()
+
+    assert "binned differently" in asked[0]
+    assert len(big.fits) == 1
+    assert big.fits[0].peaks[0].position == pytest.approx(LINE_A, abs=3.0)
+    assert big.fits[0].fit_region[0] == pytest.approx(LINE_A - 60, abs=WIDTH)

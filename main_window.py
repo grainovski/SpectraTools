@@ -35,7 +35,8 @@ from PySide6.QtWidgets import (
 
 from calibration import turning_point
 from channel_axis import (
-    axis_of, compose, rebinned, same_axis, to_channel, to_index, width_to_channel,
+    axis_of, compose, fit_marks_onto_axis, rebinned, same_axis, to_channel, to_index,
+    width_to_channel,
 )
 from calibration_plot_dialog import CalibrationPlotDialog
 from dialog_utils import close_previous
@@ -1656,7 +1657,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             return
         saved = fit_persist.savable(active.fits)
         try:
-            fit_persist.save(path, active.fits, active.path)
+            fit_persist.save(path, active.fits, active.path, axis=axis_of(active))
         except OSError as exc:
             QMessageBox.warning(self, "Could not save fits", str(exc))
             return
@@ -1680,7 +1681,7 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         if not path:
             return
         try:
-            results, saved_spectrum = fit_persist.load(path)
+            results, saved_spectrum, saved_axis = fit_persist.load(path, with_axis=True)
         except fit_persist.FitFileError as exc:
             QMessageBox.warning(self, "Could not load fits", str(exc))
             return
@@ -1699,16 +1700,37 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
                 f"and will be applied to:\n{active.path}"
             )
 
-        choice = QMessageBox.question(
-            self, "Load Fits",
-            f"Load {len(results)} fit(s)?\n\n"
-            "Yes  - restore the saved results exactly as they were\n"
-            "No   - re-run each fit from its saved marks using the current "
-            "fitting code" + note,
-            QMessageBox.StandardButton.Yes
-            | QMessageBox.StandardButton.No
-            | QMessageBox.StandardButton.Cancel,
-        )
+        # Fits saved on a spectrum binned differently (a 1k matrix cut
+        # against a 16k spectrum) are stored in THAT spectrum's bins. Their
+        # marks are carried onto this one's bins through the detector
+        # channel scale, and they can only be re-run: their fitted values
+        # are counts per bin of the old binning.
+        binned_differently = not same_axis(saved_axis, axis_of(active))
+        if binned_differently:
+            results = [fit_marks_onto_axis(r, saved_axis, axis_of(active)) for r in results]
+            choice = QMessageBox.question(
+                self, "Load Fits",
+                f"Load {len(results)} fit(s)?\n\n"
+                "They were saved on a spectrum binned differently from this one, "
+                "so their saved values do not apply here. Their marks will be "
+                "placed on the same detector channels and each fit re-run on "
+                "this spectrum." + note,
+                QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            )
+            if choice == QMessageBox.StandardButton.Cancel:
+                return
+            choice = QMessageBox.StandardButton.No
+        else:
+            choice = QMessageBox.question(
+                self, "Load Fits",
+                f"Load {len(results)} fit(s)?\n\n"
+                "Yes  - restore the saved results exactly as they were\n"
+                "No   - re-run each fit from its saved marks using the current "
+                "fitting code" + note,
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No
+                | QMessageBox.StandardButton.Cancel,
+            )
         if choice == QMessageBox.StandardButton.Cancel:
             return
 

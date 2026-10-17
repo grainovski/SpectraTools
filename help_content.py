@@ -2120,7 +2120,7 @@ histogram is shown against that scale, not against its bin numbers.
 Every spectrum and every matrix axis carries the rule</p>
 <p style="text-align:center"><i>channel = offset + width &middot; bin</i></p>
 <p>read from the histogram's bin edges -- for the CoMPASS matrix about
-7.5 + 16.015 &middot; bin. Everything you read or type goes through it:
+8.0 + 16.015 &middot; bin. Everything you read or type goes through it:
 the plot axis, the cursor readout, cut, background and fit marks, Go To,
 fitted positions and widths, the Fit Results and Fit Parameters panels,
 reports and the fit log, Calibrate from Fitted Peaks, the automatic
@@ -2130,19 +2130,36 @@ detector peak on peak.</p>
 <p>What stays in bins is the counting. A fit or integration runs on the
 histogram's real bins, because those are what was measured; only its
 results are converted. Areas and their uncertainties are therefore
-unchanged. A peak in a coarse histogram is sampled only once every ~16
-channels, though, so its position is less precise than in the 16k
-spectrum and its FWHM comes out a little wider -- on a Co-60 run the
-1332 keV line fitted at 2754.2 &plusmn; 0.9 in a 1k cut against
-2755.0 &plusmn; 0.4 in the 16k spectrum.</p>
-<p>One detail is a half channel. SpectraTools has always read bin
-[<i>n</i>, <i>n</i>+1] of a ROOT spectrum binned one per channel as
-channel <i>n</i>, so a ROOT coordinate <i>x</i> is channel
-<i>x</i> - 0.5. The same rule for a 16-channel bin puts it at its centre
-less a half, which is where the whole ADC values it collected average
-to, so coarse and fine histograms line up to within a fraction of a
-channel. The heatmap shows the matrix from -0.5 to 16382.5 for the same
-reason.</p>
+unchanged -- measured over 400 simulated lines, a coarse cut recovers
+the area to 0.02%. On a Co-60 run the 1332 keV line fitted at
+2754.7 &plusmn; 0.9 in a 1k cut against 2755.0 &plusmn; 0.4 in the 16k
+spectrum.</p>
+<p><b>Where a bin sits.</b> The digitizer writes whole numbers, and a
+bin's channel is the mean of the whole numbers it collects. A bin
+[<i>n</i>, <i>n</i>+1] of a spectrum binned one per channel holds only
+<i>n</i>, so it is channel <i>n</i> -- as SpectraTools has always read
+it. A CoMPASS matrix bin is 16.015 channels wide with edges that fall
+between whole numbers, so the numbers inside it average its centre.
+(Version 6.3.0 used "centre less a half" for every axis, which put every
+position on a 1k cut half a channel low; 6.3.1 corrects it.) The heatmap
+spans 0-16383, exactly as ROOT shows it.</p>
+<p><b>Two limits of coarse bins, and how big they are.</b> Both come from
+the binning itself, so ROOT and HDTV share them.</p>
+<ul>
+<li><b>Peak positions carry a small systematic.</b> A 16.015-wide bin
+holds 16 or 17 whole numbers, so their mean wobbles up to half a channel
+either side of the straight line the axis follows. Over many simulated
+lines this averages out, but a single line can sit 0.27 channels off (RMS;
+0.46 at most). It only matters when the statistical error is smaller
+than that -- above roughly 10<sup>5</sup> counts in the peak. For the most
+precise positions, and for calibrating, use the 16k spectrum.</li>
+<li><b>Widths come out a little wider.</b> A peak sampled every 16
+channels is smeared by the bin. Measured against the same line in the
+16k spectrum, the FWHM on a 1k cut is about 3% wider when the peak's
+sigma spans 1.25-2.5 bins, 6% at 0.75-1.25 bins and 14% below that --
+slightly more than Sheppard's correction (bin width squared over 12)
+alone predicts. Positions and areas are not biased by it.</li>
+</ul>
 <p>Consequences worth knowing. Spectra binned differently -- a 1k cut and a
 16k spectrum -- cannot be added or subtracted, because their bins do not
 line up. <b>Rebin</b> on a coarse spectrum widens its bins on the same
@@ -2150,8 +2167,10 @@ channel scale and leaves the calibration alone. <b>Save Spectrum</b>
 writes counts only, so a saved cut reopens one bin per channel. A ROOT
 axis is a channel scale, not an energy calibration, so it is never
 switched on as one; a histogram already binned in keV shows keV numbers as
-its channels (a linear calibration a = 0.5, b = 1 labels it in keV
-exactly). A TV <b>.mtx</b> or CoMPASS <b>.json</b> matrix records no
+its channels. For bins narrower than one unit -- the usual keV case, where
+the whole-number rule above has nothing to average -- a bin's channel is
+its centre less a half, so a linear calibration a = 0.5, b = 1 labels such
+an axis in keV exactly. A TV <b>.mtx</b> or CoMPASS <b>.json</b> matrix records no
 bin width, so it is shown one bin per channel.</p>
 
 <h2>Gating on more than one peak</h2>

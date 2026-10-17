@@ -96,13 +96,25 @@ def savable(results):
     return [result for result in results if getattr(result, "peaks", None) is not None]
 
 
-def save(path, results, spectrum_path):
+def save(path, results, spectrum_path, axis=None):
     """Writes the fits among `results` to `path`. Integration results are
-    skipped -- see savable()."""
+    skipped -- see savable().
+
+    `axis` is the spectrum's channel_axis.ChannelAxis, or None for one bin
+    per channel. The fits are stored in BINS, as the fit engine holds them,
+    so the axis is what says which detector channels those bins are -- a
+    fit saved on a 1k matrix cut must not land on bin numbers of a 16k
+    spectrum. An optional key, added in 6.3.1 without a schema change:
+    a file without it means one bin per channel, which every older file
+    is, and an older build reading a newer file simply ignores it.
+    """
     document = {
         "format": "spectratools-fits",
         "schema_version": SCHEMA_VERSION,
         "spectrum": str(spectrum_path),
+        "channel_axis": (
+            None if axis is None else {"offset": axis.offset, "width": axis.width}
+        ),
         "fits": [to_record(result) for result in savable(results)],
     }
     with open(path, "w", encoding="utf-8") as f:
@@ -155,8 +167,10 @@ def _from_record_v1(record):
 _READERS = {1: _from_record_v1}
 
 
-def load(path):
-    """Reads a fit file, returning (results, spectrum_path)."""
+def load(path, with_axis=False):
+    """Reads a fit file, returning (results, spectrum_path) -- or, with
+    `with_axis`, (results, spectrum_path, axis) where axis is the
+    ChannelAxis the fits were saved on, None for one bin per channel."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             document = json.load(f)
@@ -185,7 +199,17 @@ def load(path):
         results = [reader(record) for record in document.get("fits", [])]
     except (TypeError, ValueError, KeyError) as exc:
         raise FitFileError(f"Fit file is malformed: {path} ({exc})") from exc
-    return results, document.get("spectrum")
+    if not with_axis:
+        return results, document.get("spectrum")
+    stored = document.get("channel_axis")
+    axis = None
+    if stored is not None:
+        from channel_axis import ChannelAxis
+        try:
+            axis = ChannelAxis(float(stored["offset"]), float(stored["width"]))
+        except (TypeError, ValueError, KeyError) as exc:
+            raise FitFileError(f"Fit file has an unusable channel axis: {path} ({exc})") from exc
+    return results, document.get("spectrum"), axis
 
 
 def refit(result, x, y, variance=None):
