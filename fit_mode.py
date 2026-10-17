@@ -1440,12 +1440,13 @@ class FitModeController(QObject):
         covering the given 0-based indices into active.fits -- used by
         both "Export This Fit..." (a single index) and "Export All
         Fits..." (every index, in Fit Results order)."""
-        stem = os.path.splitext(os.path.basename(active.path))[0]
+        # Shared with the fit log, which is what makes a ROOT object's
+        # "<file>::<object>" path land next to its file.
+        directory, stem = fit_export.output_location(active.path)
         if len(fit_indices) == 1:
             default_name = f"{stem}_fit{fit_indices[0] + 1}_report.txt"
         else:
             default_name = f"{stem}_fits_report.txt"
-        directory = os.path.dirname(active.path)
         path, chosen_filter = QFileDialog.getSaveFileName(
             self.main_window, "Export Fit Report", os.path.join(directory, default_name),
             "Text files (*.txt);;CSV files (*.csv);;LaTeX table (*.tex);;All files (*)",

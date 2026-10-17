@@ -1,3 +1,4 @@
+import os
 import json
 
 import pytest
@@ -37,6 +38,35 @@ def _make_result(timestamp="2026-07-16T12:00:00"):
 def test_auto_log_path_derives_from_spectrum_stem(tmp_path):
     spectrum_path = str(tmp_path / "eu.spe")
     assert auto_log_path(spectrum_path) == str(tmp_path / "eu_fits.jsonl")
+
+
+def test_a_root_spectrum_logs_next_to_its_file(tmp_path):
+    """A ROOT object's path is "<file>::<object>", which is not a path on
+    disk: taken as one, the log went to the nonexistent directory
+    "<file>::ENERGY" and every write failed with "Invalid argument"."""
+    root = str(tmp_path / "HcompassF_run.root")
+    path = auto_log_path(f"{root}::ENERGY/_F_EnergyCH0@DT5780SCP_58363")
+    assert os.path.dirname(path) == str(tmp_path)
+    assert os.path.basename(path) == (
+        "HcompassF_run_ENERGY__F_EnergyCH0@DT5780SCP_58363_fits.jsonl")
+
+
+def test_matrix_cuts_of_a_root_file_log_to_distinct_files(tmp_path):
+    root = str(tmp_path / "HcompassF_run.root")
+    cut_a = auto_log_path(f"{root}::ENERGY_ENERGY/_F_EvsE_x_cut_2354_2434")
+    cut_b = auto_log_path(f"{root}::ENERGY_ENERGY/_F_EvsE_x_cut_2700_2780")
+    assert os.path.dirname(cut_a) == os.path.dirname(cut_b) == str(tmp_path)
+    assert cut_a != cut_b
+    for path in (cut_a, cut_b):
+        assert not any(c in os.path.basename(path) for c in ':/\\;')
+
+
+def test_a_root_fit_log_is_actually_written(tmp_path):
+    """The end of the chain: the write that used to fail succeeds."""
+    root = str(tmp_path / "HcompassF_run.root")
+    spectrum_path = f"{root}::ENERGY_ENERGY/_F_EvsE_x_cut_2354_2434"
+    append_auto_log(spectrum_path, _make_result())
+    assert os.path.exists(auto_log_path(spectrum_path))
 
 
 def test_fit_result_to_json_record_includes_every_field_and_uncertainty():

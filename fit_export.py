@@ -2,15 +2,47 @@ import csv
 import json
 import math
 import os
+import re
 
 from peak_fit import IntegrationResult
 
 
+# What may appear in a filename stem built from a ROOT object path. ROOT
+# names routinely carry "/" (directories) and "@" and ";" -- the first and
+# last are not legal in a Windows filename, and "/" would also be read as a
+# directory separator.
+_UNSAFE_IN_STEM = re.compile(r"[^A-Za-z0-9._@+-]+")
+
+
+def output_location(spectrum_path):
+    """(directory, stem) that files derived from a spectrum -- its fit
+    log, its report -- are written under: next to the spectrum's file,
+    named after it.
+
+    A spectrum from a ROOT file, or a cut or projection of a ROOT matrix,
+    has a display path "<file.root>::<object path>". That is not a
+    filesystem path: taken as one, its directory became
+    "<file.root>::<first directory>" -- which does not exist -- and every
+    fit log write failed with "Invalid argument" from the first ROOT
+    support onwards. The file part decides the directory; the object part
+    is folded into the stem with anything filename-unsafe replaced, so
+    distinct objects and distinct cuts still get distinct files.
+    """
+    if "::" in spectrum_path:
+        file_part, object_part = spectrum_path.split("::", 1)
+        directory = os.path.dirname(file_part)
+        file_stem = os.path.splitext(os.path.basename(file_part))[0]
+        object_stem = _UNSAFE_IN_STEM.sub("_", object_part).strip("_")
+        return directory, f"{file_stem}_{object_stem}" if object_stem else file_stem
+    directory = os.path.dirname(spectrum_path)
+    return directory, os.path.splitext(os.path.basename(spectrum_path))[0]
+
+
 def auto_log_path(spectrum_path):
     """Derives the auto-log path from a spectrum's file path -- e.g.
-    ".../eu.spe" -> ".../eu_fits.jsonl", next to the spectrum file."""
-    directory = os.path.dirname(spectrum_path)
-    stem = os.path.splitext(os.path.basename(spectrum_path))[0]
+    ".../eu.spe" -> ".../eu_fits.jsonl", next to the spectrum file. See
+    output_location for a ROOT object's "<file>::<object>" path."""
+    directory, stem = output_location(spectrum_path)
     return os.path.join(directory, f"{stem}_fits.jsonl")
 
 

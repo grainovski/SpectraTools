@@ -388,6 +388,11 @@ background regions first still works exactly as before.</p>
 <kbd>Ctrl+I</kbd>) is automatically logged to a file next to the
 spectrum: the spectrum's own filename with <code>_fits.jsonl</code>
 appended (e.g. <code>eu.spe</code> logs to <code>eu_fits.jsonl</code>).
+A spectrum from a ROOT file, or a cut of a ROOT matrix, logs next to the
+<code>.root</code> file, with the histogram's name added: a cut of
+<code>run.root</code>'s <code>ENERGY_ENERGY/EvsE</code> matrix logs to
+<code>run_ENERGY_ENERGY_EvsE_x_cut_2359_2429_fits.jsonl</code>.
+Positions and widths in the log are in detector channels, as on screen.
 Each line is one self-contained JSON record covering every parameter
 and its uncertainty, plus keV equivalents when calibration is active.
 This happens automatically every time -- there's nothing to trigger and
