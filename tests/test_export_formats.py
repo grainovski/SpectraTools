@@ -8,7 +8,7 @@ import pytest
 import fit_export
 from calibration import Calibration
 from fit_mode import _export_writer_for
-from peak_fit import FitResult, IntegrationResult, PeakResult
+from peak_fit import FitResult, PeakResult
 
 
 def _peak(position=100.0, area=1234.5, area_err=45.6, fwhm=5.0):

@@ -2,7 +2,6 @@ import functools
 import os
 
 import pytest
-from PySide6.QtCore import Qt
 
 import matrix_panel
 from main_window import MainWindow

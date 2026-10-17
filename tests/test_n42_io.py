@@ -1,6 +1,5 @@
 import os
 
-import numpy as np
 import pytest
 
 from histogram_io import ParseError

@@ -20,9 +20,13 @@ def _nint(x):
     longer follows TV (see merge_regions): this is the mark-to-channel
     conversion for .mtx matrices, and .mtx is TV's own format. HDTV's
     mfile backend rounds the other way on an exact half
-    (MFMatrix::FindCutBin is `ceil(x - 0.5)`, which sends 2.5 to 2);
-    when a ROOT backend arrives, its own conversion belongs with it
-    rather than here.
+    (MFMatrix::FindCutBin is `ceil(x - 0.5)`, which sends 2.5 to 2).
+
+    ROOT matrices use it too. Their marks reach here as fractional bin
+    indices (channel_axis.to_index), with bin centres on the integers, so
+    rounding to the nearest index picks the bin that holds the mark --
+    what ROOT's TAxis::FindBin returns -- for every mark except one
+    exactly on a bin edge, where the two may differ by one bin.
     """
     return int(x + 0.5) if x >= 0 else int(x - 0.5)
 
