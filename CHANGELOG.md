@@ -4,12 +4,15 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
-## [6.3.0] - unreleased
+## [6.3.0] - 2026-10-17
 
 ROOT histograms are now shown against their own axes, the way ROOT's
 browser and HDTV show them. Nothing changes for a spectrum with one bin per
 channel -- every .spe, .spk, .n42, .lzs, .txt, .mtx and CoMPASS .json file
-reads, fits and calibrates exactly as in 6.2.1.
+reads, fits and calibrates exactly as in 6.2.1. What moves is every channel
+number of a coarse ROOT histogram: on a CoMPASS Co-60 run the 1332 keV line
+in a 1k matrix cut used to read bin 172 and now reads ADC 2754.2 +- 0.9,
+matching the 16k spectrum's 2755.0 +- 0.4. Areas do not change.
 
 ### Changed
 
@@ -40,6 +43,16 @@ reads, fits and calibrates exactly as in 6.2.1.
   nowhere. Open the `.root` file of the same run to get ADC channels.
 - Help: How To and Knowledge Database describe the new behaviour, with a
   new "Bins and channels" section.
+
+### Fixed
+
+- **Fits on ROOT spectra and ROOT matrix cuts are now logged.** Their
+  `<file.root>::<object>` path was taken as a filesystem path, so every
+  automatic fit-log write failed with "Could not write fit log: Invalid
+  argument" (since 4.0.0). The log now goes next to the `.root` file, named
+  after the file and the histogram, e.g.
+  `run_ENERGY_ENERGY_EvsE_x_cut_2359_2429_fits.jsonl`. Export Fit Report
+  proposes the same location.
 
 ## [6.2.1] - 2026-10-13
 
