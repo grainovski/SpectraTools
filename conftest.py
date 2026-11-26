@@ -16,7 +16,7 @@ import shutil
 import tempfile
 
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QEvent, QSettings
 from PySide6.QtWidgets import QApplication
 
 # --- keep the suite out of the user's real settings --------------------
@@ -98,15 +98,36 @@ def close_all_windows():
     for widget in list(app.topLevelWidgets()):
         try:
             widget.close()
-            widget.deleteLater()
+            # Only windows nobody owns. topLevelWidgets() also lists popups
+            # that belong to another widget -- a QComboBox's dropdown frame,
+            # the QMenus of tool buttons and menu bars -- and deleting one of
+            # those behind its owner's back leaves the owner holding a
+            # dangling pointer: the combo box touches its dead dropdown when
+            # it is destroyed in turn, inside its panel, and the process dies
+            # with an access violation. That crashed ~1 run in 3 of
+            # test_matrix_heatmap.py + test_matrix_integration.py +
+            # test_matrix_panel.py, always while destroying a MatrixPanel,
+            # and a full run at 58%. Owned popups are destroyed with their
+            # owner, so skipping them here loses nothing.
+            if widget.parent() is None:
+                widget.deleteLater()
         except RuntimeError:
             # Already destroyed on the C++ side -- closing a MainWindow
             # cascades to its panels, so a widget listed a moment ago can
             # be gone by the time this loop reaches it.
             pass
-    # deleteLater only takes effect when the event loop runs, and the
-    # suite never starts one.
     app.processEvents()
+    # deleteLater only POSTS a DeferredDelete event, and processEvents()
+    # does not deliver those outside a running event loop -- which this
+    # suite never starts. So without this line nothing closed here was ever
+    # destroyed: every MainWindow, panel and dialog, and every QMenu (each
+    # a top-level of its own), stayed queued and listed by
+    # topLevelWidgets() until some test happened to spin a real loop.
+    # Measured on a full run before this: the count reached ~2,500, and
+    # because this loop and MainWindow.closeEvent both walk that list,
+    # trivial tests took ~2.5 s each and the suite 43 min to over 2 h
+    # (1 h 16 min for v6.3.1 on NUCLINO-III).
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 @pytest.fixture(autouse=True)

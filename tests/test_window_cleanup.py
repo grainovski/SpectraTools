@@ -72,6 +72,32 @@ def test_every_panel_a_test_opened_is_released_not_just_the_last(qapp):
     assert not still_held, f"{len(still_held)} of 2 panels kept their matrix"
 
 
+def test_closed_windows_are_destroyed_not_just_hidden(qapp):
+    """The widgets themselves, not only their payload, and specifically
+    the C++ side: Qt's own list of top-levels must not keep growing.
+
+    Distinct from the payload tests above. close() alone hides a window
+    and releases its matrix, so those pass whether or not deleteLater ever
+    runs -- and for a long time it did not, because processEvents() does
+    not deliver DeferredDelete without a running event loop. Every closed
+    window and each of its menus stayed in topLevelWidgets(), which every
+    teardown walks, until a full run spent seconds per test on cleanup.
+    Python may keep its wrappers; this asserts only on what Qt lists.
+    """
+    before = len(qapp.topLevelWidgets())
+    windows = [MainWindow() for _ in range(3)]
+    for window in windows:
+        window.show()
+    assert len(qapp.topLevelWidgets()) > before
+
+    close_all_windows()
+
+    assert len(qapp.topLevelWidgets()) <= before, (
+        f"{len(qapp.topLevelWidgets()) - before} top-level widgets outlived "
+        "close_all_windows()"
+    )
+
+
 def test_close_all_windows_is_safe_with_nothing_open(qapp):
     """Runs after every test in the suite, most of which open no window."""
     close_all_windows()
