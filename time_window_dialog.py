@@ -244,7 +244,9 @@ class TimeWindowDialog(StepDialog):
         line_color = DARK_LINE_COLOR if self._theme == "dark" else LIGHT_LINE_COLOR
         self.axes.step(self._centres / 1000.0, self._counts, where="mid",
                        color=line_color, linewidth=0.9)
-        self.axes.set_xlabel("Δt = t(CH1) − t(CH0)  [ns]")
+        x_name = f"CH{int(self.session.x_channel)}"
+        y_name = f"CH{int(self.session.y_channel)}"
+        self.axes.set_xlabel(f"Δt = t({x_name}) − t({y_name})  [ns]")
         self.axes.set_ylabel(f"Pairs / {self._g / 1000:g} ns")
         self.axes.set_xlim(-self._max / 1000.0 - self._g / 2000.0,
                            self._max / 1000.0 + self._g / 2000.0)

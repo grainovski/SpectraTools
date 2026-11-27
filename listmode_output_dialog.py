@@ -170,9 +170,15 @@ def _x_map(session, seed):
     return apply
 
 
+def channel_name(channel):
+    """'CH<n>', the name a detector channel goes by in labels and metadata."""
+    return f"CH{int(channel)}"
+
+
 def _meta(session, outcome, compression):
     s = session
     gain = None if s.gain_skipped or s.gain is None else list(s.gain.coefficients)
+    x_name, y_name = channel_name(s.x_channel), channel_name(s.y_channel)
     return {
         "compression": int(compression),
         "source_run": {"path": None if s.path is None else str(s.path),
@@ -189,8 +195,8 @@ def _meta(session, outcome, compression):
                   "gain_dither_random": int(outcome.seed) + 1,
                   "mtx_stochastic_round": int(outcome.seed) + 2},
         "gain_coefficients": gain,
-        "gain": "skipped" if gain is None else "CH1 mapped onto CH0",
-        "axes": {"x": "CH1", "y": "CH0"},
+        "gain": "skipped" if gain is None else f"{x_name} mapped onto {y_name}",
+        "axes": {"x": x_name, "y": y_name},
         "nchan": int(s.nchan),
         "subtraction": "S = P - w * R",
         "totals": {"prompt": int(outcome.prompt.matrix.total()),
@@ -319,8 +325,10 @@ class ListModeOutputDialog(StepDialog):
     # ------------------------------------------------------------ building
     def _build(self):
         nchan = int(self.session.nchan)
-        formats = QGroupBox(f"Files (asymmetric matrix, X = CH1, Y = CH0, "
-                            f"{nchan} × {nchan} channels)")
+        x_name = channel_name(self.session.x_channel)
+        y_name = channel_name(self.session.y_channel)
+        formats = QGroupBox(f"Files (asymmetric matrix, X = {x_name}, "
+                            f"Y = {y_name}, {nchan} × {nchan} channels)")
         fl = QVBoxLayout(formats)
         self.mtx_check = QCheckBox(
             ".mtx – full resolution; integer cells, so each value is "

@@ -1929,3 +1929,155 @@ def test_howto_documents_cursor_readout_and_kept_view():
     assert "matrix panel" in section and "kev" in section
     # Opening keeps the view; Ctrl+0 is the way back to full scale.
     assert "keeps the" in section and "first spectrum" in section
+
+
+# --- Sort List-Mode gamma-gamma Data (7.0.0) -----------------------------
+
+
+def _listmode_howto_text():
+    """Visible text of HowTo section 16 only, entities decoded, so labels
+    compare with the dialogs' own strings ("&lt; Back" is "< Back")."""
+    import html as _html
+
+    page = build_howto_html()
+    start = page.index("Sorting list-mode γγ data</h3>")
+    end = page.index("<h3>", start)
+    return _html.unescape(_rendered_text(page[start:end]))
+
+
+#: (source file, label) for every control section 16 names. Read from the
+#: source so a renamed control fails here rather than leaving the HowTo
+#: describing a button that no longer exists.
+_LISTMODE_LABELS = (
+    ("main_window.py", "Sort List-Mode γγ Data..."),
+    ("main_window.py", "Ctrl+Shift+G"),
+    ("listmode_session.py", "< Back"),
+    ("listmode_session.py", "Next >"),
+    ("listmode_session.py", "Cancel"),
+    ("listmode_input_dialog.py", "Browse…"),
+    ("listmode_input_dialog.py", "Exclude"),
+    ("listmode_input_dialog.py", "Pairing"),
+    ("listmode_input_dialog.py", "X detector"),
+    ("listmode_input_dialog.py", "Y detector"),
+    ("listmode_input_dialog.py", "Maximum |Δt|"),
+    ("listmode_singles_dialog.py", "Logarithmic counts"),
+    ("listmode_singles_dialog.py", "Send to main window"),
+    ("gain_match_dialog.py", "Peaks from"),
+    ("gain_match_dialog.py", "This run"),
+    ("gain_match_dialog.py", "Calibration run"),
+    ("gain_match_dialog.py", "SData file..."),
+    ("gain_match_dialog.py", "Two spectra..."),
+    ("gain_match_dialog.py", "None (pair by position)"),
+    ("gain_match_dialog.py", "Sensitivity"),
+    ("gain_match_dialog.py", "Find and pair peaks"),
+    ("gain_match_dialog.py", "Low-channel cutoff"),
+    ("gain_match_dialog.py", "1 (linear)"),
+    ("gain_match_dialog.py", "2 (quadratic)"),
+    ("gain_match_dialog.py", "Save coefficients..."),
+    ("gain_match_dialog.py", "Load coefficients..."),
+    ("gain_match_dialog.py", "Skip gain matching (CH1 keeps its own scale)"),
+    ("time_window_dialog.py", "A drag on the plot"),
+    ("time_window_dialog.py", "sets the prompt window"),
+    ("time_window_dialog.py", "adds a random window"),
+    ("time_window_dialog.py", "Log scale"),
+    ("time_window_dialog.py", "Prompt window"),
+    ("time_window_dialog.py", "Random windows"),
+    ("time_window_dialog.py", "Add random window"),
+    ("time_window_dialog.py", "Remove"),
+    ("listmode_output_dialog.py", "Sparse JSON"),
+    ("listmode_output_dialog.py", "Dense CoMPASS-style JSON, compressed by"),
+    ("listmode_output_dialog.py", "Base name"),
+    ("listmode_output_dialog.py", "Will write:"),
+    ("listmode_output_dialog.py", "_gg_sub"),
+    ("listmode_output_dialog.py", "Sort and Save"),
+    ("listmode_output_dialog.py", "Finish"),
+    ("listmode_output_dialog.py", "Open result"),
+    ("listmode_output_dialog.py", "Open full resolution"),
+)
+
+
+def test_howto_names_the_list_mode_controls_as_the_dialogs_label_them():
+    import io as _io
+
+    text = _listmode_howto_text()
+    checked = 0
+    for source, label in _LISTMODE_LABELS:
+        code = _io.open(source, encoding="utf-8").read()
+        assert label in code, f"{source} no longer has the label {label!r}"
+        assert label in text, f"the HowTo does not name {label!r} ({source})"
+        checked += 1
+    assert checked == len(_LISTMODE_LABELS) == 44, checked
+    # Control: the same check rejects a label that is not there.
+    assert "Sort and Save!" not in text
+
+
+def test_howto_list_mode_defaults_are_the_codes_defaults():
+    """Each default the section states, derived from the constant the
+    dialog uses, so changing a default fails here."""
+    import gain_match_dialog
+    import listmode_session
+    import peak_search
+    import time_window_dialog
+    from listmode_sort import window_weight
+
+    text = _listmode_howto_text()
+    assert f"{gain_match_dialog.DEFAULT_LOW_CUTOFF} channels" in text
+    assert f"{listmode_session.DEFAULT_MAX_DT_PS // 1000:,} ns" in text
+    assert f"default {peak_search.DEFAULT_SENSITIVITY:g} sigma" in text
+    assert f"±{time_window_dialog.DEFAULT_PROMPT_HALF_WIDTH_PS // 1000} ns" in text
+    assert f"±{time_window_dialog.DEFAULT_RANDOM_INNER_PS // 1000} ns" in text
+    assert f"fewer than {time_window_dialog.RANDOM_WARN_MIN} pairs" in text
+    # The worked weight: default windows on 10 ns ticks over +-2 us.
+    g, m = 10_000, listmode_session.DEFAULT_MAX_DT_PS
+    prompt, randoms = time_window_dialog.default_windows(
+        [0], [1], g, m)
+    w, n_p, n_r = window_weight(prompt, randoms, g, m)
+    assert f"w = {n_p}/{n_r}" in text, (n_p, n_r)
+    assert f"{-w:.4f}".replace("-", "−") in text, w
+
+
+def test_howto_explains_the_filtered_stream_and_the_memory_check():
+    text = _listmode_howto_text()
+    assert "Use the UNFILTERED stream" in text
+    assert "FILTERED" in text and "nothing to measure" in text
+    assert "2.0 GiB" in text and "+2,090 MiB" in text and "+2,118 MiB" in text
+    assert "2.1 GiB" not in text
+    assert "+2.15 GiB" in text
+    assert "refuses" in text
+    assert "stochastically rounded" in text
+    assert "Symmetrize..." in text
+
+
+def test_knowledge_database_explains_random_subtraction():
+    import html as _html
+
+    page = build_knowledge_database_html()
+    start = page.index("<h2>Random subtraction in a sorted γγ matrix</h2>")
+    end = page.find("<h2>", start + 5)
+    text = _html.unescape(_rendered_text(page[start:end if end > 0 else None]))
+    assert "S = P − w · R" in text
+    assert "N prompt / N random" in text
+    assert "inclusively" in text
+    # The limitation is stated, not hidden.
+    assert "P+w²R" in text.replace(" ", "") and "too small" in text
+    assert "stochastic rounding" in text.lower()
+    # The TV citation, and that it points at what it says.
+    assert "tv-1.9.13/src/VsCut.c" in text and "line 478" in text
+    assert "lib/tv/vsMark.c" in text and "lines 29-37" in text
+
+
+def test_the_tv_lines_the_knowledge_database_cites_say_what_it_says():
+    """Skipped when the vendored TV source (untracked) is absent."""
+    import pytest
+
+    cut = os.path.join("tv-1.9.13", "src", "VsCut.c")
+    mark = os.path.join("tv-1.9.13", "lib", "tv", "vsMark.c")
+    if not (os.path.exists(cut) and os.path.exists(mark)):
+        pytest.skip("tv-1.9.13 source not present")
+    cut_lines = open(cut, encoding="latin-1").read().splitlines()
+    assert "MrkRange(VcutsGate(&vCut)) / MrkRange(VcutsBgGate(&vCut))" in cut_lines[477]
+    mark_lines = open(mark, encoding="latin-1").read().splitlines()
+    assert mark_lines[28].startswith("double MrkRange(")
+    body = "\n".join(mark_lines[28:37])
+    assert "NPVecX2(mp,i) - NPVecX1(mp,i)" in body
+    assert "return (range + VecNum(mp));" in body

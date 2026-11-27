@@ -32,6 +32,7 @@ the starting value.
 
 import dataclasses
 import os
+import re
 
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -91,6 +92,17 @@ SKIP_EXPLANATION = (
 
 
 # ------------------------------------------------------------- pure helpers
+
+
+_CHANNEL_TOKEN = re.compile(r"\bCH([01])\b")
+
+
+def relabel(text, x_channel=1, y_channel=0):
+    """`text` written for the default assignment (X = CH1, Y = CH0) with
+    every CH1 / CH0 renamed to the channels actually chosen in step 1.
+    Both are replaced in one pass, so swapping the two is safe."""
+    names = {"1": f"CH{int(x_channel)}", "0": f"CH{int(y_channel)}"}
+    return _CHANNEL_TOKEN.sub(lambda m: names[m.group(1)], text)
 
 
 def _load_1d(path):
@@ -262,14 +274,18 @@ class GainMatchDialog(StepDialog):
         self._build()
         self.load_from_session()
 
+    def _ch(self, text):
+        """`text` with CH1 / CH0 renamed to this session's X / Y channels."""
+        return relabel(text, self.session.x_channel, self.session.y_channel)
+
     # ---------------------------------------------------------------- UI
 
     def _build(self):
-        intro = QLabel(
+        intro = QLabel(self._ch(
             "CH1 (X) is mapped onto CH0's (Y) ADC channel scale by a "
             "polynomial fitted to peaks both detectors see; CH0 is not "
             "changed. Find and pair the peaks, check the pairs and the "
-            "order, then press Next.")
+            "order, then press Next."))
         intro.setWordWrap(True)
         self.body.addWidget(intro)
 
@@ -291,9 +307,9 @@ class GainMatchDialog(StepDialog):
             "Sort another CoMPASS list-mode file into singles, with the same "
             "excluded flags and channels, and take the peaks from it.")
         self.load_spectra_button = QPushButton("Two spectra...")
-        self.load_spectra_button.setToolTip(
+        self.load_spectra_button.setToolTip(self._ch(
             "Take the peaks from two 1-D spectra: one of CH0 (reference) "
-            "and one of CH1 (mapped).")
+            "and one of CH1 (mapped)."))
         row.addWidget(self.load_sdata_button)
         row.addWidget(self.load_spectra_button)
         sl.addLayout(row)
@@ -310,10 +326,10 @@ class GainMatchDialog(StepDialog):
         pl = QGridLayout(pair_box)
         pl.addWidget(QLabel("Source file:"), 0, 0)
         self.source_combo = QComboBox()
-        self.source_combo.setToolTip(
+        self.source_combo.setToolTip(self._ch(
             "Optional. With a .sou file each channel's peaks are identified "
             "by energy and paired by energy; without one CH1's peaks are "
-            "paired with CH0's by position.")
+            "paired with CH0's by position."))
         self._fill_source_combo()
         self.source_combo.activated.connect(self._on_source_activated)
         pl.addWidget(self.source_combo, 0, 1)
@@ -337,11 +353,11 @@ class GainMatchDialog(StepDialog):
         self.cutoff = QSpinBox()
         self.cutoff.setRange(0, max(0, int(self.session.nchan) - 1))
         self.cutoff.setValue(DEFAULT_LOW_CUTOFF)
-        self.cutoff.setSuffix(" ch (CH0)")
-        self.cutoff.setToolTip(
+        self.cutoff.setSuffix(self._ch(" ch (CH0)"))
+        self.cutoff.setToolTip(self._ch(
             "Pairs whose CH0 centroid is below this start unticked: the "
             "threshold edge and noise sit there, and their position is not "
-            "set by the gain. Changing it re-applies the default ticks.")
+            "set by the gain. Changing it re-applies the default ticks."))
         self.cutoff.valueChanged.connect(self._on_cutoff_changed)
         fl.addWidget(self.cutoff, 0, 1)
         fl.addWidget(QLabel("Order:"), 1, 0)
@@ -370,7 +386,7 @@ class GainMatchDialog(StepDialog):
         middle = QHBoxLayout()
         self.body.addLayout(middle, 1)
         self.table = QTableWidget(0, len(self.COLUMNS))
-        self.table.setHorizontalHeaderLabels(self.COLUMNS)
+        self.table.setHorizontalHeaderLabels([self._ch(c) for c in self.COLUMNS])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(
@@ -398,10 +414,10 @@ class GainMatchDialog(StepDialog):
         self.extrapolation_label.setVisible(False)
         self.body.addWidget(self.extrapolation_label)
 
-        self.skip_check = QCheckBox("Skip gain matching (CH1 keeps its own scale)")
+        self.skip_check = QCheckBox(self._ch("Skip gain matching (CH1 keeps its own scale)"))
         self.skip_check.toggled.connect(self._on_skip_toggled)
         self.body.addWidget(self.skip_check)
-        self.skip_label = QLabel(SKIP_EXPLANATION)
+        self.skip_label = QLabel(self._ch(SKIP_EXPLANATION))
         self.skip_label.setWordWrap(True)
         self.skip_label.setVisible(False)
         self.body.addWidget(self.skip_label)
@@ -542,11 +558,12 @@ class GainMatchDialog(StepDialog):
 
     def _on_load_spectra_clicked(self):
         ch0, _ = QFileDialog.getOpenFileName(
-            self, "Calibration Spectrum of CH0 (reference, Y)", "", SPECTRUM_FILTER)
+            self, self._ch("Calibration Spectrum of CH0 (reference, Y)"), "",
+            SPECTRUM_FILTER)
         if not ch0:
             return
         ch1, _ = QFileDialog.getOpenFileName(
-            self, "Calibration Spectrum of CH1 (mapped, X)", os.path.dirname(ch0),
+            self, self._ch("Calibration Spectrum of CH1 (mapped, X)"), os.path.dirname(ch0),
             SPECTRUM_FILTER)
         if not ch1:
             return
@@ -561,8 +578,8 @@ class GainMatchDialog(StepDialog):
             self.status.setText(f"The spectrum could not be read: {exc}")
             return False
         self._set_calibration(
-            ch1, ch0, f"spectra {os.path.basename(ch1_path)} (CH1) and "
-                      f"{os.path.basename(ch0_path)} (CH0)")
+            ch1, ch0, self._ch(f"spectra {os.path.basename(ch1_path)} (CH1) and "
+                               f"{os.path.basename(ch0_path)} (CH0)"))
         self.status.setText("Calibration spectra loaded. Press Find and pair peaks.")
         return True
 
@@ -647,7 +664,8 @@ class GainMatchDialog(StepDialog):
         self.extrapolation = None
         self.fit_error = None
         self._apply_default_ticks()
-        found = "" if counts is None else f"{counts[0]} CH1 and {counts[1]} CH0 peaks fitted. "
+        found = "" if counts is None else self._ch(
+            f"{counts[0]} CH1 and {counts[1]} CH0 peaks fitted. ")
         if reason:
             self.status.setText(f"{found}The peaks could not be paired: {reason}")
         else:
@@ -872,7 +890,8 @@ class GainMatchDialog(StepDialog):
         g = self.gain
         covered = pair_range(self.pairs)
         range_text = ("no included pairs" if covered is None else
-                      f"pairs cover CH1 channels {covered[0]:.0f}-{covered[1]:.0f} "
+                      f"pairs cover {self._ch('CH1')} channels "
+                      f"{covered[0]:.0f}-{covered[1]:.0f} "
                       f"of 0-{int(self.session.nchan) - 1}; the map is "
                       f"extrapolated outside that range")
         if g is None:
@@ -893,7 +912,7 @@ class GainMatchDialog(StepDialog):
             self.extrapolation_label.setText(
                 f"Warning: outside the pair range the quadratic leaves the "
                 f"straight line through the same pairs by up to "
-                f"{x.deviation:.0f} channels (at CH1 channel {x.channel}), more "
+                f"{x.deviation:.0f} channels (at {self._ch('CH1')} channel {x.channel}), more "
                 f"than one FWHM ({x.fwhm:.0f} ch). Nothing constrains the "
                 f"curvature there; consider order 1, or pairs that reach "
                 f"further.")
@@ -919,7 +938,7 @@ class GainMatchDialog(StepDialog):
         # for leaving them out stays visible.
         ax = self.residual_axes
         ax.set_title("Residuals ch0 - P(ch1)", fontsize=9)
-        ax.set_xlabel("CH1 channel", fontsize=8)
+        ax.set_xlabel(self._ch("CH1 channel"), fontsize=8)
         ax.axhline(0.0, color="gray", lw=0.8)
         if g is not None and self.pairs:
             for p, r in zip(self.pairs, g.residuals):
@@ -929,7 +948,7 @@ class GainMatchDialog(StepDialog):
         # (2) the map over the whole ADC range, guard (a).
         ax = self.map_axes
         ax.set_title("Map ch0 = P(ch1)", fontsize=9)
-        ax.set_xlabel("CH1 channel", fontsize=8)
+        ax.set_xlabel(self._ch("CH1 channel"), fontsize=8)
         x = np.arange(nchan, dtype=float)
         covered = pair_range(self.pairs)
         if g is not None:
@@ -959,15 +978,15 @@ class GainMatchDialog(StepDialog):
 
         # (3) CH0 and mapped CH1 singles overlaid.
         ax = self.overlay_axes
-        ax.set_title("CH0 and gain-matched CH1 singles", fontsize=9)
-        ax.set_xlabel("CH0 channel", fontsize=8)
+        ax.set_title(self._ch("CH0 and gain-matched CH1 singles"), fontsize=9)
+        ax.set_xlabel(self._ch("CH0 channel"), fontsize=8)
         spectra = self.peak_spectra()
         if spectra is not None:
             ch1, ch0 = spectra
-            ax.plot(np.arange(ch0.size), ch0, color="C0", lw=0.8, label="CH0")
+            ax.plot(np.arange(ch0.size), ch0, color="C0", lw=0.8, label=self._ch("CH0"))
             if g is not None:
                 mx, my = mapped_histogram(g, ch1)
-                ax.plot(mx, my, color="C1", lw=0.8, label="CH1 mapped")
+                ax.plot(mx, my, color="C1", lw=0.8, label=self._ch("CH1 mapped"))
             ax.set_yscale("symlog", linthresh=1.0)
             ax.set_xlim(0, nchan - 1)
             ax.legend(fontsize=7, loc="upper right")

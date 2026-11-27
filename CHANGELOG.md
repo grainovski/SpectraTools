@@ -4,6 +4,98 @@ All notable changes to SpectraTools are documented here, starting from
 version 2.0.0. Dates are when the version was frozen and released, not
 when individual pieces of work happened.
 
+## [7.0.0] - unreleased
+
+A new operation sorts CAEN CoMPASS list-mode data into a random-subtracted
+gamma-gamma matrix, and the program now writes matrices for the first time.
+Spectra, fits, calibrations and efficiencies are untouched; the changes to
+existing features are the matrix ones listed below.
+
+### Added
+
+- **Operations › Sort List-Mode γγ Data…** (Ctrl+Shift+G). Five steps turn
+  a CoMPASS list-mode file, `SData_<run>.root`, into a γγ matrix:
+  1. **Input** describes the file (stream, events per channel, timestamp
+     tick, time order, the run's `info.txt`) and its Flags values, with
+     pile-up and saturation events excluded by default. The two detectors
+     are chosen here, X = CH1 and Y = CH0 by default, and every label and
+     file names the ones chosen; every X event is paired with every Y event
+     within the maximum |Δt| (default ±2 µs). A FILTERED stream gets a
+     warning: CoMPASS's software coincidence has removed the pairs a random
+     window needs, so use the UNFILTERED file.
+  2. **Singles** shows both detectors at 16384 channels; **Send to main
+     window** adds them as ordinary spectra.
+  3. **Gain matching** maps X onto Y's ADC scale with a linear or
+     quadratic fit to peaks both detectors see -- from the run itself, from
+     a calibration run (another SData file or two spectra), optionally
+     paired by energy from a `.sou` file. Peaks below a low-channel cutoff
+     start unticked, the map shows where it is extrapolated, and a warning
+     appears when a quadratic strays from the straight line by more than a
+     FWHM outside the pairs. Coefficients can be saved and loaded.
+  4. **Time windows**: drag or type one prompt and any number of random
+     windows on the Δt spectrum. The weight w = prompt bins / random bins
+     is TV's gate-width rule, shown live with the net prompt and its error.
+  5. **Sort and save** writes S = P − w·R, X on the x axis, as `.mtx`
+     and/or SpectraTools JSON, and **Open result** opens it in a Matrix
+     panel.
+
+  Back returns to each step with what was chosen there when you last went
+  on with Next (step 3 keeps the gain match but starts its peak-finding
+  settings afresh), and Cancel
+  before Sort and Save writes nothing, apart from gain coefficients you
+  save in step 3.
+- **Matrix files are written.** `.mtx` files are byte-compatible with TV's
+  libmfile. Since a subtracted matrix holds fractions and the format holds
+  whole numbers, each cell is rounded up or down at random with the right
+  odds (seeded), so its expected value is kept; plain rounding would erase
+  most of the subtraction in a sparsely filled matrix. The JSON keeps the
+  exact values: sparse at full resolution, or in CoMPASS's dense layout
+  when compressed by 4 or more.
+  Both JSON forms record the run, windows, w, seed and gain coefficients.
+- **File › Open of an SData file** (and Open ROOT File) offers
+  to start the sort with that file already read. File › Open now also
+  passes any `.root` file to the ROOT object dialog instead of failing to
+  read it as a text spectrum.
+- **File › Open Matrix reads SpectraTools JSON**, negative and fractional
+  cells included. A compressed one opens in ADC channels, so a peak sits
+  at the same channel as in the 16k singles.
+- **Memory checks before a 2 GiB matrix.** A 16384 × 16384 result open in a
+  Matrix panel took about 2.0 GiB on the development machine (measured
+  +2,090 MiB resident, peak +2,118 MiB). Open result,
+  and File › Open Matrix of a full-resolution (sparse) JSON, ask the operating
+  system first and refuse with the numbers when too little memory is free.
+
+### Changed
+
+- **Symmetrize… folds a subtracted matrix.** A matrix with negative or
+  fractional cells, such as a Sort List-Mode result, is now accepted and
+  folded exactly as S + Sᵀ, fractions and negative cells kept. Two-line
+  matching is switched off for it, with the reason shown, since rebinning
+  moves whole counts; a Sort List-Mode result is already gain-matched. It
+  used to be refused for any negative cell.
+- A symmetrized matrix's doubled diagonal no longer adds negative variance
+  to a cut where a diagonal cell is negative.
+
+### Fixed
+
+- **Symmetrize no longer truncates fractional cells.** Both folds turned a
+  fractional cell into a whole count without a word. No file the program
+  could read held one before 7.0.0, but a SpectraTools JSON does: the
+  identity fold now keeps the fractions exactly and the two-line fold
+  refuses them with the reason.
+- **An unreadable spectrum file is reported again** (since 3.1.0). A file
+  that failed to parse in File › Open or Reload Spectrum raised an internal
+  error instead of a message naming the file and what was wrong with it.
+
+### Documented
+
+- HowTo: a new section, "16. Sorting list-mode γγ data", walks the five
+  steps; Efficiency calibration is now section 17.
+- Knowledge Database: "Random subtraction in a sorted γγ matrix" -- the
+  weighting and its TV source, why S has negative and fractional cells,
+  and a limitation: cut error bars on such a matrix treat its cells as
+  Poisson counts and leave out the subtraction's extra variance, P + w²R.
+
 ## [6.3.1] - 2026-10-17
 
 From the 6.3.0 audit. Every peak position on a coarsely binned ROOT

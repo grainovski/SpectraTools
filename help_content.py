@@ -221,11 +221,13 @@ appear under <b>File &gt; Recent Files</b> for one-click reopening.
 Every spectrum you open stays loaded until you close it -- opening a
 new one adds it alongside the others rather than replacing what's
 already there.</p>
-<p><b>ROOT files</b> (<b>.root</b>) are opened separately, via
-<b>File &gt; Open ROOT File...</b>, because one ROOT file is not one
-spectrum -- it is a directory tree that can hold dozens of named
-objects. Picking the file opens a second dialog listing every 1D and 2D
-histogram in it; select one or more 1D histograms to load them as
+<p><b>ROOT files</b> (<b>.root</b>) are opened via <b>File &gt; Open
+ROOT File...</b> (<b>File &gt; Open...</b> passes them on there too),
+because one ROOT file is not one spectrum -- it is a directory tree that
+can hold dozens of named objects. A CoMPASS list-mode file, which holds
+events rather than histograms, offers to start
+"16. Sorting list-mode γγ data" instead. Picking the file opens a
+second dialog listing every 1D and 2D histogram in it; select one or more 1D histograms to load them as
 spectra, or a single 2D histogram to open it as a matrix. The two
 cannot be mixed in one go, since a matrix opens its own window while
 spectra join the list. Each histogram is shown against its own axis,
@@ -637,9 +639,13 @@ current view, and <kbd>Ctrl+0</kbd> resets to the full spectrum.</p>
 
 <h3>15. Matrix analysis</h3>
 <p><b>File &gt; Open Matrix...</b> (<kbd>Ctrl+Shift+O</kbd>) opens a
-2D coincidence matrix in its own window: a TV matrix (<b>.mtx</b>), or a
-gamma-gamma matrix exported by CAEN <b>CoMPASS</b> as <b>.json</b>. Only
-the raw histogram is read -- there's no way to save a matrix back out.</p>
+2D coincidence matrix in its own window: a TV matrix (<b>.mtx</b>), a
+gamma-gamma matrix exported by CAEN <b>CoMPASS</b> as <b>.json</b>, or a
+<b>.json</b> written by Sort List-Mode γγ Data
+(see "16. Sorting list-mode γγ data"). Only the histogram is read
+(plus, for a SpectraTools file, its compression factor), and the matrix
+panel cannot save a matrix back out; matrices are written only by Sort
+List-Mode γγ Data.</p>
 <p>A CoMPASS <b>.json</b> matrix also stores a calibration and axis
 limits, but they don't describe the matrix's own bins: for a Co-60
 export they put the 1173 and 1332 keV lines near 388 and 445 keV, and
@@ -652,7 +658,10 @@ CoMPASS writes each row of its data array as one X bin; the reader
 accounts for that, so X and Y are the same axes CoMPASS labels. The
 <b>.root</b> file CoMPASS saves for the same run holds the same matrix
 and opens through <b>File &gt; Open ROOT File...</b> -- prefer it, since
-it does record the bin width.</p>
+it does record the bin width. A <b>.json</b> written by Sort List-Mode γγ
+Data is different: it records how it was made, may hold negative and
+fractional counts, and when compressed it records the factor, so it opens
+in ADC channels like the 16k singles.</p>
 <p><b>A ROOT matrix is shown in detector channels, the way ROOT and HDTV
 show it.</b> CoMPASS stores its energy-energy matrix as 1023 bins over the
 same ADC range, 0-16383, as its 16k energy spectra -- about 16 ADC
@@ -755,7 +764,223 @@ committed fit marks for the projection you're leaving -- it's
 different underlying data, so nothing carries over, even switching
 back to an axis you'd already marked or fit before.</p>
 
-<h3>16. Efficiency calibration</h3>
+<h3>16. Sorting list-mode γγ data</h3>
+<p><b>Operations &gt; Sort List-Mode γγ Data...</b>
+(<kbd>Ctrl+Shift+G</kbd>) turns a CAEN CoMPASS list-mode file,
+<b>SData_&lt;run&gt;.root</b>, into a random-subtracted γγ matrix. Such a
+file holds every event -- channel, picosecond timestamp, ADC energy and a
+word of flags -- rather than histograms. The operation pairs two
+detectors, chosen in step 1: X (CH1 by default) and Y (CH0 by default),
+the same orientation as CoMPASS's own energy-energy matrices, so the
+result overlays them. Below, CH1 and CH0 stand for X and Y as chosen.
+Opening an SData file through <b>File &gt; Open...</b> or <b>File &gt; Open
+ROOT File...</b> asks whether to sort it (it holds no histograms to open);
+<b>Yes</b> starts the operation with that file already read into step 1.</p>
+<p>The operation is five dialogs in a row, each with <b>&lt; Back</b>,
+<b>Next &gt;</b> and <b>Cancel</b>. <b>Back</b> returns to the previous
+step with what you chose there when you last left it with Next; what you
+changed on the current step before pressing Back is not kept, except step
+5's file options. Step 3 keeps only the gain match itself -- its pairs,
+ticks and order; the peak source, the source file, the sensitivity and
+the cutoff start afresh. <b>Cancel</b> (or Escape) ends the operation at
+any step.
+Nothing is written to disk before you press <b>Sort and Save</b> in step
+5 -- apart from gain coefficients you choose to save in step 3 -- so
+cancelling earlier leaves nothing behind; files Sort and Save has already
+written stay. If you go back to step 1 and change the file, the excluded
+flags, a detector or the pairing range, the file is sorted again on Next
+and the gain match has to be redone (<b>Load coefficients...</b> brings a
+saved one back). The time windows chosen before are kept, not placed
+afresh, so check them in step 4. The progress windows for reading, sorting and writing
+have no Cancel button.</p>
+<ol>
+<li><b>Input.</b> <b>Browse&hellip;</b> picks the file. The <b>File</b>
+box then shows what it holds: the tree and stream (RAW, UNFILTERED or
+FILTERED -- CoMPASS's tree name says which), the number of entries, events
+per channel, the timestamp granularity found in the file (10 ns unless
+CoMPASS's fine timestamp is on), whether the events are in time order,
+and -- when the run's <b>&lt;run&gt;_info.txt</b> is found beside the
+stream folders -- the run, its start and stop and each channel's live and
+real time. The <b>Flags</b> table lists every Flags value in the file
+with its number of events and what its bits mean; tick <b>Exclude</b> to
+drop that value's events. Ticked by default is every value with a
+pile-up or saturation bit set (0x8000, 0x400 or 0x80, as CAEN's CoMPASS
+manual UM5960 names them); applied to the RAW stream, this reproduced
+CoMPASS's own UNFILTERED selection exactly on the reference run. Under <b>Pairing</b>, choose the
+<b>X detector</b> and the <b>Y detector</b> (Y is also the gain
+reference) and the <b>Maximum |Δt|</b>, the largest |t(X) &minus; t(Y)|
+that still makes a pair: 2,000 ns (&plusmn;2 &micro;s) by default, at most
+100,000 ns. It is rounded to a whole number of timestamp ticks, as the
+note under it says, so the outermost time bin is never half filled. Every
+X event is paired with every Y event inside that range, not only the
+nearest one. A file whose events are not in time order, or whose
+timestamps are all zero, is refused with the reason. On <b>Next &gt;</b>
+the singles are sorted and the pairs formed.
+<p><b>Use the UNFILTERED stream</b> (<b>SData_&lt;run&gt;.root</b> in the
+run's UNFILTERED folder). CoMPASS's FILTERED stream has been through its
+software coincidence, which keeps the pairs in the prompt peak and drops
+essentially every other pair -- so the random windows of step 4 have
+nothing to measure and the subtraction removes nothing. A FILTERED file is
+accepted, but step 1 shows a warning saying so, and step 4 warns again
+when the random windows hold (almost) nothing. A RAW file works too,
+with the default flag exclusions selecting what UNFILTERED holds.</p></li>
+<li><b>Singles.</b> Both detectors' singles at full resolution, 16384
+channels (<b>Logarithmic counts</b> is on by default), and under the plot
+each channel's counts and how many fell outside 0-16383, the events
+excluded by their Flags value, and the number of pairs found within the
+pairing range. Nothing is chosen here; it is the place to see that the
+file was read the way you meant. <b>Send to main window</b> adds both
+singles to the spectrum list as ordinary spectra, named after the run
+and the channel, to fit, calibrate or save as usual; the operation stays
+open.</li>
+<li><b>Gain matching.</b> CH1 (X) is put on CH0's (Y) ADC channel scale
+by a polynomial, ch0 = P(ch1), fitted to peaks both detectors see; CH0
+itself is not changed. Under <b>Peaks from</b>, <b>This run</b> uses the
+run's own singles. <b>SData file...</b> sorts another list-mode file --
+a calibration run with lines across the range, such as Eu-152 -- with
+the same excluded flags and channels, and <b>Two spectra...</b> takes
+two 1-D spectra, asking for CH0's first and then CH1's; either one
+switches to <b>Calibration run</b>. Under <b>Pairing</b>, <b>Source
+file</b> is optional: with <b>None (pair by position)</b> CH1's peaks are
+paired with CH0's by position; with a <b>.sou</b> file (the bundled ones
+are listed, or <b>Browse...</b>) each detector's peaks are identified by
+energy and peaks of the same energy are paired. <b>Sensitivity</b>
+(default 5 sigma) is the peak search's. <b>Find and pair peaks</b>
+searches and fits both spectra and fills the table: CH1 and CH0
+centroids, the energy (with a source), both FWHMs and the residual, with
+a <b>Use</b> box per pair. A pairing that is ambiguous is refused with
+the reason, not guessed.
+<p>Under <b>Fit</b>, pairs whose CH0 centroid is below the <b>Low-channel
+cutoff</b> (default 300 channels) start unticked: the threshold edge and
+noise sit there, and their position is not set by the gain. Changing the
+cutoff re-applies the default ticks. A pair the matcher itself doubted
+also starts unticked, and moving the cutoff never ticks it. <b>Order</b>
+is <b>1 (linear)</b> or <b>2 (quadratic)</b>; order 2 needs at least four
+ticked pairs and is greyed out with fewer. It starts at 2 with four or
+more ticked pairs and at 1 otherwise, but the choice is yours. Every tick
+and every change of order refits at once. A map that is not increasing
+over the whole ADC range is refused, since it would send two CH1 channels
+to one CH0 channel.</p>
+<p>The plots show each pair's residual (unticked pairs hollow), the map
+over the whole ADC range, and CH0's singles with the gain-matched CH1
+singles laid over them. The line under the table gives the polynomial,
+its rms and reduced chi-squared, and the CH1 channels the ticked pairs
+cover. <b>Outside that range the map is extrapolated</b>: it is drawn
+dashed over a grey band, and with order 2 the straight line through the
+same pairs is drawn dotted beside it. When the quadratic leaves that
+straight line by more than one FWHM (the largest FWHM among the ticked pairs)
+anywhere outside the pairs, an orange warning says by how many channels
+and where. Nothing constrains the curvature out there -- a quadratic
+that takes its curvature from a low-channel feature can be hundreds of
+channels off at the top of the range while passing through every pair --
+so use order 1, or pairs that reach further, such as a calibration
+run's.</p>
+<p><b>Save coefficients...</b> writes the gain match to a small JSON
+file and <b>Load coefficients...</b> reads one back, so a later run on
+the same set-up can reuse it without finding peaks. <b>Skip gain matching
+(CH1 keeps its own scale)</b> sorts CH1 as it is; the two axes then have
+different gains, and such a matrix must not be symmetrized as it stands.
+With a gain match, each CH1 event is placed at random inside its
+own ADC channel when the matrix is sorted (from a fixed seed, so the sort is reproducible) before
+it is mapped, which leaves no picket-fence pattern however non-integer
+the gain; events mapped outside 0-16383 are dropped and counted in step
+5.</p></li>
+<li><b>Time windows.</b> The spectrum of Δt = t(CH1) &minus; t(CH0) over
+the pairing range, one bin per timestamp tick, with the usual zoom
+toolbar and a <b>Log scale</b> box. Mark one prompt window and one or
+more random windows. <b>A drag on the plot</b> either <b>sets the prompt
+window</b> or <b>adds a random window</b>, as the radio buttons say;
+holding <kbd>P</kbd> or <kbd>R</kbd> while dragging does one or the other
+for that drag. A drag snaps to whole bins. You can also type the edges in
+ns into the from/to boxes under <b>Prompt window</b> and <b>Random
+windows</b>; <b>Add random window</b> adds one over the widest stretch no
+window touches, and <b>Remove</b> takes one away. A window holds the bins
+whose centres lie inside it. The defaults are a prompt window of the
+highest bin &plusmn;10 ns (at least one bin each side) and two random
+windows, from &plusmn;500 ns out to the edge of the range. With a pairing
+range of 500 ns or less the random windows take the outer half of each
+side instead, and none are placed when there is no room beside the
+prompt window.
+<p>Shown live: each window's bins and pairs, then
+<i>w</i> = N<sub>prompt</sub> / N<sub>random</sub>, where the N are the
+numbers of Δt bins in the prompt window and in all random windows
+together, the random level expected under the prompt (<i>w</i> &times;
+the random pairs), and the net prompt pairs with their uncertainty,
+&radic;(prompt + <i>w</i>&sup2; &times; random). With 10 ns ticks and the
+defaults (&plusmn;2 &micro;s), the prompt window is 3 bins and the random
+windows 2 &times; 151, so <i>w</i> = 3/302. Overlapping windows, a window
+holding no bin and no random window at all are shown in red and keep Next
+disabled. When all random windows together hold fewer than 10 pairs,
+an orange warning says the random level is not measured (and, for a
+FILTERED file, why); it is a warning, not a refusal. "Random subtraction
+in a sorted γγ matrix" on the Knowledge Database page explains the
+weighting.</p></li>
+<li><b>Sort and save.</b> Under <b>Files</b>, tick what to write; the
+matrix is asymmetric, X on the x axis (CH1 by default) and Y on the y
+axis (CH0 by default):
+<ul>
+<li><b>.mtx</b> -- TV's format, 16384 &times; 16384. Its cells are whole
+numbers, so each value is <b>stochastically rounded</b>: a cell holding
+3.3 becomes 4 with probability 0.3 and 3 otherwise. Ordinary rounding
+would be biased: with <i>w</i> = 3/302 a cell holding one random pair
+and nothing else is &minus;0.0099, which rounds to 0, so in a sparsely
+filled matrix nearly the whole subtraction would vanish. Rounded at
+random, every cell keeps its expected value, and the fixed seed gives the
+same file every time.</li>
+<li><b>Sparse JSON</b> -- 16384 &times; 16384 with the exact values; read
+by SpectraTools.</li>
+<li><b>Dense CoMPASS-style JSON, compressed by</b> &times;4, &times;8,
+&times;16, &times;32 or &times;64 (&times;16 preselected: 1024 &times;
+1024, the size of CoMPASS's own energy-energy export). Exact values,
+factor &times; factor cells summed; a dense file is at most 4096 per
+axis.</li>
+</ul>
+<b>.mtx</b> and <b>Sparse JSON</b> are ticked by default. Both JSON files
+also record how the matrix was made: the run, the windows, <i>w</i>, the
+seed, the gain coefficients and the totals. Under <b>Where</b>, the
+<b>Folder</b> starts two levels above the SData file -- the run folder
+when the file is in CoMPASS's UNFILTERED, FILTERED or RAW folder -- and the <b>Base name</b> as
+<b>&lt;run&gt;_gg_sub</b>; <b>Will write:</b> lists the files
+(&lt;base&gt;.mtx, &lt;base&gt;.json, &lt;base&gt;_x16.json). Files that
+already exist are replaced only after you confirm.
+<p><b>Sort and Save</b> sorts the prompt and random matrices from the
+pairs in the windows, applies the gain match, forms S = P &minus;
+<i>w</i>&middot;R and writes the ticked files. Each file is written under
+a temporary <b>.partial</b> name and renamed only when complete, so a
+failure never leaves a truncated file under the real name. The summary
+then gives the pairs in each window, how many were sorted and how many
+were dropped because X or Y lay outside 0-16383 (after the gain match,
+when there is one), <i>w</i>, the net
+total, the seed and each file written with its size. The button now
+reads <b>Finish</b>; changing an option turns it back into Sort and Save,
+to write again.</p>
+<p><b>Open result</b> opens S in a Matrix panel. At full resolution it is
+a 16384 &times; 16384 matrix of 8-byte values, 2 GiB, so you are asked
+first, with <b>Open full resolution</b> and, when the dense JSON is
+ticked, a compressed version (<b>Open &times;16 compressed</b> for the
+&times;16 file, 8 MiB). On the development machine a full-resolution
+result open in a Matrix panel took about 2.0 GiB of memory (measured
++2,090 MiB resident, peak +2,118 MiB, all of it returned when the panel
+closed). Before opening,
+the program asks the operating system how much memory is free and
+refuses, with the numbers, when that is too little. <b>File &gt; Open
+Matrix...</b> does the same for a full-resolution sparse JSON, whose
+loading peaked at +2.15 GiB. The full-resolution matrix is one bin per
+ADC channel; a compressed one -- here, or a dense JSON written by Sort
+List-Mode γγ Data and opened with Open Matrix... -- reads in ADC
+channels, so a peak sits at the same channel as in the 16k singles. (A
+CoMPASS JSON still opens one bin per channel.)</p>
+<p><b>Then symmetrize, if you want to.</b> The result is asymmetric, and
+because CH1 was gain-matched onto CH0 its axes already share one scale.
+<b>Symmetrize...</b> in the Matrix panel folds it exactly as
+S + S<sup>T</sup>, negative and fractional cells kept, with the two-line
+matching switched off (see "15. Matrix analysis"). Do not symmetrize a
+matrix sorted with gain matching skipped. Cuts work as on any matrix,
+and negative counts in them are expected -- but see the Knowledge
+Database on what their error bars leave out.</p></li>
+</ol>
+
+<h3>17. Efficiency calibration</h3>
 <p>After an automatic calibration has matched peaks to a source's lines,
 <b>Auto MC Efficiency Calibration...</b> on the Energy Calibration window
 fits the detector's <i>relative</i> efficiency from those same peaks. It
@@ -2177,7 +2402,11 @@ its channels. For bins narrower than one unit -- the usual keV case, where
 the whole-number rule above has nothing to average -- a bin's channel is
 its centre less a half, so a linear calibration a = 0.5, b = 1 labels such
 an axis in keV exactly. A TV <b>.mtx</b> or CoMPASS <b>.json</b> matrix records no
-bin width, so it is shown one bin per channel.</p>
+bin width, so it is shown one bin per channel. A compressed <b>.json</b>
+written by Sort List-Mode γγ Data records its compression factor
+<i>f</i>, and its bin <i>b</i> is channel <i>f</i>&middot;<i>b</i> +
+(<i>f</i> &minus; 1)/2, the mean of the <i>f</i> ADC channels it
+sums.</p>
 
 <h2>Gating on more than one peak</h2>
 <p>You can mark more than one cut region. Every marked gate is summed
@@ -2263,6 +2492,67 @@ it adds their counts.</p>
 reduced chi-square is more honest. If you compare a fit on a cut against
 one on a raw spectrum with similar counts, expect the cut's error bars to
 be wider. That is the correct answer, not a defect.</p>
+
+<h2>Random subtraction in a sorted γγ matrix</h2>
+<p>Two detectors fire together for two reasons: both gamma rays came
+from one decay (a true coincidence), or two unrelated gamma rays happened
+to arrive close together (a random one). True coincidences sit in a
+narrow <b>prompt</b> peak of the time difference Δt = t(CH1) &minus;
+t(CH0); randoms are spread evenly over every Δt. The prompt window
+therefore holds the true pairs plus the randoms that fell inside it, and
+<b>random</b> windows placed away from the peak hold randoms only, at the
+same rate per Δt bin. Sort List-Mode γγ Data (HowTo, "16. Sorting list-mode γγ data")
+sorts the pairs in each into a matrix, P and R, and subtracts:</p>
+<p style="text-align:center"><code>S = P &minus; <i>w</i> &middot; R,&nbsp;&nbsp;&nbsp; <i>w</i> = N<sub>prompt</sub> / N<sub>random</sub></code></p>
+<p>cell by cell, in exact floating point. N<sub>prompt</sub> and
+N<sub>random</sub> are the numbers of Δt bins (one per timestamp tick)
+the prompt window and all random windows together actually sum, counted
+inclusively: a window from &minus;10 to +10 ns on 10 ns ticks is 3 bins.
+A window reaching past the sorted range counts only the bins inside it,
+for its pairs and its width alike, as for a cut's background (see "How
+the cut's background is weighted"), and windows may not overlap.</p>
+<p><b>This is TV's gate-width weighting.</b> TV gives a cut's background
+marks the factor &minus;MrkRange(gate) / MrkRange(background)
+(<code>tv-1.9.13/src/VsCut.c</code>, line 478), and MrkRange adds up
+x2 &minus; x1 over the marks plus one per mark
+(<code>lib/tv/vsMark.c</code>, lines 29-37) -- the inclusive number of
+bins, summed over several marks just as several random windows are summed
+here. The clipping rule is HDTV's, which counts the bins it actually
+summed (HDTV's <code>hdtv/histogram.py</code>, lines 486-505).</p>
+<p><b>Why S has negative and fractional cells.</b> Every random pair
+takes <i>w</i> away from its cell, and <i>w</i> is usually a small
+fraction -- 3/302 with the default windows on 10 ns ticks. A cell
+with a random pair and no prompt pair holds &minus;<i>w</i>. Single cells are not counts;
+sums over many cells are. A projection or a cut adds up thousands of
+cells, and there the subtraction removes the random level on average.</p>
+<p><b>What it means for cuts.</b> A cut's error bars are worked out as
+in "Why a cut's uncertainty is not &radic;N": the counts summed in the
+gate and the background are taken as Poisson counts, so their sums
+serve as their variances (clamped at zero where a sum is negative). On a
+random-subtracted matrix that is not true. The cells' real variance is
+P + <i>w</i>&sup2;R, while the cut reads S = P &minus; <i>w</i>R as the
+variance, so the variance is short by <i>w</i>(1 + <i>w</i>)R -- roughly
+the random level that was subtracted under the gate. Cuts, fits and
+integrations on such a matrix therefore carry a variance short by that
+amount, and error bars correspondingly too small. It is negligible where the randoms under the gate
+are a small fraction of the counts, as with a narrow prompt window on a
+clean run, and it is not negligible where they are a large part. The
+program does not yet write the variance matrix P + <i>w</i>&sup2;R that
+would fix this; the prompt and random totals in step 5's summary, and in
+the JSON file, let you judge the size.</p>
+<p><b>Why .mtx needs stochastic rounding.</b> A <b>.mtx</b> cell holds a
+whole number, so S has to be rounded to be written. Ordinary rounding is
+biased for small values: &minus;0.0099 (one random pair, <i>w</i> =
+3/302) becomes 0, and in a sparsely filled matrix -- a full-resolution
+one is -- most random pairs sit in such a cell, so rounding would throw
+away nearly the whole subtraction. Each cell
+is instead rounded down or up at random, up with probability equal to
+its fractional part: &minus;0.0099 becomes &minus;1 with probability
+0.0099 and 0 otherwise. Every cell then keeps its expected value
+exactly, and so do the total and every projection. The price is a little
+extra noise -- at most a quarter of a count squared per cell -- and the
+seed is fixed, so writing the same result twice gives the same file. The
+JSON files keep the exact values.</p>
 """
     return _page("SpectraTools -- Knowledge Database", body)
 
