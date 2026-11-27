@@ -407,3 +407,31 @@ def test_real_unfiltered_all_combinations_at_least_nearest_partner():
     print(f"UNFILTERED all-combination pairs |dt| <= 10 ns: {len(pairs.dt)}; "
           f"dt == 0: {int(np.count_nonzero(pairs.dt == 0))}")
     assert len(pairs.dt) >= 43387
+
+
+def test_exclude_by_flag_values_keeps_values_a_mask_would_drop():
+    # The default excluded VALUES OR together into a mask containing 0x800,
+    # so a mask would also drop the good 0x800 event; a value set must not.
+    flags = [0x0, 0x800, 0x80, 0x480, 0xC80, 0x8000, 0x8800]
+    n = len(flags)
+    chunks = make_chunks([0] * n, np.arange(n) * G, np.arange(n) + 10, flags)
+    excluded = {0x80, 0x480, 0xC80, 0x8000, 0x8800}
+    by_value = sort_singles(chunks, channels=(0,), nchan=64, exclude_flags=excluded)
+    assert np.flatnonzero(by_value[0]).tolist() == [10, 11]  # 0x0 and 0x800 kept
+    assert by_value.excluded == 5
+    mask = 0
+    for v in excluded:
+        mask |= v
+    by_mask = sort_singles(chunks, channels=(0,), nchan=64, exclude_flags=mask)
+    assert np.flatnonzero(by_mask[0]).tolist() == [10]  # the mask loses 0x800
+
+
+@needs_run
+def test_real_raw_minus_default_flag_values_equals_unfiltered_singles():
+    raw_root = os.path.join(RUN, "RAW", "SDataR_Na22_261126_ANI_STEF.root")
+    excluded = {0x80, 0x480, 0xC80, 0x8000, 0x8800}
+    raw = sort_singles(read_root_chunks(raw_root, "Data_R"), exclude_flags=excluded)
+    unf = sort_singles(read_root_chunks(UNFILTERED_ROOT, "Data"))
+    for c in (0, 1):
+        np.testing.assert_array_equal(raw[c], unf[c])
+    assert raw.excluded == 831

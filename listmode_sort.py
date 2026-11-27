@@ -64,13 +64,26 @@ def _chunk_arrays(chunk, exclude_flags):
 
     Exclusion happens here, before pairing, so an excluded event can
     neither form a pair nor occupy a slot in the carried-over window.
+
+    `exclude_flags` is either an int bit MASK (drop an event when
+    ``flags & mask`` is non-zero) or a set/frozenset/list of flag VALUES
+    (drop an event whose flags value is one of them). The dialog works in
+    values, and the two are not interchangeable: OR-ing the default
+    excluded values {0x80, 0x480, 0xC80, 0x8000, 0x8800} gives a mask that
+    contains 0x800 and would also drop every good 0x800 event.
     """
     channel = np.asarray(chunk.channel)
     timestamp = np.asarray(chunk.timestamp, dtype=np.int64)
     energy = np.asarray(chunk.energy).astype(np.int64, copy=False)
     if not (len(channel) == len(timestamp) == len(energy)):
         raise SortError("An event chunk has branches of different lengths.")
-    if exclude_flags:
+    if isinstance(exclude_flags, (set, frozenset, list, tuple)):
+        if exclude_flags:
+            flags = np.asarray(chunk.flags).astype(np.uint64, copy=False)
+            values = np.fromiter((int(v) for v in exclude_flags), dtype=np.uint64)
+            keep = ~np.isin(flags, values)
+            channel, timestamp, energy = channel[keep], timestamp[keep], energy[keep]
+    elif exclude_flags:
         flags = np.asarray(chunk.flags).astype(np.uint64, copy=False)
         keep = (flags & np.uint64(exclude_flags)) == 0
         channel, timestamp, energy = channel[keep], timestamp[keep], energy[keep]
