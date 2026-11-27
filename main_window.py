@@ -57,16 +57,14 @@ from help_content import (
     open_help_page,
 )
 import fit_persist
-from histogram_io import ParseError, load_histogram, save_histogram
+from histogram_io import ParseError, save_histogram
 from matrix_panel import MatrixPanel
 import matrix_cache
-from json_matrix_io import load_json_matrix
+from json_matrix_io import load_json_matrix_with_meta, memory_needed_to_open, sparse_shape
 from mtx_io import load_mtx
-from lzs_io import load_lzs
-from n42_io import load_n42
 from peak_fit import FitError, channel_indices
 from settings import Settings
-from spe_io import load_spe, save_spe
+from spe_io import save_spe
 from spectrum import (
     LoadedSpectrum, active_spectrum, next_color, pan_button_is_active, panned_xlim,
 )
@@ -74,7 +72,9 @@ from spectrum_operations import (
     add, combined_variance, multiply, normalize_factors, rebin, rebinned_variance,
     reference_value, scaled_variance, subtract,
 )
-from spk_io import load_spk, save_spk
+from spectrum_files import SPECTRUM_FILTER, load_spectrum_file
+from spk_io import save_spk
+import system_memory
 from theme import qt_stylesheet, refresh_builtin_toolbar_icons, style_axes, style_nav_toolbar_palette
 
 ZOOM_FACTOR = 1.5
@@ -308,20 +308,19 @@ class _MatrixLoadWorker(QThread):
     def __init__(self, path, parent=None):
         super().__init__(parent)
         self._path = path
+        #: The (x_axis, y_axis) the matrix's file gives it: a SpectraTools
+        #: JSON compressed by f carries a ChannelAxis, everything else is
+        #: one bin per channel. Read by the GUI thread after wait().
+        self.axes = (None, None)
 
     def run(self):
-        # A CoMPASS JSON matrix reads in well under a second, so it skips
-        # the cache below entirely: the cache exists for the .mtx decode,
-        # and caching a fast read would only add a copy to keep in step
-        # with the file. Still read here rather than on the GUI thread --
-        # one code path, and a much larger export stays responsive.
+        # A JSON matrix reads in well under a second, so it skips the
+        # cache below entirely: the cache exists for the .mtx decode, and
+        # caching a fast read would only add a copy to keep in step with
+        # the file. Still read here rather than on the GUI thread -- one
+        # code path, and a much larger export stays responsive.
         if os.path.splitext(self._path)[1].lower() == ".json":
-            try:
-                matrix = load_json_matrix(self._path)
-            except ParseError as exc:
-                self.failed.emit(str(exc))
-                return
-            self.loaded.emit(matrix)
+            self._load_json()
             return
         # A cache hit skips the decode entirely, which is the whole cost
         # of opening a matrix -- about 4.9 s for the reference file. Read
@@ -349,6 +348,35 @@ class _MatrixLoadWorker(QThread):
         # failure rather than raising -- a cache that cannot be written is
         # not something to interrupt the user for.
         matrix_cache.store(self._path, matrix)
+        self.loaded.emit(matrix)
+
+    def _load_json(self):
+        """A CoMPASS or SpectraTools JSON matrix, with the channel axes its
+        metadata gives (load_json_matrix_with_meta). A full-resolution
+        sparse SpectraTools file densifies to 8 bytes per cell -- 2 GiB at
+        16384 x 16384 -- so it is refused up front, with the numbers, when
+        the OS says that much memory is not available."""
+        needed = memory_needed_to_open(self._path)
+        if needed is not None:
+            ny, nx = sparse_shape(self._path)
+            problem = system_memory.shortfall_message(
+                f"Opening {os.path.basename(self._path)} ({nx:,} x {ny:,} "
+                f"cells, read into memory as a dense matrix)", needed)
+            if problem:
+                self.failed.emit(
+                    problem + " A compressed copy (the dense JSON written "
+                    "with a compression factor) needs far less.")
+                return
+        try:
+            matrix, _meta, axes = load_json_matrix_with_meta(self._path)
+        except ParseError as exc:
+            self.failed.emit(str(exc))
+            return
+        except MemoryError:
+            self.failed.emit(
+                f"Not enough memory to open {os.path.basename(self._path)}.")
+            return
+        self.axes = axes
         self.loaded.emit(matrix)
 
 
@@ -658,6 +686,24 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self.subtract_action.setEnabled(False)
         self.subtract_action.triggered.connect(self._open_subtract_dialog)
         self.operations_menu.addAction(self.subtract_action)
+
+        self.operations_menu.addSeparator()
+
+        # Its own group: it starts from a list-mode file on disk, not from
+        # the spectra loaded here, so it is always available. Ctrl+Shift+G
+        # for gamma-gamma: free in this window and the matrix panel (Ctrl+G
+        # is Go To in both; G is the panel's bare "hold G" background key,
+        # which a Shift+Ctrl chord cannot trigger -- see
+        # fit_mode.is_bare_key_event).
+        self.sort_listmode_action = QAction("Sort List-Mode γγ Data...", self)
+        self.sort_listmode_action.setShortcut("Ctrl+Shift+G")
+        self.sort_listmode_action.setToolTip(
+            "Sort a CoMPASS list-mode file (SData_<run>.root) into singles, "
+            "gain-match the detectors, mark prompt and random time windows, "
+            "and write the random-subtracted gamma-gamma matrix")
+        self.sort_listmode_action.triggered.connect(
+            lambda: self._open_listmode_operation())
+        self.operations_menu.addAction(self.sort_listmode_action)
 
         self.help_menu = self.menuBar().addMenu("&Help")
 
@@ -1325,13 +1371,17 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
             self.canvas.draw()
 
     def _open_file_dialog(self):
+        # A .root file is offered too (in "All files" and its own filter):
+        # a CoMPASS list-mode file opened here starts Sort List-Mode γγ
+        # Data with it, and a histogram file goes to the ROOT object dialog,
+        # rather than either being read as a text histogram and refused.
         paths, _ = QFileDialog.getOpenFileNames(
             self,
             "Open Histogram",
             self.settings.last_folder(),
-            "Spectrum files (*.txt *.spe *.spk *.n42 *.lzs);;Text files (*.txt);;"
-            "SPE files (*.spe);;SPK files (*.spk);;N42 files (*.n42);;"
-            "LZS files (*.lzs);;All files (*)",
+            SPECTRUM_FILTER.replace(
+                ";;All files (*)",
+                ";;ROOT files, incl. CoMPASS list-mode data (*.root);;All files (*)"),
         )
         if paths:
             self._load_files(paths)
@@ -1340,14 +1390,14 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         path, _ = QFileDialog.getOpenFileName(
             self, "Open Matrix", self.settings.last_folder(),
             "Matrix files (*.mtx *.json);;TV matrix (*.mtx);;"
-            "CoMPASS JSON matrix (*.json);;All files (*)"
+            "JSON matrix, CoMPASS or SpectraTools (*.json);;All files (*)"
         )
         if path:
-            matrix, error = self._load_matrix_with_progress(path)
+            matrix, error, axes = self._load_matrix_with_progress(path)
             if error is not None:
                 QMessageBox.warning(self, "Could not open matrix", error)
                 return
-            self._open_matrix_panel(path, matrix=matrix)
+            self._open_matrix_panel(path, matrix=matrix, axes=axes)
             self.settings.set_last_folder(os.path.dirname(path))
 
     def fitted_peak_choices(self):
@@ -1839,21 +1889,27 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
     def _open_root_dialog(self):
         """Open a ROOT file: pick the file, then pick what to take out of
         it. Spectra join the spectrum list; a matrix opens its own panel."""
-        from root_dialog import RootObjectDialog
-        from root_io import RootError, list_objects
-
         path, _ = QFileDialog.getOpenFileName(
             self, "Open ROOT File", self.settings.last_folder(),
             "ROOT files (*.root);;All files (*)",
         )
-        if not path:
-            return
+        if path:
+            self._open_root_path(path)
+
+    def _open_root_path(self, path):
+        """The ROOT object dialog for `path`; or, for a CoMPASS list-mode
+        file (events in a TTree, no histograms), the offer to sort it."""
+        from root_dialog import RootObjectDialog
+        from root_io import RootError, list_objects
+
         try:
             objects = list_objects(path)
         except RootError as exc:
             QMessageBox.warning(self, "Could not open ROOT file", str(exc))
             return
         if not objects:
+            if self._offer_listmode_operation(path):
+                return
             QMessageBox.warning(
                 self, "Could not open ROOT file",
                 f"{os.path.basename(path)} contains no 1D or 2D histograms.",
@@ -1918,6 +1974,88 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
                 self, "Could not open ROOT file", "\n".join(failures)
             )
 
+    def _offer_listmode_operation(self, path):
+        """If `path` is a CoMPASS list-mode file, offer to sort it and
+        return True (whatever the answer); False for any other file."""
+        import listmode_io
+
+        if not listmode_io.is_listmode_file(path):
+            return False
+        answer = QMessageBox.question(
+            self, "List-mode data",
+            f"{os.path.basename(path)} is a CoMPASS list-mode file: it holds "
+            f"events, not histograms, so there is no spectrum to open.\n\n"
+            f"Sort it into singles and a random-subtracted γγ matrix "
+            f"(Operations > Sort List-Mode γγ Data...)?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.settings.set_last_folder(os.path.dirname(path))
+            self._open_listmode_operation(open_path=path)
+        return True
+
+    def _open_listmode_operation(self, open_path=None):
+        """Operations > Sort List-Mode γγ Data...: run the five steps, with
+        `open_path` already opened in step 1 when given (File > Open of an
+        SData file). Returns the finished session, or None.
+
+        The hand-offs: singles join the spectrum list as ordinary
+        spectra, and the result opens in a Matrix panel. Both read the
+        session (its run, its written files) to give what they add a
+        path-shaped name in the run's folder, like every other derived
+        spectrum here, so auto-logged fits land beside the run.
+        """
+        from listmode_operation import TITLE, run_listmode_operation
+        from listmode_session import ListModeSession
+
+        session = ListModeSession()
+        session.send_spectra = (
+            lambda spectra: self._add_listmode_spectra(spectra, session))
+        session.open_matrix = (
+            lambda name, matrix, axes: self._open_listmode_matrix(
+                name, matrix, axes, session))
+        try:
+            return run_listmode_operation(
+                self, initial_path=open_path or self.settings.last_folder(),
+                open_path=open_path, session=session)
+        except Exception as exc:  # a slot must never swallow it
+            QMessageBox.critical(self, TITLE, f"{type(exc).__name__}: {exc}")
+            return None
+
+    @staticmethod
+    def _listmode_output_path(name, session, ext):
+        """A path-shaped name for something the list-mode operation hands
+        over: `name` made file-safe, in the run's folder (where step 5
+        writes by default), with `ext` last -- fit_export.auto_log_path
+        splits on the last dot of the basename."""
+        import re
+
+        from listmode_output_dialog import default_folder
+
+        safe = name.replace(" (×", "_x").replace("×", "x")
+        safe = re.sub(r'[<>:"/\\|?*()\s]+', "_", safe).strip("_") or "listmode"
+        folder = (os.path.dirname(session.written[0]) if session.written
+                  else str(default_folder(session)))
+        return os.path.join(folder, safe + ext)
+
+    def _add_listmode_spectra(self, spectra, session):
+        """The singles of step 2, as ordinary spectra: (name, counts)
+        each. Raw counts, so no variance is attached (Poisson is right),
+        and one bin per ADC channel, so no channel axis either."""
+        for name, counts in spectra:
+            self._add_combined_spectrum(
+                self._listmode_output_path(name, session, ".txt"),
+                np.asarray(counts))
+
+    def _open_listmode_matrix(self, name, matrix, axes, session):
+        """Step 5's Open result: the subtracted matrix in a Matrix panel,
+        with the axes the step gives it ((None, None) at full resolution,
+        the compression's ChannelAxis otherwise)."""
+        return self._open_matrix_panel(
+            self._listmode_output_path(name, session, ".json"),
+            matrix=matrix, axes=axes)
+
     def _open_root_matrix(self, path, object_path):
         from root_io import RootError, load_matrix
 
@@ -1937,7 +2075,9 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
     def _load_matrix_with_progress(self, path):
         """Decodes `path` in a worker thread behind a progress dialog.
 
-        Returns (matrix, None) or (None, error_message).
+        Returns (matrix, None, axes) or (None, error_message, None), axes
+        being the (x_axis, y_axis) the file gives the matrix (see
+        _MatrixLoadWorker.axes).
 
         This used to run on the GUI thread behind a wait cursor and a
         status message flushed with processEvents(). That told the user
@@ -1986,7 +2126,9 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # explicit rather than relying on that ordering, and guarantees
         # the thread is done before its results are read.
         worker.wait()
-        return outcome["matrix"], outcome["error"]
+        if outcome["error"] is not None:
+            return None, outcome["error"], None
+        return outcome["matrix"], None, worker.axes
 
     def _open_matrix_panel(self, path, matrix=None, symmetric_diagonal=None, axes=None):
         panel = MatrixPanel(self, path, matrix=matrix,
@@ -2001,23 +2143,17 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         self.setEnabled(True)
 
     def _try_load_spectrum(self, path):
-        lower = path.lower()
-        calibration = None
+        """(spectrum, None, calibration) or (None, error message, None).
+
+        Always three values: both callers unpack three, and the failure
+        path used to return two, so a file that failed to parse raised
+        ValueError in the caller instead of being reported."""
         try:
-            if lower.endswith(".spe"):
-                data = load_spe(path)
-            elif lower.endswith(".spk"):
-                data = load_spk(path)
-            elif lower.endswith(".n42"):
-                data, calibration = load_n42(path)
-            elif lower.endswith(".lzs"):
-                data, calibration = load_lzs(path)
-            else:
-                data = load_histogram(path)
+            data, calibration = load_spectrum_file(path)
         except ParseError as exc:
-            return None, f"{os.path.basename(path)}: {exc}"
+            return None, f"{os.path.basename(path)}: {exc}", None
         except OSError as exc:
-            return None, f"{os.path.basename(path)}: {exc}"
+            return None, f"{os.path.basename(path)}: {exc}", None
 
         color_index = self._next_color_index
         self._next_color_index += 1
@@ -2043,6 +2179,16 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         return any(s.visible for s in self.spectra)
 
     def _load_files(self, paths):
+        # ROOT files hold objects to choose from, or list-mode events to
+        # sort, never a single spectrum; each goes its own way below once
+        # the ordinary files are in.
+        root_paths = [p for p in paths if p.lower().endswith(".root")]
+        paths = [p for p in paths if not p.lower().endswith(".root")]
+        self._load_spectrum_files(paths)
+        for path in root_paths:
+            self._open_root_path(path)
+
+    def _load_spectrum_files(self, paths):
         keep_view = self._has_visible_spectrum()
         failures = []
         loaded_any = False

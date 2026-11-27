@@ -273,11 +273,19 @@ def test_main_window_opens_an_lzs_file_and_applies_its_calibration(qapp):
     assert main_window._calibration.apply(12939.04) == pytest.approx(5156.0, abs=1e-6)
 
 
-def test_the_open_dialog_offers_lzs(qapp):
-    """The filter string is what makes the format selectable at all."""
-    import inspect
-
+def test_the_open_dialog_offers_lzs(qapp, monkeypatch):
+    """The filter string is what makes the format selectable at all.
+    Read from the dialog actually shown, not the method's source: the
+    filter now comes from spectrum_files.SPECTRUM_FILTER."""
     from main_window import MainWindow
 
-    source = inspect.getsource(MainWindow._open_file_dialog)
-    assert "*.lzs" in source
+    seen = {}
+
+    def fake(parent, caption, folder, filters, *a, **k):
+        seen["filters"] = filters
+        return [], ""
+    monkeypatch.setattr("main_window.QFileDialog.getOpenFileNames", fake)
+    window = MainWindow()
+    window._open_file_dialog()
+    assert "*.lzs" in seen["filters"].split(";;")[0]
+    window.close()

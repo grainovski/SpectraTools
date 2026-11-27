@@ -52,6 +52,8 @@ reads at the same ADC channel as in the 16k singles
 
 import json
 import math
+import os
+import re
 
 import numpy as np
 
@@ -324,18 +326,40 @@ def load_json_matrix_with_meta(path):
         axes = (axis, axis)
 
     if isinstance(document, dict) and document.get("format") == "sparse":
-        values = _sparse_from_document(document, path)
-    else:
-        values = _dense_from_document(document, path)
+        shape, idx, vals = _sparse_from_document(document, path)
+        # The parsed lists are the biggest thing held while the matrix is
+        # built; let them go first (a full-resolution file holds 10**7
+        # Python numbers per array).
+        del document
+        return _densify(shape, idx, vals, meta, path), meta, axes
 
+    values = _dense_from_document(document, path)
     if meta is None:
         return _strict_counts(values, path), None, axes
     return _signed_values(values, path), meta, axes
 
 
+def _densify(shape, idx, vals, meta, path):
+    """The sparse layout's coalesced cells as a dense [y][x] array, built
+    ONCE in its final dtype. The values are checked on the sparse cells,
+    before the dense array exists: at 16384 x 16384 the dense array is
+    2 GiB, and checking it after the fact (rint, compare, cast) used to
+    need two or three more arrays of that size."""
+    ny, nx = shape
+    if meta is None:
+        vals = _strict_counts(vals, path)
+    else:
+        vals = _signed_values(vals, path)
+    out = np.zeros(ny * nx, dtype=vals.dtype)
+    out[idx] = vals
+    # Already [y][x]: the sparse layout names its axes, no transpose.
+    return out.reshape(ny, nx)
+
+
 def _sparse_from_document(document, path):
-    """The sparse layout as a dense float64 [y][x] array (values checked
-    later, like the dense layout's)."""
+    """The sparse layout as ((ny, nx), flat indices, values), duplicates
+    summed (mtx_io.coalesce_sparse), values as float64 and not yet
+    checked -- like the dense layout's, the checks follow per file kind."""
     try:
         ny, nx = (int(n) for n in document["shape"])
         xs = np.asarray(document["x"])
@@ -361,10 +385,72 @@ def _sparse_from_document(document, path):
         )
     if vs.size and vs.dtype.kind not in "iuf" or any(v is True or v is False for v in document["v"]):
         raise ParseError(f"JSON matrix holds entries that are not plain numbers: {path}")
-    out = np.zeros((ny, nx), dtype=np.float64)
-    np.add.at(out, (ys.astype(np.int64), xs.astype(np.int64)), vs.astype(np.float64))
-    # Already [y][x]: the sparse layout names its axes, no transpose.
-    return out
+    flat = ys.astype(np.int64) * nx + xs.astype(np.int64)
+    _ny, _nx, idx, vals = coalesce_sparse((ny, nx), flat, vs.astype(np.float64))
+    return (ny, nx), idx, vals
+
+
+# --- memory needed to open ----------------------------------------------------
+
+# The head of a sparse file is json.dumps({"format": "sparse", "shape":
+# [ny, nx], "spectratools": {...}}) with the arrays after it, so the shape
+# is within the first few hundred bytes; 64 KiB leaves room for any
+# metadata block.
+_HEAD_BYTES = 65536
+_SPARSE_RE = re.compile(r'"format"\s*:\s*"sparse"')
+_SHAPE_RE = re.compile(r'"shape"\s*:\s*\[\s*(\d+)\s*,\s*(\d+)\s*\]')
+
+#: Peak bytes of memory per byte of file while a sparse file is parsed
+#: (json.load's Python lists plus the numpy arrays made from them).
+#: Measured 2026-11-27 on NUCLINO-IV (Windows 11, Python 3.13, process
+#: peak working set from the OS): json.load alone took 6.4-6.5 bytes per
+#: byte of a 44 MiB (2 * 10**6 cells) and a 221 MiB (10**7 cells) 16384 x
+#: 16384 file, and 8.7 with the arrays, 1.9 GiB for the larger file. The
+#: lists are released before the dense matrix is built, so the two phases
+#: do not add up. Rounded up so the estimate errs on the safe side.
+PARSE_BYTES_PER_FILE_BYTE = 10
+#: The coalesced (index, value) arrays still held while the dense matrix
+#: is filled: 16 bytes per cell against ~22 bytes of text per cell.
+CELLS_BYTES_PER_FILE_BYTE = 1
+
+
+def sparse_shape(path):
+    """(ny, nx) of a SpectraTools sparse JSON matrix, read from the head
+    of the file without parsing it, or None if `path` is not one (a
+    CoMPASS file, a dense SpectraTools file, unreadable)."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            head = fh.read(_HEAD_BYTES)
+    except OSError:
+        return None
+    if not _SPARSE_RE.search(head):
+        return None
+    m = _SHAPE_RE.search(head)
+    if m is None:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+def memory_needed_to_open(path):
+    """Bytes of memory load_json_matrix_with_meta needs for `path` at its
+    peak, or None when that is not worth estimating (a dense-layout file:
+    CoMPASS's and SpectraTools' compressed ones are at most 4096 x 4096).
+
+    For the sparse layout the larger of the two phases: the parse
+    (PARSE_BYTES_PER_FILE_BYTE per byte of file) and the dense [y][x]
+    result -- 8 bytes per cell, float64 or int64 -- with the cell arrays
+    still held beside it. A full-resolution 16384 x 16384 file needs at
+    least 2 GiB; measured: the peak rose 2.15 GiB loading a 221 MiB file
+    of 10**7 cells, estimated here as 2.22 GiB."""
+    shape = sparse_shape(path)
+    if shape is None:
+        return None
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = 0
+    return max(PARSE_BYTES_PER_FILE_BYTE * size,
+               8 * shape[0] * shape[1] + CELLS_BYTES_PER_FILE_BYTE * size)
 
 
 def _dense_from_document(document, path):
@@ -459,6 +545,8 @@ def _signed_values(values, path):
     numbers that fit, otherwise the exact float64 values."""
     if not np.all(np.isfinite(values)):
         raise ParseError(f"JSON matrix holds counts that are not finite: {path}")
+    if values.size == 0:        # a sparse file with no non-zero cell
+        return values.astype(np.int64)
     if np.all(values == np.rint(values)) and np.max(np.abs(values)) < 2.0**53:
         return values.astype(np.int64)
     return values

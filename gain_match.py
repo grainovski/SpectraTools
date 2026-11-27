@@ -210,7 +210,10 @@ class GainPair:
     """One CH1 peak and the CH0 peak it was matched to. `energy` is the
     source line both were identified as, or None without a source.
     `included` is the box the dialog shows; a pair the matcher doubts
-    starts unticked."""
+    starts unticked. `matcher_ok` keeps the matcher's own verdict apart
+    from that box, so the dialog's default ticks (re-applied when the
+    low-channel cutoff moves) never re-tick a pair the matcher doubted,
+    however often the user edits the ticks."""
 
     ch1: float
     ch1_err: float
@@ -222,11 +225,13 @@ class GainPair:
     fwhm0: float = float("nan")
     area1: float = float("nan")
     area0: float = float("nan")
+    matcher_ok: bool = True
 
     def to_dict(self):
         return {"ch1": self.ch1, "ch1_err": self.ch1_err,
                 "ch0": self.ch0, "ch0_err": self.ch0_err,
                 "energy": self.energy, "included": bool(self.included),
+                "matcher_ok": bool(self.matcher_ok),
                 "fwhm1": _json_float(self.fwhm1), "fwhm0": _json_float(self.fwhm0),
                 "area1": _json_float(self.area1), "area0": _json_float(self.area0)}
 
@@ -240,6 +245,9 @@ class GainPair:
                    ch0=float(d["ch0"]), ch0_err=float(d["ch0_err"]),
                    energy=None if energy is None else float(energy),
                    included=bool(d.get("included", True)),
+                   # Sidecars written before 7.0.0's matcher_ok: the
+                   # verdict was not kept, so trust the pair.
+                   matcher_ok=bool(d.get("matcher_ok", True)),
                    fwhm1=num("fwhm1"), fwhm0=num("fwhm0"),
                    area1=num("area1"), area0=num("area0"))
 
@@ -549,7 +557,7 @@ def _pair(q1, q0, energy, included):
     return GainPair(ch1=q1.centroid, ch1_err=q1.centroid_err,
                     ch0=q0.centroid, ch0_err=q0.centroid_err,
                     energy=energy, included=bool(included),
-                    fwhm1=q1.fwhm, fwhm0=q0.fwhm, area1=q1.area, area0=q0.area)
+                    matcher_ok=bool(included), fwhm1=q1.fwhm, fwhm0=q0.fwhm, area1=q1.area, area0=q0.area)
 
 
 # ---------------------------------------------------------------- fitting

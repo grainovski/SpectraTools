@@ -68,6 +68,14 @@ DEFAULT_PROMPT_HALF_WIDTH_PS = 10_000
 #: Default inner edge of the two random side bands.
 DEFAULT_RANDOM_INNER_PS = 500_000
 
+#: Fewer pairs than this in all random windows together and the random
+#: level is not measured, only guessed: 10 pairs is a 32% (1/sqrt(10))
+#: uncertainty on everything the subtraction removes. Warned about, not
+#: refused -- a clean run with a very narrow range can be genuinely
+#: random-free. A FILTERED stream holds none at all (CoMPASS's software
+#: coincidence removed them; see the plan's "Facts about the data").
+RANDOM_WARN_MIN = 10
+
 PROMPT_COLOR = "#d62728"
 RANDOM_COLOR = "#1f77b4"
 LIGHT_LINE_COLOR = "black"
@@ -299,6 +307,12 @@ class TimeWindowDialog(StepDialog):
         self.error_label.setWordWrap(True)
         self.error_label.setStyleSheet("color: #d62728;")
         self.body.addWidget(self.error_label)
+        # A warning, not an error: Next stays enabled.
+        self.warning_label = QLabel()
+        self.warning_label.setWordWrap(True)
+        self.warning_label.setStyleSheet("color: #d04000; font-weight: bold;")
+        self.warning_label.setVisible(False)
+        self.body.addWidget(self.warning_label)
 
     # ------------------------------------------------------------ windows
     def windows(self):
@@ -428,7 +442,8 @@ class TimeWindowDialog(StepDialog):
         readout = {"prompt_counts": n_p, "random_counts": n_r_each,
                    "random_total": n_r, "w": None, "n_prompt_bins": None,
                    "n_random_bins": None, "expected_random": None,
-                   "net": None, "net_sigma": None, "error": None}
+                   "net": None, "net_sigma": None, "error": None,
+                   "random_warning": None}
         error = self._fatal
         if error is None:
             try:
@@ -441,6 +456,8 @@ class TimeWindowDialog(StepDialog):
                                expected_random=expected, net=n_p - expected,
                                net_sigma=math.sqrt(n_p + w * w * n_r))
         readout["error"] = error
+        readout["random_warning"] = (
+            None if error is not None else self._random_warning(n_r))
         self.readout = readout
         if readout["w"] is not None:
             self.summary_label.setText(
@@ -455,8 +472,30 @@ class TimeWindowDialog(StepDialog):
             self.summary_label.setText(
                 f"Prompt: {n_p:,} pairs.   Random: {n_r:,} pairs.")
         self.error_label.setText(error or "")
+        self.warning_label.setText(readout["random_warning"] or "")
+        self.warning_label.setVisible(bool(readout["random_warning"]))
         self.next_button.setEnabled(error is None)
         self._draw_spans(prompt, randoms)
+
+    def _random_warning(self, n_random):
+        """The warning for random windows that hold (almost) nothing, or
+        None. Says why when the input is CoMPASS's FILTERED stream."""
+        if n_random >= RANDOM_WARN_MIN:
+            return None
+        lm = self.session.listmode
+        filtered = lm is not None and getattr(lm, "stream", None) == "FILTERED"
+        held = ("no pairs at all" if n_random == 0 else
+                f"only {n_random:,} pair{'s' if n_random != 1 else ''}")
+        text = (f"Warning: the random windows hold {held}, so the random "
+                f"level under the prompt is not measured and the "
+                f"subtraction removes (almost) nothing.")
+        if filtered:
+            text += (" This is CoMPASS's FILTERED stream, whose software "
+                     "coincidence has already removed the pairs away from "
+                     "the prompt peak; sort the UNFILTERED file instead.")
+        else:
+            text += " Widen the random windows or the pairing range in step 1."
+        return text
 
     def _draw_spans(self, prompt, randoms):
         for artist in self._span_artists:

@@ -52,8 +52,14 @@ def check_symmetrizable(matrix):
 
     Refused: non-square (the axes cannot be mirrored), any negative cell
     (background-subtracted or difference data, where neither the fold nor
-    the Poisson statistics mean anything), and a matrix that is already
-    symmetric (folding it again would double every count).
+    the Poisson statistics mean anything), any fractional cell (a scaled
+    or subtracted matrix: the fold works on whole counts, and both the
+    identity fold and rebin_rows cast to int64, which would silently drop
+    every fraction), and a matrix that is already symmetric (folding it
+    again would double every count).
+
+    The negative and fractional cases are what Sort List-Mode γγ Data
+    produces (S = P - w R); the message says so, and what to do instead.
     """
     m = np.asarray(matrix)
     if m.ndim != 2 or m.size == 0:
@@ -64,12 +70,32 @@ def check_symmetrizable(matrix):
             f"{m.shape[1]} x {m.shape[0]} (X x Y).")
     if np.any(m < 0):
         raise SymmetrizeError(
-            "The matrix holds negative counts, so it is background-subtracted "
-            "or a difference of matrices. Symmetrizing that is not meaningful.")
+            f"The matrix holds negative counts ({int(np.count_nonzero(m < 0)):,} "
+            f"cells), so it is background-subtracted or a difference of "
+            f"matrices -- for example a random-subtracted matrix from Sort "
+            f"List-Mode γγ Data. Symmetrize works on raw counts only: neither "
+            f"the fold's random rebinning nor its Poisson statistics mean "
+            f"anything for negative cells.")
+    if m.dtype.kind == "f" and not _all_whole(m):
+        raise SymmetrizeError(
+            "The matrix holds fractional counts, so it is scaled or "
+            "background-subtracted (for example a random-subtracted matrix "
+            "from Sort List-Mode γγ Data). Symmetrize works on whole counts "
+            "only; folding this one would silently drop every fraction.")
     if _is_symmetric(m):
         raise SymmetrizeError(
             "The matrix is already symmetric. Symmetrizing it again would "
             "double every count.")
+
+
+def _all_whole(m, block=1024):
+    """Every cell a whole number, checked a band of rows at a time: at
+    16384 x 16384 a whole-matrix rint would need another 2 GiB array."""
+    for i in range(0, m.shape[0], block):
+        band = m[i:i + block]
+        if not np.array_equal(band, np.rint(band)):
+            return False
+    return True
 
 
 def _is_symmetric(m, block=256):
@@ -148,6 +174,8 @@ def rebin_rows(matrix, a, b, seed=DEFAULT_SEED, progress=None):
     m = np.asarray(matrix)
     if np.any(m < 0):
         raise SymmetrizeError("Negative counts cannot be rebinned.")
+    if m.dtype.kind == "f" and not _all_whole(m):
+        raise SymmetrizeError("Fractional counts cannot be rebinned.")
     n_rows, n_cols = m.shape
     rng = np.random.default_rng(seed)
     out = np.zeros((n_rows, n_cols), dtype=np.int64)

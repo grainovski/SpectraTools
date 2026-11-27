@@ -59,9 +59,10 @@ from PySide6.QtWidgets import (
 import gain_match
 import peak_search
 from bundled_sources import bundled_source_files, bundled_sources_dir
-from histogram_io import ParseError, load_histogram
+from histogram_io import ParseError
 from listmode_session import StepDialog, run_with_progress
 from sou_io import load_sou
+from spectrum_files import SPECTRUM_FILTER, load_spectrum_file
 from theme import style_axes
 
 #: Pairs whose CH0 centroid is below this channel start unticked (guard
@@ -88,38 +89,18 @@ SKIP_EXPLANATION = (
     "identity map). The two matrix axes then have different gains, so "
     "the matrix must not be symmetrized as it is.")
 
-#: Spectrum files the 1-D calibration-run loader accepts. The same
-#: extensions as File > Open in the main window, dispatched the same way
-#: (see _load_1d).
-SPECTRUM_FILTER = ("Spectrum files (*.txt *.spe *.spk *.n42 *.lzs);;"
-                   "All files (*)")
-
 
 # ------------------------------------------------------------- pure helpers
 
 
 def _load_1d(path):
-    """Counts of a 1-D spectrum file, by extension.
-
-    The same dispatch as MainWindow._try_load_spectrum, which is a
-    method of the main window and so cannot be called from here; an
-    embedded energy calibration is ignored, since gain matching works in
-    ADC channels. Raises ParseError or OSError.
+    """Counts of a 1-D spectrum file as floats, read by the same
+    spectrum_files.load_spectrum_file as File > Open. An embedded energy
+    calibration is ignored: gain matching works in ADC channels. Raises
+    ParseError or OSError.
     """
-    lower = path.lower()
-    if lower.endswith(".spe"):
-        from spe_io import load_spe
-        return np.asarray(load_spe(path), dtype=float)
-    if lower.endswith(".spk"):
-        from spk_io import load_spk
-        return np.asarray(load_spk(path), dtype=float)
-    if lower.endswith(".n42"):
-        from n42_io import load_n42
-        return np.asarray(load_n42(path)[0], dtype=float)
-    if lower.endswith(".lzs"):
-        from lzs_io import load_lzs
-        return np.asarray(load_lzs(path)[0], dtype=float)
-    return np.asarray(load_histogram(path), dtype=float)
+    data, _calibration = load_spectrum_file(path)
+    return np.asarray(data, dtype=float)
 
 
 def _padded(counts, nchan):
@@ -268,7 +249,6 @@ class GainMatchDialog(StepDialog):
         self.linear = None          # order-1 fit of the same pairs (guard b)
         self.extrapolation = None   # Extrapolation or None
         self.pairs = []             # GainPair list shown in the table
-        self._matcher_ok = []       # pair_peaks' own tick per pair
         self.pair_reason = None     # pair_peaks' failure reason, verbatim
         self.fit_error = None       # fit_gain's refusal, verbatim
         self._calibration = None    # (ch1 counts, ch0 counts) or None
@@ -535,11 +515,8 @@ class GainMatchDialog(StepDialog):
         nchan = int(s.nchan)
 
         def work(progress):
-            total = 0
             try:  # only for the progress bar; iter_events validates anyway
-                handle, tree = listmode_io._open_tree(path)
-                with handle:
-                    total = int(handle[tree].num_entries)
+                total = listmode_io.num_entries(path)
             except Exception:  # noqa: BLE001 -- iter_events reports it
                 total = 0
             done = [0]
@@ -664,7 +641,6 @@ class GainMatchDialog(StepDialog):
     def set_pairs(self, pairs, reason=None, note=None, counts=None, method=None):
         """New pairs from pair_peaks: default ticks, automatic order, fit."""
         self.pairs = [dataclasses.replace(p) for p in pairs]
-        self._matcher_ok = [bool(p.included) for p in self.pairs]
         self.pair_reason = reason
         self.gain = None
         self.linear = None
@@ -686,10 +662,13 @@ class GainMatchDialog(StepDialog):
 
     def _apply_default_ticks(self):
         """Guard (c): a pair starts ticked when the matcher trusted it and
-        its CH0 centroid is at or above the cutoff."""
+        its CH0 centroid is at or above the cutoff. The matcher's verdict
+        travels on the pair (GainPair.matcher_ok), so it survives a Back
+        visit, a saved sidecar and every refit; a pair it doubted is never
+        re-ticked by moving the cutoff."""
         cutoff = float(self.cutoff.value())
-        for p, ok in zip(self.pairs, self._matcher_ok):
-            p.included = bool(ok and p.ch0 >= cutoff)
+        for p in self.pairs:
+            p.included = bool(p.matcher_ok and p.ch0 >= cutoff)
 
     def _on_cutoff_changed(self, _value):
         if self._updating or not self.pairs:
@@ -778,7 +757,6 @@ class GainMatchDialog(StepDialog):
         """Show a gain that was not fitted here (loaded, or from the
         session) exactly as it is, with its stored pairs and ticks."""
         self.pairs = [dataclasses.replace(p) for p in gain.pairs]
-        self._matcher_ok = [True] * len(self.pairs)
         self.pair_reason = None
         self.fit_error = None
         self.gain = gain

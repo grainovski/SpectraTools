@@ -166,7 +166,7 @@ def test_open_matrix_dialog_loads_off_the_gui_thread_with_progress(qapp, monkeyp
     panels = []
     monkeypatch.setattr(
         main_window, "_open_matrix_panel",
-        lambda p, matrix=None: panels.append((p, matrix)),
+        lambda p, matrix=None, axes=None: panels.append((p, matrix)),
     )
 
     main_window._open_matrix_dialog()
@@ -202,7 +202,7 @@ def test_open_matrix_dialog_reports_a_bad_file_instead_of_raising(qapp, monkeypa
     )
     opened = []
     monkeypatch.setattr(
-        main_window, "_open_matrix_panel", lambda p, matrix=None: opened.append(p)
+        main_window, "_open_matrix_panel", lambda p, matrix=None, axes=None: opened.append(p)
     )
 
     main_window._open_matrix_dialog()
@@ -297,7 +297,7 @@ def test_a_json_matrix_is_read_by_the_json_reader_not_load_mtx(
     monkeypatch.setattr("main_window.load_mtx", must_not_run)
     panels = []
     monkeypatch.setattr(main_window, "_open_matrix_panel",
-                        lambda p, matrix=None: panels.append((p, matrix)))
+                        lambda p, matrix=None, axes=None: panels.append((p, matrix)))
 
     main_window._open_matrix_dialog()
 
@@ -321,7 +321,7 @@ def test_a_json_matrix_bypasses_the_mtx_decode_cache(qapp, monkeypatch):
     monkeypatch.setattr(matrix_cache, "store",
                         lambda p, m: calls.append(("store", p)))
     monkeypatch.setattr(main_window, "_open_matrix_panel",
-                        lambda p, matrix=None: None)
+                        lambda p, matrix=None, axes=None: None)
     # Stubbed so a regression FAILS instead of hanging: if a JSON ever
     # reaches load_mtx again, its "bad magic" error opens a modal warning
     # that nobody can click in a headless run.
@@ -349,7 +349,7 @@ def test_a_bad_json_matrix_is_reported_not_raised(qapp, monkeypatch, tmp_path):
         lambda parent, title, text, *a, **k: warnings.append((title, text)))
     opened = []
     monkeypatch.setattr(main_window, "_open_matrix_panel",
-                        lambda p, matrix=None: opened.append(p))
+                        lambda p, matrix=None, axes=None: opened.append(p))
 
     main_window._open_matrix_dialog()
 

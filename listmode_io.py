@@ -275,6 +275,28 @@ def iter_events(path_or_file, step_size=DEFAULT_STEP_SIZE):
         yield from _iterate(handle, tree_name, path, step_size)
 
 
+def num_entries(path):
+    """The number of entries (events, all channels) in an SData file's
+    list-mode tree, read from the tree header without touching the
+    events. Raises ParseError for anything open_listmode would refuse."""
+    handle, tree_name = _open_tree(path)
+    with handle:
+        return int(handle[tree_name].num_entries)
+
+
+def is_listmode_file(path):
+    """Whether `path` is a readable CoMPASS list-mode (SData) file: a ROOT
+    file holding exactly one valid Data / Data_F / Data_R tree. Never
+    raises; for the main window to decide whether a .root file is a
+    list-mode run to sort rather than histograms to open."""
+    try:
+        handle, _tree_name = _open_tree(path)
+    except Exception:  # noqa: BLE001 -- any failure means "no"
+        return False
+    handle.close()
+    return True
+
+
 def open_listmode(path, step_size=DEFAULT_STEP_SIZE,
                   granularity_sample=DEFAULT_GRANULARITY_SAMPLE):
     """Validate an SData file and describe it (see ListModeFile).

@@ -123,6 +123,7 @@ program supports.</p>
 <tr><td><kbd>Ctrl+N</kbd></td><td>Normalize Spectra</td></tr>
 <tr><td><kbd>Ctrl+A</kbd></td><td>Add Spectra...</td></tr>
 <tr><td><kbd>Ctrl+Shift+A</kbd></td><td>Subtract Spectra...</td></tr>
+<tr><td><kbd>Ctrl+Shift+G</kbd></td><td>Sort List-Mode &gamma;&gamma; Data...</td></tr>
 </table>
 
 <h3>Plot toolbar</h3>

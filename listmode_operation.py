@@ -56,13 +56,19 @@ def _output_step(session, parent):
     return ListModeOutputDialog(session, parent)
 
 
-def default_steps(initial_path=None):
+def default_steps(initial_path=None, open_path=None):
     """The five step factories, in order. The input step is a closure so
-    it can be given the folder to start the file picker in."""
+    it can be given the folder to start the file picker in and, for
+    File > Open of an SData file, a file to open on its first visit only
+    (a later visit shows what the session holds, which may be another
+    file the user chose since)."""
+    pending = [open_path] if open_path else []
 
     def _input_step(session, parent):
         from listmode_input_dialog import ListModeInputDialog
-        return ListModeInputDialog(session, parent, initial_path=initial_path)
+        return ListModeInputDialog(
+            session, parent, initial_path=initial_path or open_path,
+            open_path=pending.pop() if pending else None)
 
     return [_input_step, _singles_step, _gain_step, _time_window_step,
             _output_step]
@@ -151,7 +157,8 @@ def _show_step(factory, session, parent):
 
 
 def run_listmode_operation(parent, send_spectra=None, open_matrix=None,
-                           initial_path=None, steps=None):
+                           initial_path=None, steps=None, open_path=None,
+                           session=None):
     """Run the whole operation; return the finished session, or None if
     the user cancelled (or a step failed, which is reported first).
 
@@ -159,12 +166,19 @@ def run_listmode_operation(parent, send_spectra=None, open_matrix=None,
     stored on the session for the steps that use them. `steps` replaces
     the step factories (tests use stubs); by default they are the five
     dialogs of the plan, with the input step starting its file picker at
-    `initial_path`.
+    `initial_path` and, when `open_path` is given, opening that file
+    straight away. `session` lets the caller supply the session to run
+    in (the main window does, so its hand-offs can read the run's path);
+    the hand-offs given here are then stored on it.
     """
-    session = ListModeSession(send_spectra=send_spectra,
-                              open_matrix=open_matrix)
+    if session is None:
+        session = ListModeSession()
+    if send_spectra is not None:
+        session.send_spectra = send_spectra
+    if open_matrix is not None:
+        session.open_matrix = open_matrix
     if steps is None:
-        steps = default_steps(initial_path)
+        steps = default_steps(initial_path, open_path)
     steps = list(steps)
     index = 0
     try:

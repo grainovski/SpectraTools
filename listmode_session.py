@@ -91,6 +91,14 @@ class ListModeSession:
     dropped: int = 0                # pairs mapped off the matrix edge
     written: list = field(default_factory=list)  # paths written
 
+    # Step 5: the output options the user chose (folder, base name,
+    # formats, dense factor), so that Back and a later visit show them
+    # again. A dict written by the output dialog whenever an option
+    # changes; it records the input path it was made for, and the dialog
+    # falls back to the defaults for another file (a base name made from
+    # one run's ID must not be offered for the next run). None = defaults.
+    output_options: Optional[dict] = None
+
     @property
     def granularity_ps(self):
         return None if self.listmode is None else self.listmode.granularity_ps
@@ -136,8 +144,11 @@ class StepDialog(QDialog):
     Subclasses build their content into ``self.body`` (a QVBoxLayout),
     implement ``load_from_session`` and ``apply_to_session``, and may
     rename the Next button (the last step says "Sort and Save"). Next
-    calls ``apply_to_session``; if it returns an error message the dialog
-    stays open and shows it, otherwise the dialog closes with NEXT.
+    first asks ``next_pressed``, which may keep the dialog open (step 5
+    sorts and saves on its first press and only moves on at the second),
+    then calls ``apply_to_session``; if that returns an error message the
+    dialog stays open and shows it, otherwise the dialog closes with NEXT.
+    An exception from either hook is shown, never swallowed.
     """
 
     def __init__(self, session, title, parent=None, first=False):
@@ -173,6 +184,12 @@ class StepDialog(QDialog):
         success or a message saying what is wrong."""
         return None
 
+    def next_pressed(self):
+        """Called first when Next is pressed. Return True to go on
+        (apply_to_session, then close with NEXT) or False to stay on this
+        step, having done whatever the press means here."""
+        return True
+
     # Buttons -------------------------------------------------------------
     def _on_back(self):
         self.step_result = BACK
@@ -180,6 +197,8 @@ class StepDialog(QDialog):
 
     def _on_next(self):
         try:
+            if not self.next_pressed():
+                return
             problem = self.apply_to_session()
         except Exception as exc:  # never let a slot swallow it
             problem = f"{type(exc).__name__}: {exc}"

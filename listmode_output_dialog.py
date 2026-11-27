@@ -53,6 +53,7 @@ from listmode_sort import (
 )
 from matrix_symmetrize import DEFAULT_SEED
 from mtx_io import save_mtx
+import system_memory
 
 TITLE = "Sort List-Mode γγ Data – Step 5 of 5: Sort and Save"
 
@@ -64,6 +65,13 @@ PREFERRED_FACTOR = 16
 #: Opening a dense matrix at least this big asks first (16384^2 float64
 #: is 2 GiB); smaller ones open straight away.
 OPEN_WARN_BYTES = 256 * 2**20
+#: What a Matrix panel holds beyond the dense matrix itself. Measured
+#: 2026-11-27 on NUCLINO-IV (Windows 11, process working set from the OS)
+#: by opening a 16384 x 16384 float64 result through Open result: +2,090
+#: MiB resident with the panel open (the matrix is 2,048 MiB), peak +2,118
+#: MiB, a heatmap ~25 MiB more (peak +55), all of it released on close --
+#: the same with 10**5 and 10**7 non-zero cells. 128 MiB covers it.
+OPEN_OVERHEAD_BYTES = 128 * 2**20
 
 _BAD_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _STREAM_PREFIX = re.compile(r"^SData[FR]?_", re.IGNORECASE)
@@ -303,6 +311,7 @@ class ListModeOutputDialog(StepDialog):
         self._theme = getattr(parent, "_theme", "light")
         self.outcome = None
         self._done = False
+        self._loading = False              # restoring options: do not store them back
         self._run = run_with_progress      # a seam for the tests
         self._build()
         self.load_from_session()
@@ -402,9 +411,37 @@ class ListModeOutputDialog(StepDialog):
         files = self.choice().files()
         self.planned_label.setText(
             "\n".join(str(p) for _k, p in files) if files else "(nothing ticked)")
+        if not self._loading:
+            self._store_options()
         if self._done:
             self._done = False
             self.next_button.setText("Sort and Save")
+
+    def _store_options(self):
+        """Keep the options on the session as they are edited, so Back
+        and a later visit restore them (Back never calls
+        apply_to_session)."""
+        self.session.output_options = {
+            "source_path": self.session.path,
+            "folder": self.folder_edit.text(),
+            "base": self.base_edit.text(),
+            "mtx": self.mtx_check.isChecked(),
+            "sparse": self.sparse_check.isChecked(),
+            "dense": self.dense_check.isChecked(),
+            "factor": (int(self.factor_combo.currentData())
+                       if self.factor_combo.count() else None),
+        }
+
+    def _restore_options(self, options):
+        self.folder_edit.setText(str(options.get("folder", "")))
+        self.base_edit.setText(str(options.get("base", "")))
+        self.mtx_check.setChecked(bool(options.get("mtx", True)))
+        self.sparse_check.setChecked(bool(options.get("sparse", True)))
+        self.dense_check.setChecked(bool(options.get("dense", False))
+                                    and self.dense_check.isEnabled())
+        index = self.factor_combo.findData(options.get("factor"))
+        if index >= 0:
+            self.factor_combo.setCurrentIndex(index)
 
     def _problem(self, choice):
         if not choice.files():
@@ -419,11 +456,13 @@ class ListModeOutputDialog(StepDialog):
         return None
 
     # ------------------------------------------------------------ sorting
-    def _on_next(self):
+    def next_pressed(self):
+        """The first press sorts and saves and stays on this step; only
+        after a successful save does Next ("Finish") end the operation."""
         if self._done:
-            super()._on_next()
-        else:
-            self.sort_and_save()
+            return True
+        self.sort_and_save()
+        return False
 
     def sort_and_save(self):
         """Sort, subtract and write. Returns True when every ticked file
@@ -543,6 +582,16 @@ class ListModeOutputDialog(StepDialog):
             how = self._ask_open(full_bytes, factor)
             if how is None:
                 return None
+        if how == "compressed":
+            m = (int(S.shape[0]) // factor) * (int(S.shape[1]) // factor)
+            needed = m * 8 + OPEN_OVERHEAD_BYTES
+        else:
+            needed = full_bytes + OPEN_OVERHEAD_BYTES
+        problem = system_memory.shortfall_message(
+            "Opening the result in a Matrix panel", needed)
+        if problem:
+            QMessageBox.warning(self, "Open result", problem)
+            return None
         name = self.choice().base or default_base_name(s)
         try:
             if how == "compressed":
@@ -562,8 +611,16 @@ class ListModeOutputDialog(StepDialog):
     # ------------------------------------------------------------ session
     def load_from_session(self):
         s = self.session
-        self.folder_edit.setText(str(default_folder(s)))
-        self.base_edit.setText(default_base_name(s))
+        options = s.output_options
+        self._loading = True
+        try:
+            if options is not None and options.get("source_path") == s.path:
+                self._restore_options(options)
+            else:
+                self.folder_edit.setText(str(default_folder(s)))
+                self.base_edit.setText(default_base_name(s))
+        finally:
+            self._loading = False
         self._options_changed()
         self.open_button.setEnabled(s.result_matrix is not None)
         if s.result_matrix is not None and s.written:
@@ -571,8 +628,8 @@ class ListModeOutputDialog(StepDialog):
                 "Already written:\n" + "\n".join(f"    {p}" for p in s.written))
 
     def apply_to_session(self):
-        # Reached only after a successful save (see _on_next); the session
-        # was filled by _record.
+        # Reached only after a successful save (see next_pressed); the
+        # session was filled by _record.
         if not self._done:
             return "Sort and save first."
         return None

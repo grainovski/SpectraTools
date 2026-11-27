@@ -96,11 +96,16 @@ class ListModeInputDialog(StepDialog):
     opened and then abandoned with Cancel leaves the session untouched.
     """
 
-    def __init__(self, session, parent=None, initial_path=None):
+    def __init__(self, session, parent=None, initial_path=None,
+                 open_path=None):
         super().__init__(session, f"Sort List-Mode γγ Data — "
                          f"1 of 5: Input", parent, first=True)
         self._theme = getattr(parent, "_theme", "light")
         self._initial_path = initial_path
+        # File > Open of an SData file: read it as soon as the dialog
+        # shows the session (load_from_session), so the user lands on
+        # step 1 with the file already described, not on an empty picker.
+        self._open_path = open_path
         self.listmode = None
         self.run_info = None
         self.path = None
@@ -185,17 +190,19 @@ class ListModeInputDialog(StepDialog):
         self.channel_label.setStyleSheet(f"color: {colour};")
         self.channel_label.hide()
         pair_form.addRow("", self.channel_label)
-        dt_row = QHBoxLayout()
         self.max_dt_spin = QDoubleSpinBox()
         self.max_dt_spin.setDecimals(3)
         self.max_dt_spin.setRange(0.001, MAX_DT_LIMIT_NS)
         self.max_dt_spin.setSuffix(" ns")
         self.max_dt_spin.setValue(session.max_dt_ps / 1000.0)
         self.max_dt_spin.editingFinished.connect(self._snap_spin)
-        dt_row.addWidget(self.max_dt_spin)
+        pair_form.addRow("Maximum |Δt| = |t(X) − t(Y)|:", self.max_dt_spin)
+        # On its own row and wrapping: beside the spin box, in the form's
+        # field column, the note was cut off at the dialog's usual ~700 px
+        # width (Task 5 review).
         self.dt_note = QLabel()
-        dt_row.addWidget(self.dt_note, 1)
-        pair_form.addRow("Maximum |Δt| = |t(X) − t(Y)|:", dt_row)
+        self.dt_note.setWordWrap(True)
+        pair_form.addRow("", self.dt_note)
         self.body.addWidget(pair_box)
 
         self._show_file()
@@ -212,6 +219,9 @@ class ListModeInputDialog(StepDialog):
             self._select_channel(self.x_combo, s.x_channel)
             self._select_channel(self.y_combo, s.y_channel)
         self._snap_spin()
+        if self._open_path and s.listmode is None:
+            path, self._open_path = self._open_path, None
+            self.open_path(path)
 
     def apply_to_session(self):
         if self.listmode is None:
