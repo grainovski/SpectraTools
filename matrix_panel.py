@@ -217,8 +217,12 @@ class _SymmetrizeWorker(QThread):
         # Looked up at call time, so a test can substitute the module's
         # `symmetrize`. Nothing may escape run(): an exception here would
         # end the thread with no way to tell the user.
+        # The source matrix is dropped as soon as the fold is done: a
+        # 16384^2 float matrix is 2 GiB, and a reference held here kept it
+        # alive after its panel was closed.
+        matrix, self._matrix = self._matrix, None
         try:
-            result = symmetrize(self._matrix, self._a, self._b,
+            result = symmetrize(matrix, self._a, self._b,
                                 progress=self.progressed.emit)
         except SymmetrizeError as exc:
             self.failed.emit(str(exc))
@@ -228,6 +232,8 @@ class _SymmetrizeWorker(QThread):
                 "Not enough memory to symmetrize this matrix: it needs about "
                 "three copies of it at once.")
             return
+        finally:
+            del matrix
         self.succeeded.emit(result)
 
 
@@ -900,6 +906,12 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
         worker.start()
         dialog.exec()
         worker.wait()
+        # Parented to this panel, so without deleteLater the worker (and
+        # the closures above, which hold the folded matrix) lived as long
+        # as the panel -- 2 GiB each at 16384 x 16384, still resident after
+        # both panels were closed. Same cleanup as run_with_progress.
+        worker.deleteLater()
+        dialog.deleteLater()
         return outcome["result"], outcome["error"]
 
     def _symmetrize_with(self, a, b):

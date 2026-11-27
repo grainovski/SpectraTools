@@ -2126,9 +2126,15 @@ class MainWindow(CalibrationViewMixin, GoToMixin, QMainWindow):
         # explicit rather than relying on that ordering, and guarantees
         # the thread is done before its results are read.
         worker.wait()
+        # Parented to this window: without deleteLater every matrix opened
+        # left its worker (and progress dialog) behind for the life of the
+        # app. Same cleanup as listmode_session.run_with_progress.
+        axes = worker.axes
+        worker.deleteLater()
+        dialog.deleteLater()
         if outcome["error"] is not None:
             return None, outcome["error"], None
-        return outcome["matrix"], None, worker.axes
+        return outcome["matrix"], None, axes
 
     def _open_matrix_panel(self, path, matrix=None, symmetric_diagonal=None, axes=None):
         panel = MatrixPanel(self, path, matrix=matrix,

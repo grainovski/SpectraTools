@@ -225,3 +225,61 @@ def test_a_failure_in_the_worker_is_reported_not_raised(qapp, monkeypatch):
     assert messages == ["deliberate failure"]
     assert len(window._matrix_panels) == before
     panel.close(); window.close()
+
+
+def _flush_deletes(qapp):
+    """Run the DeferredDelete events deleteLater posted, then collect."""
+    import gc
+
+    from PySide6.QtCore import QEvent
+
+    for _ in range(3):
+        qapp.processEvents()
+        qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    gc.collect()
+
+
+def test_closing_both_panels_frees_both_matrices(qapp, monkeypatch):
+    """Through the REAL dialog path (worker thread + progress dialog), the
+    source matrix and the folded one must die with their panels. They
+    used to stay alive: the worker, parented to the source panel and never
+    deleted, held the source matrix, and its signal closures held S --
+    4 GiB still resident after both 16384^2 panels were closed."""
+    import weakref
+
+    import symmetrize_dialog
+
+    monkeypatch.setattr(symmetrize_dialog, "SymmetrizeDialog", _AcceptedDialog)
+    m = _asymmetric()
+    window, panel = _panel(qapp, m)
+    source = weakref.ref(panel.matrix)
+    del m
+
+    panel._open_symmetrize_dialog()
+    new = window._matrix_panels[-1]
+    folded = weakref.ref(new.matrix)
+    assert folded() is not source()
+
+    new.close()
+    panel.close()
+    del new, panel
+    _flush_deletes(qapp)
+
+    assert folded() is None, "the symmetrized matrix outlived its panel"
+    assert source() is None, "the source matrix outlived its panel"
+    window.close()
+
+
+def test_opening_a_matrix_leaves_no_worker_behind(qapp, tmp_path):
+    """File > Open Matrix's loader thread is deleted once it is done,
+    rather than accumulating under the main window for every file."""
+    from main_window import _MatrixLoadWorker
+
+    window = MainWindow()
+    path = os.path.join(FIXTURES, sorted(
+        f for f in os.listdir(FIXTURES) if f.endswith(".json"))[0])
+    matrix, error, _axes = window._load_matrix_with_progress(path)
+    assert error is None and matrix is not None
+    _flush_deletes(qapp)
+    assert not window.findChildren(_MatrixLoadWorker)
+    window.close()
