@@ -322,6 +322,22 @@ explicit new paths, never `git add -A`; one commit per task on `v7-major`.
   return float64 for such files. A full-resolution sparse JSON still
   densifies to 2 GiB on load: measure it, and refuse with a clear message
   if memory is short.
+- Carried over from Task 5's reviews:
+  - File → Open of an SData file starts the operation **with that file
+    already opened** (today `initial_path` only sets the picker's folder);
+    pass the main window as `parent` (theme) and wrap
+    `_open_matrix_panel(..., matrix=, axes=)` as `session.open_matrix`.
+  - Keep the step-5 output options on the session (folder, base name,
+    formats, factor) so a Back visit restores them; replace the step-5
+    `_on_next` override with a small `StepDialog` hook.
+  - Step 4: warn when the random windows hold (almost) nothing, as happens
+    with a FILTERED stream.
+  - Public `listmode_io.num_entries(path)` (the gain dialog uses the
+    private `_open_tree`). One shared 1-D `load_spectrum_file(path)` for
+    main_window and the gain dialog (today copied as `_load_1d`).
+    `GainPair.matcher_ok` to keep the matcher's "suspect" flag across
+    edits.
+  - Cosmetic: the max-|Δt| note in step 1 clips at 700 px.
 - Measure the memory of a 16384² result in the panel on this machine
   ([[feedback_measure_the_real_system]]) and state the number in the help.
 

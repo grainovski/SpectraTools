@@ -1,6 +1,5 @@
 """The shared contract of the list-mode operation's dialogs."""
 
-import pytest
 from PySide6.QtWidgets import QLabel
 
 from listmode_session import (

@@ -1,7 +1,6 @@
 """Step 2 of the list-mode operation: the singles dialog."""
 
 import numpy as np
-import pytest
 
 from listmode_session import NEXT, ListModeSession
 from listmode_singles_dialog import ListModeSinglesDialog, run_label
