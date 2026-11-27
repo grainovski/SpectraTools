@@ -685,8 +685,13 @@ them once cost a simulated self-coincidence peak about 11% of its area and
 flattened its top. The doubled diagonal is allowed for in the error bars of
 every cut, so those come out right too. In the symmetrized window the X
 and Y projections are identical, so the projection choice is fixed.
-Symmetrize refuses a matrix that is not square, one holding negative counts
-(a background-subtracted or difference matrix), and one that is already
+A matrix holding negative or fractional counts -- background-subtracted or
+scaled, such as the random-subtracted matrix from <b>Sort List-Mode γγ
+Data</b> -- can be symmetrized too, but only as it stands: rebinning moves
+whole counts, so the two-line matching is switched off and the matrix is
+folded exactly, fractions and negative cells kept. That is right for a
+Sort List-Mode result, whose CH1 axis was already gain-matched onto CH0's.
+Symmetrize refuses a matrix that is not square and one that is already
 symmetric, and says which.</p>
 <p>Decoding a full-size <b>.mtx</b> matrix takes several seconds, so a
 <b>Reading matrix...</b> progress window appears while it works; the

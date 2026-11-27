@@ -11,11 +11,14 @@ from PySide6.QtWidgets import (
 )
 
 from channel_axis import to_channel, to_index
-from matrix_symmetrize import SymmetrizeError, map_from_lines, refine_centroid
+from matrix_symmetrize import (
+    SIGNED_NEEDS_IDENTITY, SymmetrizeError, map_from_lines, refine_centroid,
+)
 
 
 class SymmetrizeDialog(QDialog):
-    def __init__(self, parent, projection_x, projection_y, axes=None):
+    def __init__(self, parent, projection_x, projection_y, axes=None,
+                 whole_counts=True):
         super().__init__(parent)
         self.setWindowTitle("Symmetrize Matrix")
         self._px, self._py = projection_x, projection_y
@@ -44,6 +47,16 @@ class SymmetrizeDialog(QDialog):
         group.addButton(self.same_radio)
         self.match_radio.setChecked(True)
         layout.addWidget(self.match_radio)
+        #: False for a subtracted or scaled matrix: only the identity fold
+        #: is possible, so matching is switched off and the reason shown.
+        self.whole_counts = whole_counts
+        self.signed_note = None
+        if not whole_counts:
+            self.same_radio.setChecked(True)
+            self.match_radio.setEnabled(False)
+            self.signed_note = QLabel(SIGNED_NEEDS_IDENTITY)
+            self.signed_note.setWordWrap(True)
+            layout.addWidget(self.signed_note)
 
         grid = QGridLayout()
         grid.addWidget(QLabel("Same line seen on"), 0, 0)

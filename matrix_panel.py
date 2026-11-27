@@ -20,7 +20,9 @@ from PySide6.QtWidgets import (
 
 from fit_mode import FitModeController, is_bare_key_event
 from matrix_cut import compute_projection
-from matrix_symmetrize import SymmetrizeError, check_symmetrizable, symmetrize
+from matrix_symmetrize import (
+    SymmetrizeError, check_symmetrizable, holds_whole_counts, symmetrize,
+)
 from mtx_io import load_mtx
 from peak_fit import channel_indices
 from calibration_view import (
@@ -858,7 +860,8 @@ class MatrixPanel(CalibrationViewMixin, GoToMixin, QMainWindow):
 
         dialog = SymmetrizeDialog(
             self, self.projections["x"], self.projections["y"],
-            axes=(self.channel_axes["x"], self.channel_axes["y"]))
+            axes=(self.channel_axes["x"], self.channel_axes["y"]),
+            whole_counts=holds_whole_counts(self.matrix))
         if not dialog.exec() or dialog.mapping is None:
             return
         result, error = self._run_symmetrize(*dialog.mapping)

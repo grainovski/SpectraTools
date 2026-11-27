@@ -23,6 +23,11 @@ short version:
   so their variance is 4*D rather than 2*D -- is corrected in the cut
   (matrix_cut, `diagonal_twice`), which is why symmetrize() returns D.
 
+- **Subtracted matrices fold as they stand.** A matrix with negative or
+  fractional cells (Sort List-Mode γγ Data's S = P - w R) is folded with
+  the identity map only, exactly, in float64: its axes already share a
+  scale, and the random rebinning below needs whole counts.
+
 - **Integer counts.** Each count of a Y bin is sent to one of the new bins
   it overlaps, at random with the overlap fractions as probabilities, from
   a fixed seed. That keeps the matrix integer and its statistics exactly
@@ -50,16 +55,15 @@ class SymmetrizeError(ValueError):
 def check_symmetrizable(matrix):
     """Raise SymmetrizeError, saying why, unless `matrix` can be folded.
 
-    Refused: non-square (the axes cannot be mirrored), any negative cell
-    (background-subtracted or difference data, where neither the fold nor
-    the Poisson statistics mean anything), any fractional cell (a scaled
-    or subtracted matrix: the fold works on whole counts, and both the
-    identity fold and rebin_rows cast to int64, which would silently drop
-    every fraction), and a matrix that is already symmetric (folding it
-    again would double every count).
+    Refused: non-square (the axes cannot be mirrored) and a matrix that is
+    already symmetric (folding it again would double every count).
 
-    The negative and fractional cases are what Sort List-Mode γγ Data
-    produces (S = P - w R); the message says so, and what to do instead.
+    A matrix with negative or fractional cells -- background-subtracted,
+    scaled, or the random-subtracted S = P - w R of Sort List-Mode γγ
+    Data -- is accepted, but only for the identity fold S + S.T, done
+    exactly in floating point: its axes must already share one scale.
+    Rebinning Y onto X (rebin_rows) moves whole counts at random and
+    refuses it. `holds_whole_counts` tells the caller which case it has.
     """
     m = np.asarray(matrix)
     if m.ndim != 2 or m.size == 0:
@@ -68,24 +72,30 @@ def check_symmetrizable(matrix):
         raise SymmetrizeError(
             f"Only a square matrix can be symmetrized; this one is "
             f"{m.shape[1]} x {m.shape[0]} (X x Y).")
-    if np.any(m < 0):
-        raise SymmetrizeError(
-            f"The matrix holds negative counts ({int(np.count_nonzero(m < 0)):,} "
-            f"cells), so it is background-subtracted or a difference of "
-            f"matrices -- for example a random-subtracted matrix from Sort "
-            f"List-Mode γγ Data. Symmetrize works on raw counts only: neither "
-            f"the fold's random rebinning nor its Poisson statistics mean "
-            f"anything for negative cells.")
-    if m.dtype.kind == "f" and not _all_whole(m):
-        raise SymmetrizeError(
-            "The matrix holds fractional counts, so it is scaled or "
-            "background-subtracted (for example a random-subtracted matrix "
-            "from Sort List-Mode γγ Data). Symmetrize works on whole counts "
-            "only; folding this one would silently drop every fraction.")
     if _is_symmetric(m):
         raise SymmetrizeError(
             "The matrix is already symmetric. Symmetrizing it again would "
             "double every count.")
+
+
+def holds_whole_counts(matrix):
+    """True when every cell is a whole, non-negative count -- the only
+    kind of matrix whose Y axis can be rebinned onto X's scale. False for
+    a subtracted or scaled matrix, which can only be folded as it stands."""
+    m = np.asarray(matrix)
+    if np.any(m < 0):
+        return False
+    return m.dtype.kind != "f" or _all_whole(m)
+
+
+#: Why a subtracted or scaled matrix cannot be gain-matched by Symmetrize.
+SIGNED_NEEDS_IDENTITY = (
+    "This matrix holds negative or fractional counts (background-subtracted "
+    "or scaled, for example a random-subtracted matrix from Sort List-Mode "
+    "γγ Data), so Y cannot be rebinned onto X's scale: rebinning moves whole "
+    "counts. Its axes must already share one scale -- true for a Sort "
+    "List-Mode result, whose CH1 was gain-matched onto CH0 -- and it is "
+    "folded exactly as S = M + Mᵀ.")
 
 
 def _all_whole(m, block=1024):
@@ -172,10 +182,8 @@ def rebin_rows(matrix, a, b, seed=DEFAULT_SEED, progress=None):
     if not (math.isfinite(a) and math.isfinite(b)) or b <= 0:
         raise SymmetrizeError("The scale between the axes must be a positive, finite number.")
     m = np.asarray(matrix)
-    if np.any(m < 0):
-        raise SymmetrizeError("Negative counts cannot be rebinned.")
-    if m.dtype.kind == "f" and not _all_whole(m):
-        raise SymmetrizeError("Fractional counts cannot be rebinned.")
+    if not holds_whole_counts(m):
+        raise SymmetrizeError(SIGNED_NEEDS_IDENTITY)
     n_rows, n_cols = m.shape
     rng = np.random.default_rng(seed)
     out = np.zeros((n_rows, n_cols), dtype=np.int64)
@@ -219,10 +227,16 @@ def symmetrize(matrix, a=0.0, b=1.0, seed=DEFAULT_SEED, progress=None):
 
     D is what matrix_cut's `diagonal_twice` needs to give the doubled
     diagonal its true variance.
+
+    A matrix of whole counts stays int64. A subtracted or scaled one
+    (negative or fractional cells) is folded exactly in float64 and only
+    with the identity map; any other map raises SymmetrizeError.
     """
     check_symmetrizable(matrix)
     if a == 0.0 and b == 1.0:
-        mg, lost = np.asarray(matrix).astype(np.int64, copy=True), 0
+        m = np.asarray(matrix)
+        dtype = np.int64 if holds_whole_counts(m) else np.float64
+        mg, lost = m.astype(dtype, copy=True), 0
     else:
         mg, lost = rebin_rows(matrix, a, b, seed, progress=progress)
     diagonal = np.diag(mg).copy()

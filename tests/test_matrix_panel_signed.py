@@ -11,7 +11,7 @@ import pytest
 from matplotlib.backend_bases import MouseEvent
 
 from main_window import MainWindow
-from matrix_symmetrize import SymmetrizeError, check_symmetrizable, rebin_rows
+from matrix_symmetrize import SymmetrizeError, check_symmetrizable, rebin_rows, symmetrize
 
 N = 256
 
@@ -115,48 +115,102 @@ def test_heatmap_log_colour_scale_spans_the_negative_cells(panel):
     heatmap.close()
 
 
-def test_symmetrize_refuses_negative_cells_and_says_why(panel, monkeypatch):
+def _accept_real_dialog(monkeypatch, seen):
+    """Let the REAL SymmetrizeDialog be built and inspected, then accept
+    it as it stands -- no modal loop to hang a headless run."""
+    def exec_(self):
+        seen["dialog"] = self
+        seen["match_enabled"] = self.match_radio.isEnabled()
+        seen["mapping"] = self.mapping
+        seen["note"] = self.signed_note.text() if self.signed_note else None
+        return 1
+    monkeypatch.setattr("symmetrize_dialog.SymmetrizeDialog.exec", exec_)
+
+
+def test_symmetrize_folds_the_subtracted_matrix_exactly(panel, monkeypatch):
+    """Sort List-Mode's S = P - w R, then Symmetrize...: the dialog offers
+    only the identity fold (rebinning moves whole counts), and the new
+    panel holds S + S.T exactly -- fractions and negative cells kept, the
+    diagonal doubled like any other symmetrized matrix."""
     window, p, m = panel
-    messages = []
-    monkeypatch.setattr("matrix_panel.QMessageBox.information",
-                        lambda parent, title, text, *a, **k: messages.append((title, text)))
-    opened = []
-    monkeypatch.setattr("symmetrize_dialog.SymmetrizeDialog.exec",
-                        lambda self: opened.append(self) or 0)
+    problems = []
+    for name in ("information", "warning", "critical"):
+        monkeypatch.setattr(f"matrix_panel.QMessageBox.{name}",
+                            lambda *a, _n=name, **k: problems.append((_n, a[2])))
+    seen = {}
+    _accept_real_dialog(monkeypatch, seen)
     before = len(window._matrix_panels)
+
     p.symmetrize_button.click()
-    assert not opened, "the Symmetrize dialog must not open for a subtracted matrix"
-    assert len(window._matrix_panels) == before
-    (title, text), = messages
-    assert title == "Cannot symmetrize"
-    assert "negative counts" in text
-    assert f"{int((m < 0).sum()):,} cells" in text
-    assert "Sort List-Mode" in text
+
+    assert not problems, problems
+    assert "dialog" in seen, "the Symmetrize dialog did not open"
+    assert seen["match_enabled"] is False
+    assert seen["mapping"] == (0.0, 1.0)
+    assert "Sort List-Mode" in seen["note"]
+    assert len(window._matrix_panels) == before + 1
+    new = window._matrix_panels[-1]
+    assert new.matrix.dtype == np.float64
+    np.testing.assert_array_equal(new.matrix, m + m.T)
+    assert (new.matrix < 0).any()
+    np.testing.assert_array_equal(new.symmetric_diagonal, np.diag(m))
+    assert new.symmetrize_button.isEnabled() is False
+    new.close()
 
 
-def test_symmetrize_refuses_fractional_cells_instead_of_truncating(qapp, monkeypatch):
+def test_a_cut_on_the_symmetrized_subtracted_matrix_has_honest_errors(panel):
+    """The doubled diagonal's extra variance is clamped at zero like the
+    rest: a negative diagonal cell owes no negative variance."""
+    from matrix_cut import compute_cut_with_variance
+
+    window, p, m = panel
+    new = p._symmetrize_with(0.0, 1.0)
+    diag = np.diag(m)
+    j = int(np.argmin(diag))
+    assert diag[j] < 0                      # the case being guarded
+    net, var = compute_cut_with_variance(
+        new.matrix, "x", (j, j), [], diagonal_twice=new.symmetric_diagonal)
+    assert np.all(np.isfinite(var)) and np.all(var >= 0)
+    np.testing.assert_allclose(net, (m + m.T)[:, j])
+    new.close()
+
+
+def test_fractional_cells_fold_exactly_instead_of_truncating(qapp):
     """A scaled or subtracted matrix without a negative cell (a busy
-    compressed result) used to be folded with every cell cast to int64:
-    0.7 + 0.7 became 0. Now it is refused, like the negative case."""
+    compressed result) used to be cast to int64 by the fold: 0.7 + 0.4
+    became 0. Now it folds exactly in float64; a non-identity map, which
+    would have to rebin whole counts, is refused with the reason."""
     window = MainWindow()
     m = np.zeros((16, 16))
     m[3, 5] = 2.7
     m[5, 3] = 0.4
     m[7, 9] = 1.0
     p = window._open_matrix_panel("frac.json", matrix=m)
-    messages = []
-    monkeypatch.setattr("matrix_panel.QMessageBox.information",
-                        lambda parent, title, text, *a, **k: messages.append(text))
-    opened = []
-    monkeypatch.setattr("symmetrize_dialog.SymmetrizeDialog.exec",
-                        lambda self: opened.append(self) or 0)
-    p.symmetrize_button.click()
-    assert not opened, "the Symmetrize dialog opened for a fractional matrix"
-    assert messages and "fractional" in messages[0], messages
-    with pytest.raises(SymmetrizeError, match="fractional"):
-        p._symmetrize_with(0.0, 1.0)
-    with pytest.raises(SymmetrizeError, match="Fractional"):
+    new = p._symmetrize_with(0.0, 1.0)
+    assert new.matrix[3, 5] == pytest.approx(3.1)
+    assert new.matrix[5, 3] == pytest.approx(3.1)
+    with pytest.raises(SymmetrizeError, match="rebinned"):
+        symmetrize(m, 0.5, 1.01)
+    with pytest.raises(SymmetrizeError, match="rebinned"):
         rebin_rows(m, 0.5, 1.01)
+    new.close()
+    p.close()
+    window.close()
+
+
+def test_whole_count_matrix_still_offers_two_line_matching(qapp, monkeypatch):
+    """Raw counts are unchanged: matching stays the default choice."""
+    window = MainWindow()
+    m = np.zeros((16, 16), dtype=np.int64)
+    m[3, 5] = 4
+    p = window._open_matrix_panel("raw.mtx", matrix=m)
+    seen = {}
+    monkeypatch.setattr("symmetrize_dialog.SymmetrizeDialog.exec",
+                        lambda self: seen.update(d=self) or 0)
+    p.symmetrize_button.click()
+    d = seen["d"]
+    assert d.match_radio.isEnabled() and d.match_radio.isChecked()
+    assert d.signed_note is None
     p.close()
     window.close()
 

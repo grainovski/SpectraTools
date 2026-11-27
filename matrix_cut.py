@@ -176,7 +176,10 @@ def _diagonal_extra(diagonal_twice, merged, size):
         raise ValueError(f"diagonal_twice must have {size} entries, got {d.shape}")
     extra = np.zeros(size, dtype=float)
     for lo_idx, hi_idx in merged:
-        extra[lo_idx : hi_idx + 1] += 2.0 * d[lo_idx : hi_idx + 1]
+        # Clamped at zero like the rest of the variance: a symmetrized
+        # SUBTRACTED matrix can have negative diagonal cells, which owe no
+        # negative variance.
+        extra[lo_idx : hi_idx + 1] += 2.0 * np.maximum(d[lo_idx : hi_idx + 1], 0.0)
     return extra
 
 

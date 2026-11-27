@@ -14,6 +14,7 @@ from matrix_cut import compute_cut_with_variance, compute_projection
 from matrix_symmetrize import (
     SymmetrizeError,
     check_symmetrizable,
+    holds_whole_counts,
     map_from_lines,
     rebin_rows,
     refine_centroid,
@@ -37,7 +38,6 @@ def test_an_asymmetric_square_count_matrix_is_accepted():
 
 @pytest.mark.parametrize("matrix, needle", [
     (np.zeros((2, 3), dtype=np.int64), "square"),
-    (np.array([[1, -1], [0, 3]]), "negative"),
     (np.array([[1, 2], [2, 3]]), "already symmetric"),
     (np.zeros((0, 0), dtype=np.int64), "empty"),
 ])
@@ -45,6 +45,19 @@ def test_what_cannot_be_symmetrized_is_refused_with_the_reason(matrix, needle):
     with pytest.raises(SymmetrizeError) as err:
         check_symmetrizable(matrix)
     assert needle in str(err.value), str(err.value)
+
+
+def test_a_subtracted_matrix_is_accepted_for_the_identity_fold_only():
+    m = np.array([[1.5, -1.0], [0.25, 3.0]])
+    check_symmetrizable(m)
+    assert not holds_whole_counts(m)
+    assert holds_whole_counts(np.array([[1.0, 2.0], [0.0, 3.0]]))
+    s, d, lost = symmetrize(m)
+    assert s.dtype == np.float64 and lost == 0
+    np.testing.assert_array_equal(s, m + m.T)
+    np.testing.assert_array_equal(d, [1.5, 3.0])
+    with pytest.raises(SymmetrizeError, match="rebinned"):
+        symmetrize(m, 1.0, 1.0)
 
 
 def test_symmetrize_itself_refuses_too():
