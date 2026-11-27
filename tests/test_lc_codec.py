@@ -61,3 +61,93 @@ def test_decode_row_single_value_tag_at_zigzag_table_boundary():
     just_past = decode_row(bytes([0xBC, 0x04]), 1, "fake_path", kind="lc matrix file")  # n=64
     assert in_table == [zigzag_decode(63)] == [-32]
     assert just_past == [zigzag_decode(64)] == [32]
+
+
+# --- encoder (moved here from spk_io in 7.0.0) ----------------------------
+
+
+def _naive_lc2_compress(values, wrap32=False):
+    """Frozen element-by-element port of lc2_compress (lc_c2.c:63-126),
+    the shape spk_io._lc2_compress had before 7.0.0: no run lookup. The
+    reference encode_row's bisect shortcut must agree with byte for byte."""
+    from lc_codec import put_tag_n, wrap_int32, zigzag_encode
+
+    def delta(v, last):
+        d = v - last
+        return wrap_int32(d) if wrap32 else d
+
+    out = bytearray()
+    last = 0
+    n = len(values)
+    idx = 0
+    while idx < n:
+        remaining = n - idx
+        d = delta(values[idx], last)
+        i = 1
+        if 0 <= d < 2:
+            while i < remaining and values[idx + i] == last:
+                i += 1
+        same = i - 1
+        if same >= 3:
+            out += put_tag_n(0xC0, ((same - 3) << 1) + d)
+            idx += i
+            continue
+        s0 = values[idx]
+        a = zigzag_encode(d)
+        if (a >> 3) == 0 and remaining >= 2:
+            s1 = values[idx + 1]
+            b = zigzag_encode(delta(s1, last))
+            if ((a | b) >> 2) == 0 and remaining >= 3:
+                s2 = values[idx + 2]
+                c = zigzag_encode(delta(s2, last))
+                if (c >> 2) == 0:
+                    out.append(a + (b << 2) + (c << 4))
+                    idx += 3
+                    last = s2
+                    continue
+            if (b >> 3) == 0:
+                out.append(0x40 + a + (b << 3))
+                idx += 2
+                last = s1
+                continue
+        out += put_tag_n(0x80, a)
+        idx += 1
+        last = s0
+    return bytes(out)
+
+
+def test_encode_row_matches_the_naive_encoder_on_a_randomised_sweep():
+    """Rows built to exercise the long-run lookup: runs of every length
+    around _RUN_SCAN_LIMIT, of 0, of 1 and of other values, mixed with
+    singles, small and large deltas and int32 extremes."""
+    import numpy as np
+    from lc_codec import INT32_MAX, INT32_MIN, encode_row
+
+    rng = np.random.default_rng(20261127)
+    pool = [0, 0, 1, -1, 2, 5, 300, -70000, INT32_MIN, INT32_MAX]
+    checked = 0
+    for _ in range(400):
+        row = []
+        while len(row) < int(rng.integers(1, 400)):
+            v = pool[int(rng.integers(len(pool)))]
+            row += [v] * int(rng.choice([1, 2, 3, 4, 15, 16, 17, 18, 40, 200]))
+        arr = np.array(row, dtype=np.int64)
+        expected = _naive_lc2_compress(row, wrap32=True)
+        assert encode_row(row, wrap32=True) == expected
+        assert encode_row(arr, wrap32=True) == expected
+        assert decode_row(expected, len(row), "sweep", kind="test") is not None
+        checked += 1
+    assert checked == 400
+
+
+def test_encode_row_wraps_int32_deltas_like_the_c():
+    """INT32_MAX followed by INT32_MIN: C computes the delta in int, which
+    wraps to +1 (lc_c2.c:85), so the pair costs two bytes, not ten."""
+    from lc_codec import INT32_MAX, INT32_MIN, encode_row, wrap_int32
+
+    assert wrap_int32(INT32_MIN - INT32_MAX) == 1
+    wrapped = encode_row([INT32_MAX, INT32_MIN], wrap32=True)
+    assert wrapped == bytes([0xBF, 0xC2, 0xFE, 0xFE, 0xFE, 0x82])
+    # Unwrapped (save_spk's behaviour) the same delta is out of range.
+    with pytest.raises(ValueError):
+        encode_row([INT32_MAX, INT32_MIN])

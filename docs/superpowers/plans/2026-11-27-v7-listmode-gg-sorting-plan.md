@@ -143,8 +143,11 @@ written to disk until step 5.
   carried into the next, so no pair is lost at a boundary. Input that is
   not time-sorted is detected; it is sorted if it fits in memory and
   refused with a clear message otherwise.
-- **Gain mapping.** ch₀′ = P(E₁ + u), u ~ U(0, 1) seeded
-  (`DEFAULT_SEED`), then floored to an integer channel. This is the same
+- **Gain mapping.** ch₀′ = ⌊P(E₁ − ½ + u) + ½⌋, u ~ U(0, 1) seeded
+  (`DEFAULT_SEED`). This is the centre-coordinate form: P is fitted to
+  peak centroids measured on x = arange(n), i.e. bin centres, and the
+  naive ⌊P(E + u)⌋ would shift every event by (P′ − 1)/2 channels
+  (corrected in Task 3). This is the same
   random-split idea as `rebin_rows`, applied before binning so there is no
   picket-fence pattern from a non-integer gain. Events mapped outside
   0…16383 are dropped and counted. CH0 is not remapped.
@@ -266,6 +269,37 @@ explicit new paths, never `git add -A`; one commit per task on `v7-major`.
   `gain_match_dialog.py`, `time_window_dialog.py`,
   `listmode_output_dialog.py`. Plots use the existing matplotlib/theme
   helpers, so dark theme works.
+- Carried over from Task 3's review (**required**): on the Na-22 run the
+  automatic choice (order 2 at ≥ 4 pairs) takes its curvature from a
+  ~150-channel low-energy feature, probably the threshold edge and not a
+  line both detectors see. Through the three real lines (511, 1275,
+  1461 keV) a straight line fits to ≤ 3.5 ch, but the quadratic differs
+  from it by ~380 ch at ADC 16000, beyond the last pair (~6200), where
+  nothing constrains it. So the gain dialog must: (a) show the range the
+  pairs span and plot the map with the extrapolated part marked; (b) warn
+  when order 2 is used and the curvature term moves any channel outside the
+  pair range by more than one FWHM against the linear fit; (c) leave peaks
+  below a low-channel cutoff unticked by default (threshold/noise region,
+  cutoff shown and editable). The order is chosen by the user, with the
+  automatic choice only as the starting value.
+- Carried over from Task 3's report, small: `peak_search._MAX_FWHM` (60 ch)
+  is too narrow for scintillators on a 16k ADC. `gain_match.find_peaks`
+  works around it by compressing ×2–×8. `gain_match` also imports private
+  helpers from `auto_calibrate` (`_inliers`, `_usable`, …), which should be
+  made public. There is no bundled `na22.sou`; adding one (511,
+  1274.537 keV) lets Na-22 runs take the source route.
+- Carried over from Task 4: `save_mtx` is pure-Python per tag (≈ 1.8 s
+  for 10⁵ entries at 16384², ≈ 34 s for 10⁷), so writing runs on the
+  worker thread with its `progress` callback. Use one `compress` only:
+  `json_matrix_io.compress_matrix` (f must divide both sides) and
+  `listmode_sort.compress` overlap. Pick `compress_matrix` for output
+  and drop or delegate the other.
+- Carried over from Task 2's review: the time-window dialog snaps the
+  maximum |Δt| to a multiple of the detected granularity (otherwise the
+  outermost Δt bin is only partly populated and a random window reaching
+  it under-measures), and passes the granularity to
+  `listmode_sort.window_mask` so that the counts summed and the widths
+  counted use the same bins.
 - Tests (pytest-qt): each dialog's state ↔ session round-trip; Back keeps
   choices; Cancel writes nothing; overlapping windows refused; the output
   dialog writes exactly the ticked formats.
@@ -282,6 +316,12 @@ explicit new paths, never `git add -A`; one commit per task on `v7-major`.
   projections, heatmap log scale, Symmetrize's refusal of negatives with a
   clear message, since `rebin_rows` refuses negative counts) before relying
   on it ([[feedback_verify_the_ui_reaches_the_feature]]).
+- Carried over from Task 4: File → Open of a SpectraTools JSON must use
+  `load_json_matrix_with_meta` and pass its axes to the panel (compressed
+  files carry a (f−1)/2-offset `ChannelAxis`). `load_json_matrix` can now
+  return float64 for such files. A full-resolution sparse JSON still
+  densifies to 2 GiB on load: measure it, and refuse with a clear message
+  if memory is short.
 - Measure the memory of a 16384² result in the panel on this machine
   ([[feedback_measure_the_real_system]]) and state the number in the help.
 
